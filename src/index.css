@@ -9,7 +9,7 @@
 
   color-scheme: light dark;
   color: rgba(255, 255, 255, 0.87);
-  background-color:  white;
+  background-image: url("../Images/login-bg.png");
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -36,9 +36,10 @@ h1 {
   color: black;
   border-color: black;
   height: clamp(70px, 10vw, 90px);
+  padding: 10px;
 }
 .header-logo{
-
+  width: 15vw;
   border: 1px solid black;
 }
 

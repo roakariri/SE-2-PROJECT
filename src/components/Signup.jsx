@@ -3,6 +3,9 @@ import { Link, useNavigate } from "react-router-dom";
 import { UserAuth } from "../context/AuthContext";
 
 const Signup = () => {
+  const signUpWithGoogle = async () => {
+    await window.supabase.auth.signInWithOAuth({ provider: "google" });
+  };
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState(null);
@@ -64,6 +67,14 @@ const Signup = () => {
         </button>
         {error && <p className="text-red-600 text-center pt-4">{error}</p>}
       </form>
+      <div className="pt-6 text-center">
+        <button
+          onClick={signUpWithGoogle}
+          className="bg-gray-800 text-white px-4 py-2 rounded"
+        >
+          Sign up with Google
+        </button>
+      </div>
     </div>
   );
 };

@@ -1,70 +1,123 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { UserAuth } from "../context/AuthContext";
+import { supabase } from "../supabaseClient";
 
 const Signin = () => {
+  // ...existing code...
+  // ...existing code...
+  const handleForgotPasswordPage = (e) => {
+    e.preventDefault();
+    navigate("/forgot-password");
+  };
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(false);
-
-  const { signInUser } = UserAuth();
+  const [session, setSession] = useState(null);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    let subscription;
+    const getSession = async () => {
+      const { data } = await supabase.auth.getSession();
+      setSession(data.session);
+    };
+    getSession();
+    subscription = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    }).data.subscription;
+    return () => {
+      if (subscription) subscription.unsubscribe();
+    };
+  }, []);
 
   const handleSignIn = async (e) => {
     e.preventDefault();
-    const { session, error } = await signInUser(email, password); // Use your signIn function
-
+    setError(null);
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
     if (error) {
-      setError(error); // Set the error message if sign-in fails
-
-      // Set a timeout to clear the error message after a specific duration (e.g., 3 seconds)
-      setTimeout(() => {
-        setError("");
-      }, 3000); // 3000 milliseconds = 3 seconds
+      setError(error.message);
+      setTimeout(() => setError(null), 3000);
     } else {
-      // Redirect or perform any necessary actions after successful sign-in
-      navigate("/dashboard");
-    }
-
-    if (session) {
-      closeModal();
-      setError(""); // Reset the error when there's a session
+      setError(null);
+      navigate("/Homepage");
     }
   };
 
-  return (
-    <div>
-      <form onSubmit={handleSignIn} className="max-w-md m-auto pt-24">
-        <h2 className="font-bold pb-2">Sign in2</h2>
+  const signUpWithGoogle = async () => {
+    await supabase.auth.signInWithOAuth({ provider: "google" });
+  };
+
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    setSession(null);
+  };
+
+  if (!session) {
+    return (
+      <div className="max-w-md m-auto pt-24">
+        <h2 className="font-bold pb-2">Sign In</h2>
         <p>
           Don't have an account yet? <Link to="/signup">Sign up</Link>
         </p>
-        <div className="flex flex-col py-4">
-          {/* <label htmlFor="Email">Email</label> */}
-          <input
-            onChange={(e) => setEmail(e.target.value)}
-            className="p-3 mt-2"
-            type="email"
-            name="email"
-            id="email"
-            placeholder="Email"
-          />
+        <form onSubmit={handleSignIn}>
+          <div className="flex flex-col py-4">
+            <input
+              onChange={(e) => setEmail(e.target.value)}
+              className="p-3 mt-2"
+              type="email"
+              placeholder="Email"
+              value={email}
+              required
+            />
+          </div>
+          <div className="flex flex-col py-4">
+            <input
+              onChange={(e) => setPassword(e.target.value)}
+              className="p-3 mt-2"
+              type="password"
+              placeholder="Password"
+              value={password}
+              required
+            />
+          </div>
+          <button className="w-full mt-4 bg-blue-500 text-white p-2 rounded">
+            Sign In
+          </button>
+          <div className="pt-2 text-right">
+            <button
+              type="button"
+              className="text-blue-600 underline text-sm"
+              onClick={handleForgotPasswordPage}
+            >
+              Forgot password?
+            </button>
+          </div>
+          {error && <p className="text-red-600 text-center pt-4">{error}</p>}
+        </form>
+        <div className="pt-6 text-center">
+          <button
+            onClick={signUpWithGoogle}
+            className="bg-gray-800 text-white px-4 py-2 rounded"
+          >
+            Sign in with Google
+          </button>
         </div>
-        <div className="flex flex-col py-4">
-          {/* <label htmlFor="Password">Password</label> */}
-          <input
-            onChange={(e) => setPassword(e.target.value)}
-            className="p-3 mt-2"
-            type="password"
-            name="password"
-            id="password"
-            placeholder="Password"
-          />
-        </div>
-        <button className="w-full mt-4">Sign In</button>
-        {error && <p className="text-red-600 text-center pt-4">{error}</p>}
-      </form>
+      </div>
+    );
+  }
+
+  return (
+    <div className="text-center pt-24">
+      <h2>Welcome, {session?.user?.email}</h2>
+      <button
+        onClick={signOut}
+        className="mt-4 bg-red-500 text-white px-4 py-2 rounded"
+      >
+        Sign out
+      </button>
     </div>
   );
 };

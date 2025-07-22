@@ -10,8 +10,8 @@ createRoot(document.getElementById("root")).render(
   <StrictMode>
     <>
       <div className="w-full border-b header">
-        <div className="w-full max-w-md mx-auto border-b header">
-          <img src="./Logo & icon/logo.png" className="max-w-full h-auto header-logo" alt="Logo" />
+        <div className="header border">
+          <img src="./Logo & icon/logo.png" className=" header-logo" alt="Logo" />
         </div>
       </div>
       <AuthContextProvider>
