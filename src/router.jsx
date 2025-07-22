@@ -7,12 +7,20 @@ import Signin from "./components/Signin";
 import Dashboard from "./routes/Dashboard";
 import PrivateRoute from "./components/PrivateRoute";
 
+import Homepage from "./components/Homepage";
+import ResetPassword from "./components/ResetPassword";
+
+
 export const router = createBrowserRouter([
   { path: "/", element: <App /> },
   { path: "/signup", element: <Signup /> },
   { path: "/signin", element: <Signin /> },
   { path: "/forgot-password", element: <ForgotPassword /> },
   { path: "/reset-confirmation", element: <ResetConfirmation /> },
+  { path: "/Homepage", element: <Homepage /> },
+  { path: "/forgotpassword", element: <ForgotPassword /> },
+  { path: "/reset-password", element: <ResetPassword /> },
+  
   {
     path: "/dashboard",
     element: (

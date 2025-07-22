@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
+import "../ForgotPassword.css"; 
 
 const ForgotPassword = () => {
   const [email, setEmail] = useState("");
@@ -36,26 +37,44 @@ const ForgotPassword = () => {
   };
 
   return (
-    <div className="max-w-md m-auto pt-24">
-      <h2 className="font-bold pb-2">Reset Password</h2>
-      <form onSubmit={handleReset}>
-        <div className="flex flex-col py-4">
-          <input
-            onChange={(e) => setEmail(e.target.value)}
-            className="p-3 mt-2"
-            type="email"
-            placeholder="Email"
-            value={email}
-            required
-          />
+    <div className="min-h-screen flex flex-col">
+      <div className="w-full header bg-white">
+        <div className="header">
+          <img src={"/Logo & icon/logo.png"} className="header-logo" alt="Logo" />
         </div>
-        <button className="w-full mt-4 bg-blue-500 text-white p-2 rounded" disabled={loading}>
-          {loading ? "Sending..." : "Send reset link"}
-        </button>
-        {message && (
-          <p className={`text-center pt-4 ${message.startsWith('Error') ? 'text-red-600' : 'text-green-600'}`}>{message}</p>
-        )}
-      </form>
+      </div>
+      
+      <div className="flex-1 flex flex-col items-center justify-center">
+        <div className="container flex flex-col  justify-center">
+            <h2 className="header-notice">Forgot Password</h2>
+            
+            <form onSubmit={handleReset}>
+                <div className="flex flex-col py-4">
+                <p className="text-gray-600">Enter your email address or username</p>
+                <input
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="p-3 mt-2 bg-white border border-gray-300 rounded"
+                    type="email"
+                    placeholder="Email"
+                    value={email}
+                    required
+                />
+                </div>
+                <button className="w-full mt-2 submit-button" disabled={loading}>
+                {loading ? "Sending..." : "Reset my Password"}
+                </button>
+                {message && (
+                <p className={`text-center pt-4 ${message.startsWith('Error') ? 'text-red-600' : 'text-green-600'}`}>{message}</p>
+                )}
+                <div className="pt-8 text-center">
+                    <a href="/signin" className="text-blue-600 underline text-sm ">&lt; Back to Login</a>
+                </div>
+            </form>
+        </div>
+      </div>
+      
+      
+      
     </div>
   );
 };
