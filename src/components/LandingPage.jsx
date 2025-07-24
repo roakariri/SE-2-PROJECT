@@ -9,7 +9,7 @@ const LandingPage = () => {
   const [isFavoritesHovered, setIsFavoritesHovered] = React.useState(false);
   const [isCartHovered, setIsCartHovered] = React.useState(false);
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen w-full">
       <div className="w-full header bg-white">
         <div className="header-home">
           <div>
