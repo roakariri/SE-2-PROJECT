@@ -64,7 +64,7 @@ const LandingPage = () => {
         <div className="header-home ">
           <div>
             <img
-              src={"/Logo & icon/logo.png"}
+              src={"./Logo & icon/logo.png"}
               className="header-logo"
               alt="Logo"
             />
