@@ -1,13 +1,62 @@
+.search-bar::placeholder {
+    font-size: 13px;
+    /* Adjust as needed */
+}
+
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap');
 
 
-.header-home{
+
+.header-landingpage{
+    border: 1px solid #5f5f76;
+    height: clamp(70px, 10vw, 100px);
+    padding: 10px;
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    background: white;
+}
+
+.header-home {
     color: black;
     font-weight: bold;
-    font-family: dm-sans, sans-serif;;
-    display: flex; 
-    
+    font-family: dm-sans, sans-serif;
+    display: flex;
+    flex-direction: column;
     padding: 10px;
+    gap: 10px;
+}
+.sub-header{
+  color: black;
+  height: clamp(70px, 3vw, 90px);
+  padding: 10px;
+  align-items: center;
+  justify-items: center;
+  position: sticky;
+  top: clamp(70px, 10vw, 100px);
+  z-index: 999;
+  background: white;
+}
+.subheader-home{
+    width: 100%;
+    height: 2vw;
+    gap: 5.5vw;
+    
+}
+.sub-header p{
+    gap: 6vw;
+    color: #2B4269;
+    font: dm-sans, sans-serif;
+    font-weight: 600;
+}
+
+@media (min-width: 768px) {
+    .header-home {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0;
+    }
 }
 
 .container{
@@ -21,38 +70,68 @@
 p{
     font-size: 16px;
 }
-.search-bar-container{
+
+.search-bar-container {
     margin-left: 10vw;
 }
-.search-bar{
+.search-bar {
     background-color: white;
-    width: 20vw;
+    width: 200%;
+    min-width: 0;
     height: 3vw;
     border-top-left-radius: 5px;
     border-bottom-left-radius: 5px;
     border: 1px solid black;
     color: black;
     caret-color: black;
-    font-size: 12px;
-    padding: 10px;
     
+    padding: 16px;
 }
-.search-btn{
+
+.search-btn {
     background-color: #4f5181;
     color: white;
-    width: 4vw;
+    width: 7vw;
     height: 3vw;
     border-radius: 0px;
     border-top-right-radius: 5px;
     border-bottom-right-radius: 5px;
-    
-    border: 1px solid black;
 }
 
-.project-bag-icon{
+@media (max-width: 600px) {
+    .search-bar-container {
+        max-width: 100%;
+        margin-left: 0;
+    }
+    .search-bar {
+        font-size: 12px;
+        height: 32px;
+        padding: 6px;
+        width: 300px;
+    }
+    .search-btn {
+        width: 36px;
+        height: 32px;
+    }
+}
+
+.search-icon {
+  width: 240px;
+  height: 24px;
+}
+
+.btn-icon {
     width: 28px;
     height: 28px;
     margin-right: 10px;
+}
+
+@media (max-width: 600px) {
+    .btn-icon {
+        width: 22px;
+        height: 22px;
+        margin-right: 6px;
+    }
 }
 
 .project-bag-icon:hover{
@@ -60,26 +139,84 @@ p{
 }
 
 
-.shopping-bag-container{
-    margin-left: 2vw;
+
+.header-btn-container {
+    margin-left: 0;
     font-family: dm-sans, sans-serif;
     font-size: 16px;
     font-weight: 600;
+    padding: 4px 0;
 }
 
-.project-btn{
+@media (max-width: 600px) {
+    .header-btn-container {
+        font-size: 13px;
+        padding: 2px 0;
+    }
+}
+
+
+.project-btn {
     color: black;
     border: 1px solid white;
     background-color: white;
     font-family: dm-sans, sans-serif;
     font-size: 16px;
     font-weight: 600;
-    
-
+    padding: 4px 8px;
+    min-width: 0;
 }
-.project-btn:hover{
+.project-btn:hover {
     color: #c4c4c4;
 }
 
+@media (max-width: 600px) {
+    .project-btn {
+        font-size: 13px;
+        padding: 2px 4px;
+    }
+}
 
+
+.login-btn {
+    color: black;
+    border: 1px solid #171738;
+    background-color: #FFA07A;
+    font-family: dm-sans, sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    border-radius: 4px;
+    width: 96px;
+    min-width: 72px;
+}
+
+.signup-btn {
+    color: black;
+    border: 1px solid #171738;
+    background-color: white;
+    font-family: dm-sans, sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    border-radius: 4px;
+    width: 96px;
+    min-width: 72px;
+}
+
+@media (max-width: 600px) {
+    .login-btn, .signup-btn {
+        font-size: 13px;
+        width: 72px;
+        padding: 4px 0;
+    }
+}
+
+.signup-btn:hover{
+    color: black;
+    background-color: #c4c4c4;
+}
+
+.login-btn:hover{
+    color: black;
+    background-color: #c07557;
+}
 
