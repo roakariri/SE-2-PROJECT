@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import gsap from "gsap";
 import { Link, useNavigate } from "react-router-dom";
 import { UserAuth } from "../context/AuthContext";
 import { supabase } from "../supabaseClient";
@@ -47,24 +48,39 @@ const Signup = () => {
       return;
     }
     setLoading(true);
+    gsap.to(".gsap-loader", { opacity: 1, duration: 0.5, display: "flex" });
     try {
       const result = await signUpNewUser(email, password); // Call context function
-      if (result.success) {
-        navigate("/dashboard"); // Navigate to dashboard on success
-      } else {
-        console.error("Signup error:", result.error); // Log full error for debugging
-        setError(result.error.message || "Database error saving new user. Please check your email and password, and try again.");
-      }
+      setTimeout(() => {
+        gsap.to(".gsap-loader", { opacity: 0, duration: 0.5, display: "none" });
+        setLoading(false);
+        if (result.success) {
+          navigate("/dashboard"); // Navigate to dashboard on success
+        } else {
+          console.error("Signup error:", result.error); // Log full error for debugging
+          setError(result.error.message || "Database error saving new user. Please check your email and password, and try again.");
+        }
+      }, 1200); // Simulate loading, adjust as needed
     } catch (err) {
+      gsap.to(".gsap-loader", { opacity: 0, duration: 0.5, display: "none" });
+      setLoading(false);
       console.error("Unexpected error during signup:", err);
       setError("An unexpected error occurred."); // Catch unexpected errors
-    } finally {
-      setLoading(false); // End loading state
     }
   };
 
   return (
     <div className="min-h-screen flex flex-col">
+      {/* GSAP Loading Screen */}
+      <div
+        className="gsap-loader fixed inset-0 z-50 flex items-center justify-center bg-white bg-opacity-90"
+        style={{ opacity: 0, pointerEvents: loading ? "auto" : "none", display: loading ? "flex" : "none" }}
+      >
+        <div className="flex flex-col items-center">
+          <div className="loader-circle mb-4" style={{ width: 60, height: 60, border: "6px solid #4f5181", borderTop: "6px solid #c4c4c4", borderRadius: "50%", animation: "spin 1s linear infinite" }}></div>
+          <span className="text-lg font-semibold text-gray-700">Loading...</span>
+        </div>
+      </div>
       <div className="w-full header bg-white">
         <div className="header">
           <img src={"/Logo & icon/logo.png"} className="header-logo" alt="Logo" />

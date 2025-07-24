@@ -36,9 +36,8 @@ h1 {
 }
 
 .header{
-  color: black;
-  border-color: black;
-  height: clamp(70px, 10vw, 90px);
+  color: black;;
+  height: clamp(70px, 10vw, 100px);
   padding: 10px;
 }
 .header-logo{
