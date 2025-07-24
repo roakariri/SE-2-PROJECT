@@ -43,10 +43,10 @@ const LandingPage = () => {
   };
 
   return (
-    <div className="min-h-screen w-full bg-white">
+    <div className="min-h-screen w-full bg-cover bg-white">
       {/* GSAP Loading Screen */}
       <div
-        className="gsap-loader fixed inset-0 z-50 flex items-center justify-center bg-white"
+        className="gsap-loader fixed inset-0 z-50 flex items-center justify-center bg-white z-11"
         style={{ opacity: 0, pointerEvents: loading ? "auto" : "none", display: loading ? "flex" : "none" }}
       >
         <div className="flex flex-col items-center">
@@ -185,8 +185,43 @@ const LandingPage = () => {
       </div>
       <div className="flex flex-col items-center justify-center ">
         <img src={"../Images/Hero-Banner.png"}></img>
-        <h1 className="text-4xl text-gray-700 font-bold mb-4">Welcome!</h1>
-        <p className="text-lg text-gray-700 mb-8">Sign in or create an account to continue.</p>
+      </div>
+
+      <div className="flex flex-col items-center justify-center new-arrivals-container mt-10">
+        <h1>New Arrivals</h1>
+        <div className = "flex flex-row">
+          <div className="border border-b mt-10">
+            <img src = {"../Images/textured-mugs.png"} className="textured-mugs"></img>
+          </div>
+          <div className="border border-b  new-arrival-description mt-10 ml-5">
+              <h2>Textured Glaze Mugs</h2>
+              <p>Subtle, artisan feel. Your design printed on slightly rustic
+                  ceramic textures
+              </p>
+              <p className="text-right mt-9">
+                <a href="/signin" className="underline">View more</a>
+              </p>
+          </div>
+          
+        </div>
+        <div className = "flex flex-row">
+          <div className="border border-b  new-arrival-description2 mt-5 ">
+              <h2>Textured Glaze Mugs</h2>
+              <p>Subtle, artisan feel. Your design printed on slightly rustic
+                  ceramic textures
+              </p>
+              <p className="text-left mt-9">
+                <a href="/signin" className="underline">View more</a>
+              </p>
+          </div>
+          <div className="border border-b mt-5 ml-5">
+            <img src = {"../Images/caps.png"} className="caps-size"></img>
+          </div>
+
+
+        </div>
+
+
       </div>
     </div>
   );
