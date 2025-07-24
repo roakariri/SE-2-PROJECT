@@ -184,7 +184,7 @@ const LandingPage = () => {
         </div>
       </div>
       <div className="flex flex-col items-center justify-center ">
-        <img src={"../Images/Hero-Banner.png"}></img>
+        <img src={"/images/Hero-Banner.png"}></img>
       </div>
 
       <div className="flex flex-col items-center justify-center new-arrivals-container mt-10">
