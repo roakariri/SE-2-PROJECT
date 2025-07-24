@@ -48,3 +48,38 @@ p{
     
     border: 1px solid black;
 }
+
+.project-bag-icon{
+    width: 28px;
+    height: 28px;
+    margin-right: 10px;
+}
+
+.project-bag-icon:hover{
+    color: gray;
+}
+
+
+.shopping-bag-container{
+    margin-left: 2vw;
+    font-family: dm-sans, sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.project-btn{
+    color: black;
+    border: 1px solid white;
+    background-color: white;
+    font-family: dm-sans, sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    
+
+}
+.project-btn:hover{
+    color: #c4c4c4;
+}
+
+
+
