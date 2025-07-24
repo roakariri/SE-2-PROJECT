@@ -191,7 +191,7 @@ const LandingPage = () => {
         <h1>New Arrivals</h1>
         <div className = "flex flex-row">
           <div className="border border-b mt-10">
-            <img src = {"../Images/textured-mugs.png"} className="textured-mugs"></img>
+            <img src = {"/images/textured-mugs.png"} className="textured-mugs"></img>
           </div>
           <div className="border border-b  new-arrival-description mt-10 ml-5">
               <h2>Textured Glaze Mugs</h2>
@@ -215,7 +215,7 @@ const LandingPage = () => {
               </p>
           </div>
           <div className="border border-b mt-5 ml-5">
-            <img src = {"../Images/caps.png"} className="caps-size"></img>
+            <img src = {"/images/caps.png"} className="caps-size"></img>
           </div>
 
 

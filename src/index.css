@@ -9,7 +9,7 @@
 
   color-scheme: light dark;
   color: rgba(255, 255, 255, 0.87);
-  background-image: url("../Images/login-bg.png");
+  background-image: url("/images/login-bg.png");
   background-repeat: no-repeat;
   background-attachment: fixed;
   background-size: cover;
