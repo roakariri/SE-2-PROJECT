@@ -1,0 +1,85 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap');
+
+
+.header-home{
+    color: black;
+    font-weight: bold;
+    font-family: dm-sans, sans-serif;;
+    display: flex; 
+    
+    padding: 10px;
+}
+
+.container{
+    width: 40%;
+ 
+    border: 1px solid white;
+    background-color: white;
+    padding: 50px;
+}
+
+p{
+    font-size: 16px;
+}
+.search-bar-container{
+    margin-left: 10vw;
+}
+.search-bar{
+    background-color: white;
+    width: 20vw;
+    height: 3vw;
+    border-top-left-radius: 5px;
+    border-bottom-left-radius: 5px;
+    border: 1px solid black;
+    color: black;
+    caret-color: black;
+    font-size: 12px;
+    padding: 10px;
+    
+}
+.search-btn{
+    background-color: #4f5181;
+    color: white;
+    width: 4vw;
+    height: 3vw;
+    border-radius: 0px;
+    border-top-right-radius: 5px;
+    border-bottom-right-radius: 5px;
+    
+    border: 1px solid black;
+}
+
+.project-bag-icon{
+    width: 28px;
+    height: 28px;
+    margin-right: 10px;
+}
+
+.project-bag-icon:hover{
+    color: gray;
+}
+
+
+.shopping-bag-container{
+    margin-left: 2vw;
+    font-family: dm-sans, sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.project-btn{
+    color: black;
+    border: 1px solid white;
+    background-color: white;
+    font-family: dm-sans, sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    
+
+}
+.project-btn:hover{
+    color: #c4c4c4;
+}
+
+
+
