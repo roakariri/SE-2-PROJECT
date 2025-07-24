@@ -50,7 +50,7 @@ const LandingPage = () => {
         style={{ opacity: 0, pointerEvents: loading ? "auto" : "none", display: loading ? "flex" : "none" }}
       >
         <div className="flex flex-col items-center">
-          <img src={"/Logo & icon/logo.png"} alt="Logo" className="mb-6 " />
+          <img src={"/logo-icon/logo.png"} alt="Logo" className="mb-6 " />
           <svg className="animate-spin h-16 w-16 text-blue-600 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
@@ -64,7 +64,7 @@ const LandingPage = () => {
         <div className="header-home ">
           <div>
             <img
-              src={"/Logo & icon/logo.png"}
+              src={"/logo-icon/logo.png"}
               className="header-logo"
               alt="Logo"
             />
@@ -78,7 +78,7 @@ const LandingPage = () => {
               />
               <button type="button" className="search-btn flex p-1">
                 <img
-                  src={"/Logo & icon/search-icon.svg"}
+                  src={"/logo-icon/search-icon.svg"}
                   alt="Search"
                   className="search-icon mt-1"
                 />
@@ -96,7 +96,7 @@ const LandingPage = () => {
                onMouseLeave={() => setIsProjectsHovered(false)}
              >
                <img
-                 src={isProjectsHovered ? "/Logo & icon/hovered-project-icon.svg" : "/Logo & icon/project-icon.svg"}
+                 src={isProjectsHovered ? "/logo-icon/hovered-project-icon.svg" : "/logo-icon/project-icon.svg"}
                  alt="User Icon"
                  className="btn-icon transition duration-200"
                />
@@ -114,7 +114,7 @@ const LandingPage = () => {
                onMouseLeave={() => setIsFavoritesHovered(false)}
              >
                <img
-                 src={isFavoritesHovered ? "/Logo & icon/favorites-icon-hovered.svg" : "/Logo & icon/favorites-icon.svg"}
+                 src={isFavoritesHovered ? "/logo-icon/favorites-icon-hovered.svg" : "/logo-icon/favorites-icon.svg"}
                  alt="User Icon"
                  className="btn-icon transition duration-200"
                />
@@ -132,7 +132,7 @@ const LandingPage = () => {
                onMouseLeave={() => setIsCartHovered(false)}
              >
                <img
-                 src={isCartHovered ? "/Logo & icon/cart-icon-hovered.svg" : "/Logo & icon/cart-icon.svg"}
+                 src={isCartHovered ? "/logo-icon/cart-icon-hovered.svg" : "/logo-icon/cart-icon.svg"}
                  alt="User Icon"
                  className="btn-icon transition duration-200"
                />
@@ -199,19 +199,19 @@ const LandingPage = () => {
                   ceramic textures
               </p>
               <p className="text-right mt-9">
-                <a href="/signin" className="underline">View more</a>
+                <a href="/signin" onClick={e => {e.preventDefault(); handleLogin();}} className="underline">View more</a>
               </p>
           </div>
           
         </div>
         <div className = "flex flex-row">
           <div className="border border-b  new-arrival-description2 mt-5 ">
-              <h2>Textured Glaze Mugs</h2>
+              <h2>Embroidered Slogan Caps</h2>
               <p>Subtle, artisan feel. Your design printed on slightly rustic
                   ceramic textures
               </p>
               <p className="text-left mt-9">
-                <a href="/signin" className="underline">View more</a>
+                <a href="/signin" onClick={e => {e.preventDefault(); handleLogin();}} className="underline">View more</a>
               </p>
           </div>
           <div className="border border-b mt-5 ml-5">

@@ -83,7 +83,7 @@ const Signup = () => {
       </div>
       <div className="w-full header bg-white">
         <div className="header">
-          <img src={"/Logo & icon/logo.png"} className="header-logo" alt="Logo" />
+          <img src={"/logo-icon/logo.png"} className="header-logo" alt="Logo" />
         </div>
       </div>
 
@@ -165,7 +165,7 @@ const Signup = () => {
               onClick={signUpWithGoogle}
               className="w-full mt-4 google-btn flex items-center justify-center gap-2 py-2"
             >
-              <img src={"/Logo & icon/google-logo.webp"} alt="Google" className="h-6 w-6 object-contain" />
+              <img src={"/logo-icon/google-logo.webp"} alt="Google" className="h-6 w-6 object-contain" />
               <span>Continue with Google</span>
             </button>
           </div>

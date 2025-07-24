@@ -40,7 +40,7 @@ const ForgotPassword = () => {
     <div className="min-h-screen flex flex-col">
       <div className="w-full header bg-white">
         <div className="header">
-          <img src={"/Logo & icon/logo.png"} className="header-logo" alt="Logo" />
+          <img src={"/logo-icon/logo.png"} className="header-logo" alt="Logo" />
         </div>
       </div>
       

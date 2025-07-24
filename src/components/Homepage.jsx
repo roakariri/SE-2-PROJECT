@@ -23,7 +23,7 @@ const Homepage = () => {
     <div className="min-h-screen bg-white">
       <div className="w-full border-b header">
         <div className="header border">
-          <img src={"/Logo & icon/logo.png"} className="header-logo" alt="Logo" />
+          <img src={"/logo-icon/logo.png"} className="header-logo" alt="Logo" />
         </div>
       </div>
       <div className="flex flex-col items-center justify-center pt-24">
