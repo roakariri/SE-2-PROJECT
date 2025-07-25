@@ -1,0 +1,138 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap');
+
+
+.footer-container{
+    
+    height: 389px;
+    background-color: #2B4269;
+    align-items: center;
+    padding-left: 5vw;
+}
+
+.footer-container-inside{
+
+    
+}
+
+.logo{
+  width: 20vw;
+  margin-bottom: 1vw;
+}
+
+.address-number-email{
+    font-size: 15px;
+    color: white;
+    font-family: dm-sans, sans-serif;
+    font-weight: 600;
+}
+
+.socials-icon{
+    width: 45px;
+    height: 45px;
+}
+
+
+/*Our Company*/
+
+.our-company-container{
+    line-height: 2;
+    margin-left: 5vw;
+}
+
+.our-company-container p{
+    color: white;
+    font-family: dm sans, sans-serif;
+    
+}
+
+
+.our-company-name{
+    font-weight: bold;
+    font-size: 20px;
+}
+
+.atp{
+    font-size: 16px;
+}
+
+/*Our Services*/
+
+.our-services-container{
+    line-height: 2;
+    margin-left: 5vw;
+}
+.our-services-container2{
+    line-height: 2;
+    margin-left: 1vw;
+
+}
+
+.our-services-container p{
+    color: white;
+    font-family: dm sans, sans-serif;
+    
+}
+.our-services-container2 p{
+    color: white;
+    font-family: dm sans, sans-serif;
+    
+}
+
+
+.our-services-name{
+    font-weight: bolder;
+    font-size: 20px;
+}
+
+.fasoc{
+    font-size: 16px;
+    
+}
+
+
+.margin-toppiana{
+    margin-top: 3.3vw;
+}
+
+/*News Letter*/
+
+.news-letter-container{
+    margin-left: 5vw;
+}
+
+.news-letter-name{
+    font-weight: bolder;
+    font-size: 20px;
+}
+
+.news-letter-container p{
+    color: white;
+    font-family: dm sans, sans-serif;
+    
+}
+
+.news-letter-description{
+    margin-top: 1.6vw;
+    font-style: italic;
+}
+
+.email-bar{
+    width: 250px;
+    height: 40px;
+    padding: 10px;
+    border: 1px solid black;
+    
+}
+
+.email-btn{
+    background-color: #FFA07A;
+    border: 1px solid black;
+    height: 40px;
+    border-radius: 0;
+    
+}
+
+.email-btn p{
+    color: black;
+    font-weight: bold;
+}

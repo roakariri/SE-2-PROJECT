@@ -6,6 +6,14 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap');
 
 
+.header-container{
+    position: fixed;
+    top: 0;
+    width: 100%;
+    z-index: 50; /* High enough to stay on top, but not block interactivity */
+    background: none;
+    z-index: 1;
+}
 
 .header-landingpage{
     border-bottom: 1px solid #5f5f76;

@@ -1,4 +1,3 @@
-
 import React from "react";
 import gsap from "gsap";
 import "../LandingPage.css";
@@ -18,35 +17,20 @@ const LandingPage = () => {
     }, 1200);
     return () => clearTimeout(timeout);
   }, [location.key]);
+  
   const [isProjectsHovered, setIsProjectsHovered] = React.useState(false);
   const [isFavoritesHovered, setIsFavoritesHovered] = React.useState(false);
   const [isCartHovered, setIsCartHovered] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
 
-  const handleLogin = () => {
-    setLoading(true);
-    gsap.to(".gsap-loader", { opacity: 1, duration: 0.5, display: "flex" });
-    setTimeout(() => {
-      gsap.to(".gsap-loader", { opacity: 0, duration: 0.5, display: "none" });
-      setLoading(false);
-      navigate("/signin");
-    }, 1200); // Simulate loading, adjust as needed
-  };
-
-  const handleSignup = () => {
-    setLoading(true);
-    gsap.to(".gsap-loader", { opacity: 1, duration: 0.5, display: "flex" });
-    setTimeout(() => {
-      gsap.to(".gsap-loader", { opacity: 0, duration: 0.5, display: "none" });
-      setLoading(false);
-      navigate("/signup");
-    }, 1200); // Simulate loading, adjust as needed
-  };
+ 
 
   return (
-    <div className="min-h-screen w-full bg-cover bg-white pt-[170px]">
+
+    
+    <div className="min-h-screen w-full bg-cover bg-white pt-[170px] landing-page-container">
       {/*Hero Banner*/}
-      <div className="flex flex-col items-center justify-center">
+      <div className="flex flex-col items-center justify-center z-5">
         <img src={"/images/hero-banner.png"} className="w-full"></img>
       </div>
       
@@ -139,7 +123,7 @@ const LandingPage = () => {
 
                 </div>
                 <div className="customize-btn-container">
-                  <button type="button" className=" flex p-1 customize-btn">
+                  <button type="button" className=" flex p-1 customize-btn" onClick={() => navigate("/customize")}>
                     Customize Yours!
                   </button>
                 </div>
@@ -186,8 +170,6 @@ const LandingPage = () => {
       </div>
 
 
-      {/*footer*/
-}
 
     </div>
   );

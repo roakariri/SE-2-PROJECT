@@ -13,8 +13,25 @@ const Header = () => {
   const [isFavoritesHovered, setIsFavoritesHovered] = useState(false);
   const [isCartHovered, setIsCartHovered] = useState(false);
 
-  const handleLogin = () => navigate("/signin");
-  const handleSignup = () => navigate("/signup");
+  const handleLogin = () => {
+    setLoading(true);
+    gsap.to(".gsap-loader", { opacity: 1, duration: 0.5, display: "flex" });
+    setTimeout(() => {
+      gsap.to(".gsap-loader", { opacity: 0, duration: 0.5, display: "none" });
+      setLoading(false);
+      navigate("/signin");
+    }, 1200); // Simulate loading, adjust as needed
+  };
+
+  const handleSignup = () => {
+    setLoading(true);
+    gsap.to(".gsap-loader", { opacity: 1, duration: 0.5, display: "flex" });
+    setTimeout(() => {
+      gsap.to(".gsap-loader", { opacity: 0, duration: 0.5, display: "none" });
+      setLoading(false);
+      navigate("/signup");
+    }, 1200); // Simulate loading, adjust as needed
+  };
 
   useEffect(() => {
     if (loading) {
@@ -25,8 +42,9 @@ const Header = () => {
     }
   }, [loading]);
 
+
   return (
-    <div className="fixed min-h-screen w-full bg-cover z-50">
+    <div className="fixed w-full bg-cover bg-white header-container">
       {/* GSAP Loading Screen */}
       <div
         ref={loaderRef}
