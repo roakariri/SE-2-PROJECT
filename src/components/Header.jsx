@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import gsap from "gsap";
-import "../LandingPage.css";
+import "../Header.css";
 import { useNavigate, useLocation } from "react-router-dom";
 
 const Header = () => {
