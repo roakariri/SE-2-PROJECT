@@ -41,7 +41,8 @@ h1 {
   padding: 10px;
 }
 .header-logo{
-  width: 15vw;
+  /*width: 15vw;*/
+  width: clamp(80px, 15vw, 216px);
 
 }
 

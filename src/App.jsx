@@ -5,6 +5,7 @@ import Signin from "./components/Signin";
 
 import { UserAuth } from "./context/AuthContext";
 import LandingPage from "./components/LandingPage";
+import Header from "./components/Header"
 
 function App() {
   const { user } = UserAuth();
@@ -13,7 +14,9 @@ function App() {
 
   return (
     <>
+      <Header />
       <LandingPage />
+
     </>
   );
 }
