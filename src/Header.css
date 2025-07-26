@@ -197,6 +197,7 @@ p{
     border-radius: 4px;
     width: 93px;
     min-width: 72px;
+    padding: 8px 0;
 }
 
 .signup-btn {

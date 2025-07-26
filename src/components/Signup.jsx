@@ -5,14 +5,15 @@ import { UserAuth } from "../context/AuthContext";
 import { supabase } from "../supabaseClient";
 
 const Signup = () => {
+  const loaderRef = React.useRef();
   const signUpWithGoogle = async () => {
-    await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: window.location.origin + "/homepage"
-      }
-    });
-  };
+      await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: window.location.origin + "/Homepage"
+        }
+      });
+    };
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -20,6 +21,7 @@ const Signup = () => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [confirmationMessage, setConfirmationMessage] = useState("");
   // SVG icons for show/hide password
   const EyeIcon = (
     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
@@ -55,7 +57,7 @@ const Signup = () => {
         gsap.to(".gsap-loader", { opacity: 0, duration: 0.5, display: "none" });
         setLoading(false);
         if (result.success) {
-          navigate("/dashboard"); // Navigate to dashboard on success
+          setConfirmationMessage("Check your email for confirmation.");
         } else {
           console.error("Signup error:", result.error); // Log full error for debugging
           setError(result.error.message || "Database error saving new user. Please check your email and password, and try again.");
@@ -73,14 +75,30 @@ const Signup = () => {
     <div className="min-h-screen flex flex-col">
       {/* GSAP Loading Screen */}
       <div
-        className="gsap-loader fixed inset-0 z-50 flex items-center justify-center bg-white bg-opacity-90"
-        style={{ opacity: 0, pointerEvents: loading ? "auto" : "none", display: loading ? "flex" : "none" }}
+        ref={loaderRef}
+        className="gsap-loader fixed inset-0 z-50 flex items-center justify-center bg-white"
+        style={{
+          pointerEvents: loading ? "auto" : "none",
+          display: loading ? "flex" : "none"
+        }}
       >
         <div className="flex flex-col items-center">
-          <div className="loader-circle mb-4" style={{ width: 60, height: 60, border: "6px solid #4f5181", borderTop: "6px solid #c4c4c4", borderRadius: "50%", animation: "spin 1s linear infinite" }}></div>
+          <img src="/logo-icon/logo.png" alt="Logo" className="mb-6" />
+          <svg
+            className="animate-spin h-16 w-16 text-blue-600 mb-4"
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+          >
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+          </svg>
           <span className="text-lg font-semibold text-gray-700">Loading...</span>
         </div>
       </div>
+
+
+
       <div className="w-full header bg-white">
         <div className="header">
           <img src={"/logo-icon/logo.png"} className="header-logo" alt="Logo" />
@@ -153,6 +171,9 @@ const Signup = () => {
             <button type="submit" disabled={loading} className="w-full mt-4 submit-button">
               Sign Up
             </button>
+            {confirmationMessage && (
+              <div className="text-green-600 text-center pt-4 text-lg font-semibold">{confirmationMessage}</div>
+            )}
             {error && <p className="text-red-600 text-center pt-4">{error}</p>}
           </form>
           <div className="flex items-center mt-4">

@@ -10,6 +10,7 @@ import PrivateRoute from "./components/PrivateRoute";
 import Homepage from "./components/Homepage";
 import ResetPassword from "./components/ResetPassword";
 import LandingPage from "./components/LandingPage";
+import ResetSuccessful from "./components/ResetSuccessful";
 
 
 export const router = createBrowserRouter([
@@ -22,8 +23,7 @@ export const router = createBrowserRouter([
   { path: "/forgotpassword", element: <ForgotPassword /> },
   { path: "/reset-password", element: <ResetPassword /> },
   { path: "/landingpage", element: <LandingPage /> },
-
-  
+  { path: "/reset-successful", element: <ResetSuccessful /> },
   {
     path: "/dashboard",
     element: (

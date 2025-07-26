@@ -1,4 +1,3 @@
-
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
@@ -46,7 +45,8 @@ const ResetPassword = () => {
         setError(error.message);
       } else {
         setSuccess("Password updated successfully! You can now log in.");
-        setTimeout(() => navigate("/signin"), 2000);
+        await supabase.auth.signOut(); // <-- Add this line
+        setTimeout(() => navigate("/reset-successful"), 2000);
       }
     } catch (err) {
       setError("Unexpected error. Please try again.");
@@ -116,7 +116,7 @@ const ResetPassword = () => {
                 </button>
               </div>
             </div>
-            <button type="submit" disabled={loading} className="w-full mt-4 submit-button">
+            <button type="submit" className="w-full mt-4 submit-button">
                 {loading ? "Resetting..." : "Reset Password"}
             </button>
             {error && <p className="text-red-600 text-center pt-4">{error}</p>}
@@ -130,3 +130,4 @@ const ResetPassword = () => {
 };
 
 export default ResetPassword;
+
