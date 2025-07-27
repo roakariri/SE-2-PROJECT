@@ -33,29 +33,82 @@ const Signin = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let subscription;
-    const getSession = async () => {
-      const { data } = await supabase.auth.getSession();
-      setSession(data.session);
-      if (data.session) {
+  let subscription;
+  const getSession = async () => {
+    const { data } = await supabase.auth.getSession();
+    setSession(data.session);
+
+    if (data.session) {
+      const provider = data.session.user?.app_metadata?.provider;
+
+      if (provider === "google") {
+        console.log("Logged in with Google");
         navigate("/Homepage");
-      }
-    };
-    getSession();
-    subscription = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      if (session) {
+      } else if (provider === "email") {
+        console.log("Logged in with email/password");
         navigate("/Homepage");
+      } else {
+        console.warn("Unknown provider:", provider);
       }
-    }).data.subscription;
-    return () => {
-      if (subscription) subscription.unsubscribe();
-    };
-  }, [navigate]);
+    }
+  };
+
+  getSession();
+
+  subscription = supabase.auth.onAuthStateChange((_event, session) => {
+    setSession(session);
+    if (session) {
+      const provider = session.user?.app_metadata?.provider;
+      if (provider === "google") {
+        console.log("Logged in with Google");
+        navigate("/Homepage");
+      } else if (provider === "email") {
+        console.log("Logged in with email/password");
+        navigate("/Homepage");
+      } else {
+        console.warn("Unknown provider:", provider);
+      }
+    }
+  }).data.subscription;
+
+  return () => {
+    if (subscription) subscription.unsubscribe();
+  };
+}, [navigate]);
 
   const handleSignIn = async (e) => {
     e.preventDefault();
     setError(null);
+    // Check if user exists and with what provider
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('id, email, provider')
+      .eq('email', email)
+      .single();
+
+    // If user not found in custom table, try to fetch from auth.users
+    let provider = null;
+    if (!userData || userError) {
+      // Fallback: check in auth.users
+      const { data: authUser, error: authError } = await supabase
+        .from('auth.users')
+        .select('id, email, app_metadata')
+        .eq('email', email)
+        .single();
+      if (authUser && authUser.app_metadata) {
+        provider = authUser.app_metadata.provider;
+      }
+    } else {
+      provider = userData.provider;
+    }
+
+    if (provider && provider !== 'email') {
+      setError('This email is registered with Google. Please use Google Sign-In.');
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+
+    // Proceed with email/password sign in
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -182,7 +235,7 @@ const Signin = () => {
               </div>
             </div>
             
-            <button onClick={handleLogin} className="w-full mt-4 submit-button">
+            <button type="submit" className="w-full mt-4 submit-button">
               Login
             </button>
             

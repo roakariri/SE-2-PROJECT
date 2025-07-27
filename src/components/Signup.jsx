@@ -19,7 +19,7 @@ const Signup = () => {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [confirmationMessage, setConfirmationMessage] = useState("");
   // SVG icons for show/hide password
@@ -40,7 +40,8 @@ const Signup = () => {
 
   const handleSignUp = async (e) => {
     e.preventDefault();
-    setError(null);
+    setError("");
+    setConfirmationMessage("");
     if (password !== confirmPassword) {
       setError("Passwords do not match.");
       return;
@@ -52,22 +53,44 @@ const Signup = () => {
     setLoading(true);
     gsap.to(".gsap-loader", { opacity: 1, duration: 0.5, display: "flex" });
     try {
-      const result = await signUpNewUser(email, password); // Call context function
-      setTimeout(() => {
+      // Use supabase.auth.signUp directly for accurate error handling
+      const { data, error } = await supabase.auth.signUp({
+        email: email.toLowerCase(),
+        password: password,
+      });
+      console.log("Signup result:", { data, error });
+      if (error) {
+        setConfirmationMessage("");
+        setError("This email is already registered with Google or previous signup. Please use the correct sign-in method.");
         gsap.to(".gsap-loader", { opacity: 0, duration: 0.5, display: "none" });
         setLoading(false);
-        if (result.success) {
-          setConfirmationMessage("Check your email for confirmation.");
+        return;
+      }
+      if (data && data.user) {
+        if (data.user.email_confirmed_at) {
+          setConfirmationMessage("");
+          setError("This email is already registered with Google or previous signup. Please use the correct sign-in method.");
+          gsap.to(".gsap-loader", { opacity: 0, duration: 0.5, display: "none" });
+          setLoading(false);
+          return;
         } else {
-          console.error("Signup error:", result.error); // Log full error for debugging
-          setError(result.error.message || "Database error saving new user. Please check your email and password, and try again.");
+          setError("");
+          setConfirmationMessage("A verification email has already been sent to this address. Please check your inbox and verify your account.");
+          gsap.to(".gsap-loader", { opacity: 0, duration: 0.5, display: "none" });
+          setLoading(false);
+          return;
         }
-      }, 1200); // Simulate loading, adjust as needed
+      }
+      // If no user and no error, show generic error
+      setError("An unexpected error occurred. Please try again later.");
+      setConfirmationMessage("");
+      gsap.to(".gsap-loader", { opacity: 0, duration: 0.5, display: "none" });
+      setLoading(false);
     } catch (err) {
       gsap.to(".gsap-loader", { opacity: 0, duration: 0.5, display: "none" });
       setLoading(false);
-      console.error("Unexpected error during signup:", err);
-      setError("An unexpected error occurred."); // Catch unexpected errors
+      setError("An unexpected error occurred.");
+      setConfirmationMessage("");
     }
   };
 
@@ -171,10 +194,12 @@ const Signup = () => {
             <button type="submit" disabled={loading} className="w-full mt-4 submit-button">
               Sign Up
             </button>
-            {confirmationMessage && (
+            {error && (
+              <p className="text-red-600 text-center pt-4">{error}</p>
+            )}
+            {!error && confirmationMessage && (
               <div className="text-green-600 text-center pt-4 text-lg font-semibold">{confirmationMessage}</div>
             )}
-            {error && <p className="text-red-600 text-center pt-4">{error}</p>}
           </form>
           <div className="flex items-center mt-4">
             <hr className="flex-grow border-t border-gray-300" />
