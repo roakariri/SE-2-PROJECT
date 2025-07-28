@@ -2,10 +2,10 @@ import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
 import "../Signin.css";
-import gsap from "gsap";
+
 
 const Signin = () => {
-  const loaderRef = React.useRef();
+
   // SVG icons for show/hide password
   const EyeIcon = (
     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
@@ -30,51 +30,51 @@ const Signin = () => {
   const [error, setError] = useState(null);
   const [session, setSession] = useState(null);
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(true);
+  // Removed loading state
 
   useEffect(() => {
-  let subscription;
-  const getSession = async () => {
-    const { data } = await supabase.auth.getSession();
-    setSession(data.session);
+    let subscription;
+    const getSession = async () => {
+      const { data } = await supabase.auth.getSession();
+      setSession(data.session);
 
-    if (data.session) {
-      const provider = data.session.user?.app_metadata?.provider;
+      if (data.session) {
+        const provider = data.session.user?.app_metadata?.provider;
 
-      if (provider === "google") {
-        console.log("Logged in with Google");
-        navigate("/Homepage");
-      } else if (provider === "email") {
-        console.log("Logged in with email/password");
-        navigate("/Homepage");
-      } else {
-        console.warn("Unknown provider:", provider);
+        if (provider === "google") {
+          console.log("Logged in with Google");
+          navigate("/Homepage");
+        } else if (provider === "email") {
+          console.log("Logged in with email/password");
+          navigate("/Homepage");
+        } else {
+          console.warn("Unknown provider:", provider);
+        }
       }
-    }
-  };
+    };
 
-  getSession();
+    getSession();
 
-  subscription = supabase.auth.onAuthStateChange((_event, session) => {
-    setSession(session);
-    if (session) {
-      const provider = session.user?.app_metadata?.provider;
-      if (provider === "google") {
-        console.log("Logged in with Google");
-        navigate("/Homepage");
-      } else if (provider === "email") {
-        console.log("Logged in with email/password");
-        navigate("/Homepage");
-      } else {
-        console.warn("Unknown provider:", provider);
+    subscription = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session) {
+        const provider = session.user?.app_metadata?.provider;
+        if (provider === "google") {
+          console.log("Logged in with Google");
+          navigate("/Homepage");
+        } else if (provider === "email") {
+          console.log("Logged in with email/password");
+          navigate("/Homepage");
+        } else {
+          console.warn("Unknown provider:", provider);
+        }
       }
-    }
-  }).data.subscription;
+    }).data.subscription;
 
-  return () => {
-    if (subscription) subscription.unsubscribe();
-  };
-}, [navigate]);
+    return () => {
+      if (subscription) subscription.unsubscribe();
+    };
+  }, [navigate]);
 
   const handleSignIn = async (e) => {
     e.preventDefault();
@@ -131,24 +131,9 @@ const Signin = () => {
     });
   };
 
-  const handleLogin = () => {
-    setLoading(true);
-    gsap.to(".gsap-loader", { opacity: 1, duration: 0.5, display: "flex" });
-    setTimeout(() => {
-      gsap.to(".gsap-loader", { opacity: 0, duration: 0.5, display: "none" });
-      setLoading(false);
-      navigate("/Homepage");
-    }, 1200); // Simulate loading, adjust as needed
-  };
 
-  useEffect(() => {
-    if (loading) {
-      gsap.to(loaderRef.current, { opacity: 1, duration: 0.6 });
-      setTimeout(() => setLoading(false), 1800); // Simulate loading
-    } else {
-      gsap.to(loaderRef.current, { opacity: 0, duration: 0.6 });
-    }
-  }, [loading]);
+
+
 
   const signOut = async () => {
     await supabase.auth.signOut();
@@ -159,29 +144,7 @@ const Signin = () => {
   return (
     <div className="min-h-screen flex flex-col">
 
-      {/* GSAP Loading Screen */}
-      <div
-        ref={loaderRef}
-        className="gsap-loader fixed inset-0 z-50 flex items-center justify-center bg-white"
-        style={{
-          pointerEvents: loading ? "auto" : "none",
-          display: loading ? "flex" : "none"
-        }}
-      >
-        <div className="flex flex-col items-center">
-          <img src="/logo-icon/logo.png" alt="Logo" className="mb-6" />
-          <svg
-            className="animate-spin h-16 w-16 text-blue-600 mb-4"
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-          >
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-          </svg>
-          <span className="text-lg font-semibold text-gray-700">Loading...</span>
-        </div>
-      </div>
+
 
       {/*signin Module*/}
       <div className="w-full header bg-white">
@@ -252,10 +215,7 @@ const Signin = () => {
 
           <div className=" text-center">
             <button
-              onClick={() => {
-                signUpWithGoogle();
-                handleLogin();
-              }}
+              onClick={signUpWithGoogle}
               className="w-full mt-4 google-btn flex items-center justify-center gap-2 py-2"
             >
               <img src={"/logo-icon/google-logo.webp"} alt="Google" className="h-6 w-6 object-contain" />

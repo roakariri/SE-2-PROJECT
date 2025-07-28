@@ -39,86 +39,84 @@ const Signup = () => {
   const navigate = useNavigate();
 
   const handleSignUp = async (e) => {
-    e.preventDefault();
-    setError("");
-    setConfirmationMessage("");
-    if (password !== confirmPassword) {
-      setError("Passwords do not match.");
+  e.preventDefault();
+  setError("");
+  setConfirmationMessage("");
+
+  if (password !== confirmPassword) {
+    setError("Passwords do not match.");
+    return;
+  }
+  if (password.length < 6) {
+    setError("Password must be at least 6 characters long.");
+    return;
+  }
+  setLoading(true);
+
+  try {
+    const { data, error } = await supabase.auth.signUp({
+      email: email.toLowerCase(),
+      password: password,
+    });
+    console.log("Signup result:", { data, error });
+
+    if (error) {
+      if (error.message && error.message.includes("30 seconds")) {
+        setError("For security purposes, you can only request this after 30 seconds. Please wait and try again.");
+      } else if (error.message && error.message.toLowerCase().includes("already registered")) {
+        setError("This email is already registered. Please use the correct sign-in method or Google sign-in.");
+      } else {
+        setError(error.message || "An unexpected error occurred. Please try again later.");
+      }
+      setConfirmationMessage("");
+      setLoading(false);
       return;
     }
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters long.");
+
+    // ✨ NEW: Check for duplicate email via identities array
+    if (data?.user?.identities?.length === 0) {
+      setError("This email is already registered. Please log in or use Google sign-in.");
+      setConfirmationMessage("");
+      setLoading(false);
       return;
     }
-    setLoading(true);
-    gsap.to(".gsap-loader", { opacity: 1, duration: 0.5, display: "flex" });
-    try {
-      // Use supabase.auth.signUp directly for accurate error handling
-      const { data, error } = await supabase.auth.signUp({
-        email: email.toLowerCase(),
-        password: password,
-      });
-      console.log("Signup result:", { data, error });
-      if (error) {
+
+    // Proceed with success messaging for actual new signup
+    else if (
+      !error &&
+      data &&
+      data.user &&
+      data.user.email === email.toLowerCase()
+    ) {
+      if (!data.user.confirmed_at && !data.user.last_sign_in_at) {
+        setError("");
+        setConfirmationMessage("Registration successful! Please check your email to verify your account.");
+        setLoading(false);
+        return;
+      } else {
+        setError("This email is already registered. Please use the correct sign-in method or Google sign-in.");
         setConfirmationMessage("");
-        setError("This email is already registered with Google or previous signup. Please use the correct sign-in method.");
-        gsap.to(".gsap-loader", { opacity: 0, duration: 0.5, display: "none" });
         setLoading(false);
         return;
       }
-      if (data && data.user) {
-        if (data.user.email_confirmed_at) {
-          setConfirmationMessage("");
-          setError("This email is already registered with Google or previous signup. Please use the correct sign-in method.");
-          gsap.to(".gsap-loader", { opacity: 0, duration: 0.5, display: "none" });
-          setLoading(false);
-          return;
-        } else {
-          setError("");
-          setConfirmationMessage("A verification email has already been sent to this address. Please check your inbox and verify your account.");
-          gsap.to(".gsap-loader", { opacity: 0, duration: 0.5, display: "none" });
-          setLoading(false);
-          return;
-        }
-      }
-      // If no user and no error, show generic error
-      setError("An unexpected error occurred. Please try again later.");
-      setConfirmationMessage("");
-      gsap.to(".gsap-loader", { opacity: 0, duration: 0.5, display: "none" });
-      setLoading(false);
-    } catch (err) {
-      gsap.to(".gsap-loader", { opacity: 0, duration: 0.5, display: "none" });
-      setLoading(false);
-      setError("An unexpected error occurred.");
-      setConfirmationMessage("");
     }
-  };
+
+    // Fallback
+    else {
+      setError("Signup failed. Please try again or use another email.");
+      setConfirmationMessage("");
+      setLoading(false);
+    }
+  } catch (err) {
+    setLoading(false);
+    setError("An unexpected error occurred.");
+    setConfirmationMessage("");
+  }
+};
 
   return (
     <div className="min-h-screen flex flex-col">
-      {/* GSAP Loading Screen */}
-      <div
-        ref={loaderRef}
-        className="gsap-loader fixed inset-0 z-50 flex items-center justify-center bg-white"
-        style={{
-          pointerEvents: loading ? "auto" : "none",
-          display: loading ? "flex" : "none"
-        }}
-      >
-        <div className="flex flex-col items-center">
-          <img src="/logo-icon/logo.png" alt="Logo" className="mb-6" />
-          <svg
-            className="animate-spin h-16 w-16 text-blue-600 mb-4"
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-          >
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-          </svg>
-          <span className="text-lg font-semibold text-gray-700">Loading...</span>
-        </div>
-      </div>
+      
 
 
 

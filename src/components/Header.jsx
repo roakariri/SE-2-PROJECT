@@ -1,73 +1,31 @@
-import React, { useState, useEffect, useRef } from "react";
-import gsap from "gsap";
+import React, { useState } from "react";
 import "../Header.css";
 import { useNavigate, useLocation } from "react-router-dom";
 
 const Header = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const loaderRef = useRef();
 
-  const [loading, setLoading] = useState(true);
+
+  // Removed loading state
   const [isProjectsHovered, setIsProjectsHovered] = useState(false);
   const [isFavoritesHovered, setIsFavoritesHovered] = useState(false);
   const [isCartHovered, setIsCartHovered] = useState(false);
 
   const handleLogin = () => {
-    setLoading(true);
-    gsap.to(".gsap-loader", { opacity: 1, duration: 0.5, display: "flex" });
-    setTimeout(() => {
-      gsap.to(".gsap-loader", { opacity: 0, duration: 0.5, display: "none" });
-      setLoading(false);
-      navigate("/signin");
-    }, 1200); // Simulate loading, adjust as needed
+    navigate("/signin");
   };
 
   const handleSignup = () => {
-    setLoading(true);
-    gsap.to(".gsap-loader", { opacity: 1, duration: 0.5, display: "flex" });
-    setTimeout(() => {
-      gsap.to(".gsap-loader", { opacity: 0, duration: 0.5, display: "none" });
-      setLoading(false);
-      navigate("/signup");
-    }, 1200); // Simulate loading, adjust as needed
+    navigate("/signup");
   };
 
-  useEffect(() => {
-    if (loading) {
-      gsap.to(loaderRef.current, { opacity: 1, duration: 0.6 });
-      setTimeout(() => setLoading(false), 1800); // Simulate loading
-    } else {
-      gsap.to(loaderRef.current, { opacity: 0, duration: 0.6 });
-    }
-  }, [loading]);
+
 
 
   return (
     <div className="fixed w-full bg-cover bg-white header-container">
-      {/* GSAP Loading Screen */}
-      <div
-        ref={loaderRef}
-        className="gsap-loader fixed inset-0 z-50 flex items-center justify-center bg-white"
-        style={{
-          pointerEvents: loading ? "auto" : "none",
-          display: loading ? "flex" : "none"
-        }}
-      >
-        <div className="flex flex-col items-center">
-          <img src="/logo-icon/logo.png" alt="Logo" className="mb-6" />
-          <svg
-            className="animate-spin h-16 w-16 text-blue-600 mb-4"
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-          >
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-          </svg>
-          <span className="text-lg font-semibold text-gray-700">Loading...</span>
-        </div>
-      </div>
+
 
       {/* Header */}
       <div className="w-full header-landingpage bg-white">
@@ -140,10 +98,10 @@ const Header = () => {
               Cart
             </button>
 
-            <button onClick={handleLogin} className="login-btn px-6 py-2" disabled={loading}>
+            <button onClick={handleLogin} className="login-btn px-6 py-2">
               LOGIN
             </button>
-            <button onClick={handleSignup} className="signup-btn px-4 py-2" disabled={loading}>
+            <button onClick={handleSignup} className="signup-btn px-4 py-2">
               SIGN UP
             </button>
           </div>
