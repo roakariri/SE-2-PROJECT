@@ -58,9 +58,7 @@ const Signup = () => {
       email: email.toLowerCase(),
       password: password,
       options: {
-        options: {
-        redirectTo: "https://se-2-project-hz21.vercel.app/Homepage"
-      } 
+        redirectTo: window.location.origin + "/Homepage" // <-- Use your production URL here
       }
     });
     console.log("Signup result:", { data, error });
