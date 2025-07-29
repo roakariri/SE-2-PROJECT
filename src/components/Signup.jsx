@@ -59,7 +59,7 @@ const Signup = () => {
       password: password,
       options: {
         options: {
-        redirectTo: window.location.origin + "/Homepage"
+        redirectTo: "https://se-2-project-hz21.vercel.app/Homepage"
       } 
       }
     });
