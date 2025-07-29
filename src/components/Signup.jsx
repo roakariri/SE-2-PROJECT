@@ -57,6 +57,11 @@ const Signup = () => {
     const { data, error } = await supabase.auth.signUp({
       email: email.toLowerCase(),
       password: password,
+      options: {
+        options: {
+        redirectTo: window.location.origin + "/Homepage"
+      } 
+      }
     });
     console.log("Signup result:", { data, error });
 
