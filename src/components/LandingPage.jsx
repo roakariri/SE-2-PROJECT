@@ -22,6 +22,7 @@ const LandingPage = () => {
   const [isFavoritesHovered, setIsFavoritesHovered] = React.useState(false);
   const [isCartHovered, setIsCartHovered] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
+  
 
  
 

@@ -3,17 +3,47 @@ import gsap from "gsap";
 import { Link, useNavigate } from "react-router-dom";
 import { UserAuth } from "../context/AuthContext";
 import { supabase } from "../supabaseClient";
+import bcrypt from "bcryptjs";
 
 const Signup = () => {
   const loaderRef = React.useRef();
   const signUpWithGoogle = async () => {
-      await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: {
-          redirectTo: window.location.origin + "/Homepage"
+    await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: window.location.origin + "/Homepage"
+      }
+    });
+  };
+
+  // Insert Google user into custom users table after OAuth redirect
+  React.useEffect(() => {
+    const insertGoogleUser = async () => {
+      const { data: { session } = {} } = await supabase.auth.getSession();
+      const userEmail = session?.user?.email;
+      if (userEmail) {
+        // Check if user exists in custom users table
+        const { data: existingUser, error: checkError } = await supabase
+          .from("users")
+          .select("id")
+          .eq("email", userEmail)
+          .maybeSingle();
+        if (!existingUser && !checkError) {
+          const { error: insertError } = await supabase.from("users").insert([
+            {
+              email: userEmail,
+              provider: "google"
+            }
+          ]);
+          if (insertError) {
+            // Optionally handle error (e.g., show message)
+            console.error("Failed to insert Google user:", insertError.message);
+          }
         }
-      });
+      }
     };
+    insertGoogleUser();
+  }, []);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -54,19 +84,22 @@ const Signup = () => {
   setLoading(true);
 
   try {
-    const { data, error } = await supabase.auth.signUp({
-      email: email.toLowerCase(),
-      password: password,
-      options: {
-        redirectTo: window.location.origin + "/Homepage" // <-- Use your production URL here
-      }
-    });
-    console.log("Signup result:", { data, error });
+    // Hash the password
+    const password_hash = bcrypt.hashSync(password, 10);
+
+    // Insert into custom users table
+    const { data, error } = await supabase
+      .from("users")
+      .insert([
+        {
+          email: email.toLowerCase(),
+          password_hash,
+        },
+      ])
+      .select();
 
     if (error) {
-      if (error.message && error.message.includes("30 seconds")) {
-        setError("For security purposes, you can only request this after 30 seconds. Please wait and try again.");
-      } else if (error.message && error.message.toLowerCase().includes("already registered")) {
+      if (error.code === "23505") { // unique_violation
         setError("This email is already registered. Please use the correct sign-in method or Google sign-in.");
       } else {
         setError(error.message || "An unexpected error occurred. Please try again later.");
@@ -76,40 +109,9 @@ const Signup = () => {
       return;
     }
 
-    // ✨ NEW: Check for duplicate email via identities array
-    if (data?.user?.identities?.length === 0) {
-      setError("This email is already registered. Please log in or use Google sign-in.");
-      setConfirmationMessage("");
-      setLoading(false);
-      return;
-    }
-
-    // Proceed with success messaging for actual new signup
-    else if (
-      !error &&
-      data &&
-      data.user &&
-      data.user.email === email.toLowerCase()
-    ) {
-      if (!data.user.confirmed_at && !data.user.last_sign_in_at) {
-        setError("");
-        setConfirmationMessage("Registration successful! Please check your email to verify your account.");
-        setLoading(false);
-        return;
-      } else {
-        setError("This email is already registered. Please use the correct sign-in method or Google sign-in.");
-        setConfirmationMessage("");
-        setLoading(false);
-        return;
-      }
-    }
-
-    // Fallback
-    else {
-      setError("Signup failed. Please try again or use another email.");
-      setConfirmationMessage("");
-      setLoading(false);
-    }
+    setError("");
+    setConfirmationMessage("Registration successful! Please check your email to verify your account.");
+    setLoading(false);
   } catch (err) {
     setLoading(false);
     setError("An unexpected error occurred.");
