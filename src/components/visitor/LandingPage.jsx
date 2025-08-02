@@ -1,6 +1,6 @@
 import React from "react";
 import gsap from "gsap";
-import "../LandingPage.css";
+import "../../LandingPage.css";
 import { useNavigate, useLocation } from "react-router-dom";
 
 

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
-import "../ResetConfirmation.css";
-import { supabase } from "../supabaseClient";
+import "../../ResetConfirmation.css";
+import { supabase } from "../../supabaseClient";
 
 const ResetConfirmation = () => {
   const [email, setEmail] = useState(() => localStorage.getItem("resetEmail") || "");

@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "../supabaseClient";
-import "../ForgotPassword.css"; 
+import { supabase } from "../../supabaseClient";
+import "../../ForgotPassword.css"; 
 
 const ForgotPassword = () => {
   const [email, setEmail] = useState("");
