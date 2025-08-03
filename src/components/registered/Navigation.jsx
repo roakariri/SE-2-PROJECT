@@ -25,13 +25,24 @@ const Navigation = () => {
     "3D Print Services"
   ];
 
+  // Map subNavLinks to their corresponding route paths
+  const subNavRoutes = {
+    "Deals": "/deals",
+    "Apparel": "/apparel",
+    "Accessories & Documentation": "/",
+    "Signage & Posters": "/signage",
+    "Cards & Stickers": "/cards",
+    "Packaging": "/packaging",
+    "3D Print Services": "/3d-print"
+  };
+
   return (
     <div className="fixed w-full bg-cover bg-white z-50">
       {/* Header */}
-      <div className="w-full h-15  bg-white border ">
-        <div className="p-1 phone:grid phone:grid-cols-1 phone:items-center phone:justify-center phone:align-center tablet:grid tablet:justify-center tablet:items-center laptop:flex bigscreen:flex border justify-center items-center  laptop:gap-6">
+      <div className="w-full h-15  bg-white border border-[#171738]">
+        <div className="p-1 phone:grid phone:grid-cols-1 phone:items-center phone:justify-center phone:align-center tablet:grid tablet:justify-center tablet:items-center laptop:flex bigscreen:flex justify-center items-center  laptop:gap-6">
           {/* Logo */}
-          <div className="phone:w-50 phone:h-10 border tablet:h-15 laptop:h-20 bigscreen:h-20 bigscreen:mr-[1px]  ">
+          <div className="phone:w-50 phone:h-10 tablet:h-15 laptop:h-20 bigscreen:h-20 bigscreen:mr-[1px]  ">
             <img 
               src="/logo-icon/logo.png" 
               className="object-contain w-[120px] h-[32px] phone:w-[100px] phone:h-[28px] tablet:w-[140px] tablet:h-[40px] laptop:w-[220px] laptop:h-[80px] bigscreen:w-[220px] bigscreen:h-[80px] mx-auto" 
@@ -40,8 +51,8 @@ const Navigation = () => {
           </div>
 
           {/* Search Bar */}
-          <div className="phone:mt-4  flex justify-center items-center border bigscreen:ml-[100px] laptop:mt-0">
-            <form className="flex items-center mx-auto w-full phone:max-w-md md:max-w-lg lg:max-w-xl laptop:max-w-2xl border ">
+          <div className="phone:mt-4  flex justify-center items-center bigscreen:ml-[100px] laptop:mt-0">
+            <form className="flex items-center mx-auto w-full phone:max-w-md md:max-w-lg lg:max-w-xl laptop:max-w-2xl">
               <input
                 type="text"
                 placeholder="What would you like to customize today?"
@@ -58,7 +69,7 @@ const Navigation = () => {
           </div>
 
             {/* Header Buttons */}
-            <div className="flex items-center gap-2 phone:gap-[45px] laptop:gap-4 justify-center phone:mt-1 laptop:mt-0     border ">
+            <div className="flex items-center gap-2 phone:gap-[45px] laptop:gap-4 justify-center phone:mt-1 laptop:mt-0">
                 <button
                 className="project-btn flex items-center text-xs laptop:text-xs"
                 onClick={() => navigate("/shopping")}
@@ -162,11 +173,21 @@ const Navigation = () => {
       </div>
 
       {/* Sub Nav for laptop and up */}
-      <div className="w-full bg-white border-b phone:hidden laptop:hidden big-laptop:block">
+      {/* Sub Nav for laptop and up */}
+      <div className="w-full  bg-white border-b phone:hidden laptop:hidden big-laptop:block">
         <div className="subheader-home flex flex-nowrap mt-2 justify-center items-center laptop:justify-around p-8 gap-4 ">
-          {subNavLinks.map((label) => (
-            <p key={label} className="text-[#3B5B92] font-semibold cursor-pointer hover:text-blue-600 transition px-2 flex-shrink-0 min-w-max leading-tight flex items-center font-dm-sans">{label}</p>
-          ))}
+          {subNavLinks.map((label) => {
+            const isActive = location.pathname === subNavRoutes[label];
+            return (
+              <p
+                key={label}
+                className={`font-bold cursor-pointer transition px-2 flex-shrink-0 min-w-max leading-tight flex items-center font-dm-sans ${isActive ? 'text-gray' : 'text-[#3B5B92] hover:text-blue-600'}`}
+                onClick={() => navigate(subNavRoutes[label])}
+              >
+                {label}
+              </p>
+            );
+          })}
         </div>
       </div>
     </div>

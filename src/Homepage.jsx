@@ -2,18 +2,20 @@
 import { UserAuth } from "./context/AuthContext";
 import Navigation from "./components/registered/Navigation";
 import HomepageBody from "./components/registered/HomepageBody";
-
+import Header from "./components/visitor/Header";
+import Footer from "./components/visitor/Footer";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 
 
 function Homepage() {
-  const { user } = UserAuth();
+  const { session } = UserAuth();
   return (
-    <>
-      <Navigation />
+    <ErrorBoundary>
+      {session ? <Navigation /> : <Header />}
       <HomepageBody />
-
-    </>
+      <Footer />
+    </ErrorBoundary>
   );
 }
 

@@ -1,74 +1,68 @@
 
-import "../../Footer.css"
+
 
 const Footer = () => {
 
 
 
     return (
-        <div className="flex footer-container">
-            <div className=" flex flex-row footer-container-inside" >
-                <div className="flex flex-col  text-center">
-                    <img src={"/logo-icon/logo-white.png"} className="logo"></img>
-                    <p className="address-number-email">2219 C. M. Recto Ave, Sampaloc, Manila</p>
-                    <p className="address-number-email">+63 9xxx xxx xxxx</p>
-                    <p className="address-number-email">goodprintsgreatprints@gmail.com</p>
-                    <div className="flex flex-row align-center justify-center mt-5">
-                        <img src = {"/logo-icon/fb-icon.png"} className="socials-icon"></img>
-                        <img src = {"/logo-icon/ig-icon.png"} className="socials-icon"></img>
-                        <img src = {"/logo-icon/tiktok-icon.png"} className="socials-icon"></img>
+        <footer className="w-full bg-[#2B4269] text-white font-dm-sans font-semibold text-[15px] py-8 px-4 phone:px-2 tablet:px-8 laptop:px-16 phone:justify-left phone:flex align-center">
+            <div className="flex flex-col w-full h-auto phone:p-10 laptop:py-5 laptop:px-0 laptop:flex-row justify-between items-start gap-8 laptop:gap-12  phone:items-start laptop:items-start text-white p-0">
+                {/* Logo & Contact */}
+                <div className="flex flex-col items-center laptop:items-start text-center phone:items-start laptop:text-left gap-2 laptop:gap-0 laptop:items-center min-w-[180px]">
+                    <img src="/logo-icon/logo-white.png" className="w-32 h-auto mb-2 laptop:w-[230.76px] laptop:h-[60px] bigscreen:h-[100px] bigscreen:w-[340.76px] phone:w-[210px] phone:h-[70px]" alt="Logo" />
+                    <p className="text-[15px] text-white">2219 C. M. Recto Ave, Sampaloc, Manila</p>
+                    <p className="text-[15px] text-white">+63 9xxx xxx xxxx</p>
+                    <p className="text-[15px] text-white">goodprintsgreatprints@gmail.com</p>
+                    <div className="flex flex-row justify-center laptop:justify-start gap-3 mt-3">
+                        <img src="/logo-icon/fb-icon.png" className="w-7 h-7" alt="Facebook" />
+                        <img src="/logo-icon/ig-icon.png" className="w-7 h-7" alt="Instagram" />
+                        <img src="/logo-icon/tiktok-icon.png" className="w-7 h-7" alt="TikTok" />
                     </div>
                 </div>
 
-                <div className="flex flex-col text-left our-company-container">
-                    <p className="our-company-name">Our Company</p>
-                    <p className="atp mt-2">About Us</p>
-                    <p className="atp">Terms & Conditions</p>
-                    <p className="atp">Privacy Policy</p>
-
+                {/* Our Company */}
+                <div className="flex flex-col gap-1 min-w-[120px]">
+                    <p className="font-bold text-base mb-2 text-white">Our Company</p>
+                    <p className="text-[15px] cursor-pointer hover:underline text-white">About Us</p>
+                    <p className="text-[15px] cursor-pointer hover:underline text-white">Terms & Conditions</p>
+                    <p className="text-[15px] cursor-pointer hover:underline text-white">Privacy Policy</p>
                 </div>
 
-
-                <div className="flex flex-col text-left our-services-container">
-                    <p className="our-services-name">Our Services</p>
-                    <p className="fasoc mt-2">FAQs</p>
-                    <p className="fasoc">All Products</p>
-                    <p className="fasoc">Shipping</p>
-                    <p className="fasoc">Order Tracking</p>
-                    <p className="fasoc">Contact Support</p>
-
-                </div>
-                <div className="flex flex-col text-left our-services-container2">
-               
-                    <p className="fasoc margin-toppiana">Returns Policy</p>
-                    <p className="fasoc">3D Print Services</p>
-                    <p className="fasoc">Live Chat Support</p>
+                {/* Our Services */}
+                <div className="flex flex-col gap-1 min-w-[120px]">
+                    <p className="font-bold text-base mb-2 text-white">Our Services</p>
+                    <p className="text-sm cursor-pointer hover:underline text-white">FAQs</p>
+                    <p className="text-[15px] cursor-pointer hover:underline text-white">All Products</p>
+                    <p className="text-[15px] cursor-pointer hover:underline text-white">Shipping</p>
+                    <p className="text-[15px] cursor-pointer hover:underline text-white">Order Tracking</p>
+                    <p className="text-[15px] cursor-pointer hover:underline text-white">Contact Support</p>
                 </div>
 
-                <div className="flex flex-col news-letter-container">
-                    <p className="news-letter-name">News Letter Subsscription</p>
-                    <p className="news-letter-description">Love what you see? Subscribe to our
-                        
-                    </p>
-                    <p className="italic">newsletter.</p>
-                    <div className="justify-center align-center">
-                        <form className="items-center flex mt-3">
-                            <input
+                {/* More Services */}
+                <div className="flex flex-col gap-1 min-w-[120px] laptop:mt-[25px] phone:mt-[-30px]">
+                    <p className="text-[15px] cursor-pointer hover:underline mt-2 text-white">Returns Policy</p>
+                    <p className="text-[15px] cursor-pointer hover:underline text-white">3D Print Services</p>
+                    <p className="text-[15px] cursor-pointer hover:underline text-white">Live Chat Support</p>
+                </div>
+
+                {/* Newsletter */}
+                <div className="flex flex-col gap-2 min-w-[220px]">
+                    <p className="font-bold text-[15px] mb-1 text-white">Newsletter Subscription</p>
+                    <p className="text-[15px] text-white">Love what you see? Subscribe to our <span className="italic text-white">newsletter.</span></p>
+                    <form className="flex gap-2 mt-2">
+                        <input
                             type="email"
                             placeholder="Email Address"
-                            className="email-bar"
-                            />
-
-                            <button type="button" className="email-btn">
-                                    <p>Subscribe</p>
-                            </button>
-                            
-                        </form>
-                    </div>
+                            className="px-3 py-2 rounded-l-md bg-white text-black focus:outline-none w-full"
+                        />
+                        <button type="button" className="bg-orange-500 text-white px-4 py-2 rounded-r-md rounded-l-none ml-[-10px] font-semibold hover:bg-orange-600 transition">
+                            Subscribe
+                        </button>
+                    </form>
                 </div>
-                
             </div>
-        </div>
+        </footer>
     );
 };
 

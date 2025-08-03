@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import gsap from "gsap";
+
 import { Link, useNavigate } from "react-router-dom";
 import { UserAuth } from "../../context/AuthContext";
 import { supabase } from "../../supabaseClient";

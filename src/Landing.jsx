@@ -7,11 +7,12 @@ import Footer from "./components/visitor/Footer";
 
 
 
+
 function Landing() {
-  const { user } = UserAuth();
+  const { session } = UserAuth();
   return (
     <>
-      <Header />
+      {session ? <Navigation /> : <Header />}
       <LandingPage />
       <Footer />
     </>

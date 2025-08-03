@@ -40,4 +40,6 @@ export const router = createBrowserRouter([
   // Apparel routes
   { path: "/apparel", element: <Apparel /> },
   { path: "/apparel-catalog", element: <ApparelCatalog /> },
+
+  
 ]);

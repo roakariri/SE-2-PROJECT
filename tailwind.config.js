@@ -8,11 +8,16 @@ export default {
       'tablet': '601px',
       'laptop': '1024px',
       'big-laptop': '1182px',
+      'landingHeader' : '1433px',
       'semi-bigscreen': '1237px',
       'bigscreen': '1280px',
     },
 
-    extend: {},
+    extend: {
+      fontFamily: {
+        'dm-sans': ['DM Sans', 'sans-serif'],
+      },
+    },
   },
   plugins: [],
 };

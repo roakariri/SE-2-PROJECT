@@ -1,18 +1,20 @@
 
 import { UserAuth } from "./context/AuthContext";
-import Navigation from "./components/registered/Navigation";
+import Header from "./components/visitor/Header";
 import ApparelCatalog from "./components/visitor/ApparelCatalog";
+import Navigation from "./components/registered/Navigation";
+import Footer from "./components/visitor/Footer";
 
 
 
 
 function Apparel() {
-  const { user } = UserAuth();
+  const { session } = UserAuth();
   return (
     <>
-      <Navigation />
+      {session ? <Navigation /> : <Header />}
       <ApparelCatalog />
-
+      <Footer />
     </>
   );
 }
