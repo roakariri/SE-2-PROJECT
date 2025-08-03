@@ -2,114 +2,8 @@ import React, { useEffect, useState } from "react";
 import { supabase } from "../../supabaseClient";
 import { useNavigate } from "react-router-dom";
 
-const ApparelCatalog = () => {
-  const [products, setProducts] = useState([]);
-  const [filteredProducts, setFilteredProducts] = useState([]);
-  const [productTypeFilter, setProductTypeFilter] = useState([]);
-  const [allProductTypes, setAllProductTypes] = useState([]);
-  const [priceRange, setPriceRange] = useState({ min: '', max: '' });
-  const [selectAll, setSelectAll] = useState(false);
-  const [sortOption, setSortOption] = useState("relevance");
-
-  useEffect(() => {
-    fetchProducts();
-    fetchProductTypes();
-  }, []);
-
-  useEffect(() => {
-    filterByProductTypeOnly();
-  }, [products, productTypeFilter, selectAll]);
-
-  const fetchProducts = async () => {
-    const { data, error } = await supabase
-      .from("products")
-      .select("*, product_types(id, name)");
-
-    if (error) {
-      console.error("Error fetching products:", error);
-    } else {
-      setProducts(data);
-      setFilteredProducts(data);
-    }
-  };
-
-  const fetchProductTypes = async () => {
-    const { data, error } = await supabase.from("product_types").select("*");
-    if (error) {
-      console.error("Error fetching product types:", error);
-    } else {
-      setAllProductTypes(data);
-    }
-  };
-
-  const handleProductTypeChange = (event, typeId) => {
-    const { checked } = event.target;
-    setSelectAll(false);
-    setProductTypeFilter(prev =>
-      checked ? [...prev, typeId] : prev.filter(id => id !== typeId)
-    );
-  };
-
-  const handleSelectAllChange = () => {
-    setSelectAll(prev => !prev);
-    setProductTypeFilter([]);
-  };
-
-  const handlePriceChange = (event) => {
-    const { name, value } = event.target;
-    setPriceRange(prev => ({ ...prev, [name]: value }));
-  };
-
-  const filterByProductTypeOnly = () => {
-    let temp = [...products];
-    if (!selectAll && productTypeFilter.length > 0) {
-      temp = temp.filter(product =>
-        productTypeFilter.includes(product.product_types?.id)
-      );
-    }
-    setFilteredProducts(temp);
-    setSortOption("relevance"); // Reset sort on filter change
-  };
-
-  const applyFilters = () => {
-    let temp = [...products];
-
-    if (!selectAll && productTypeFilter.length > 0) {
-      temp = temp.filter(product =>
-        productTypeFilter.includes(product.product_types?.id)
-      );
-    }
-
-    if (priceRange.min) {
-      temp = temp.filter(product => product.starting_price >= parseFloat(priceRange.min));
-    }
-
-    if (priceRange.max) {
-      temp = temp.filter(product => product.starting_price <= parseFloat(priceRange.max));
-    }
-
-    setFilteredProducts(temp);
-    setSortOption("relevance"); // Reset sort when applying price filter
-  };
-
-  const handleSortChange = (e) => {
-    const sortValue = e.target.value;
-    setSortOption(sortValue);
-    let sorted = [...filteredProducts];
-
-    if (sortValue === "lowToHigh") {
-      sorted.sort((a, b) => a.starting_price - b.starting_price);
-    } else if (sortValue === "highToLow") {
-      sorted.sort((a, b) => b.starting_price - a.starting_price);
-    } else if (sortValue === "nameAZ") {
-      sorted.sort((a, b) => a.name?.toLowerCase().localeCompare(b.name?.toLowerCase()));
-    } else if (sortValue === "nameZA") {
-      sorted.sort((a, b) => b.name?.toLowerCase().localeCompare(a.name?.toLowerCase()));
-    }
-
-    setFilteredProducts(sorted);
-  };
-
+const HomePage = () => {
+ 
   return (
     
     <div className="min-h-screen w-full bg-white phone:pt-[212px] tablet:pt-[160px] laptop:pt-[166px] relative z-0">
@@ -302,4 +196,4 @@ const ApparelCatalog = () => {
   );
 };
 
-export default ApparelCatalog;
+export default HomePage;
