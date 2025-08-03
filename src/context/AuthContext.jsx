@@ -38,7 +38,7 @@ export const AuthContextProvider = ({ children }) => {
       // If no error, return success
       console.log("Sign-in success:", data);
       return { success: true, data }; // Return the user data
-    } catch (error) {
+    } catch (err) {
       // Handle unexpected issues
       console.error("Unexpected error during sign-in:", err.message);
       return {
