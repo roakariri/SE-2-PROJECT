@@ -1,22 +1,22 @@
 
 import { UserAuth } from "./context/AuthContext";
-import Navigation from "./components/registered/Navigation";
-import HomepageBody from "./components/registered/HomepageBody";
 import Header from "./components/visitor/Header";
+import Navigation from "./components/registered/Navigation";
 import Footer from "./components/visitor/Footer";
-import ErrorBoundary from "./components/ErrorBoundary";
+import SignagesPostersCatalog from "./components/visitor/Signages-Posters-Catalog";
 
 
 
-function Homepage() {
+
+function SignagesPosters() {
   const { session } = UserAuth();
   return (
     <div className="font-dm-sans">
       {session ? <Navigation /> : <Header />}
-      <HomepageBody />
+      <SignagesPostersCatalog />
       <Footer />
     </div>
   );
 }
 
-export default Homepage;
+export default SignagesPosters;

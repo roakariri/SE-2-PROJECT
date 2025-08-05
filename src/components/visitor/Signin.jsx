@@ -147,13 +147,13 @@ const Signin = () => {
 
 
       {/*signin Module*/}
-      <div className="w-full header bg-white">
+      <div className="fixed w-full header bg-white">
         <div className="header">
           <img src={"/logo-icon/logo.png"} className="header-logo" alt="Logo" />
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center mt-6 my-6">
+      <div className="flex-1 flex flex-col items-center justify-center mt-[100px] my-6">
         <div className="container flex flex-col  justify-center mt-9">
           <h2 className="header-notice">Login</h2>
           

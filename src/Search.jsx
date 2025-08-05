@@ -1,20 +1,23 @@
-import { UserAuth } from "./context/AuthContext";
-import LandingPage from "./components/visitor/LandingPage";
-import Header from "./components/visitor/Header";
-import Footer from "./components/visitor/Footer";
-import Navigation from "./components/registered/Navigation";
 
-function Landing() {
+import { UserAuth } from "./context/AuthContext";
+import Header from "./components/visitor/Header";
+import Navigation from "./components/registered/Navigation";
+import Footer from "./components/visitor/Footer";
+import SearchPage from "./components/visitor/Search-page";
+
+
+
+
+
+function Search() {
   const { session } = UserAuth();
   return (
-
-    <div className="font-dm-sans">
+    <>
       {session ? <Navigation /> : <Header />}
-      <LandingPage />
+      <SearchPage />
       <Footer />
-    </div>
- 
+    </>
   );
 }
 
-export default Landing;
+export default Search;

@@ -6,7 +6,7 @@ const HomePage = () => {
  
   return (
     
-    <div className="min-h-screen w-full bg-white phone:pt-[212px] tablet:pt-[160px] laptop:pt-[166px] relative z-0">
+    <div className="min-h-screen w-full bg-white phone:pt-[212px] tablet:pt-[215px] laptop:pt-[166px] relative z-0">
       {/* Hero Banner */}
       <div className="flex flex-col items-center justify-center z-5">
         <img src="/images/hero-banner.png" className="w-full object-cover" />

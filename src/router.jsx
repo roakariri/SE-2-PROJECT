@@ -13,11 +13,29 @@ import ResetSuccessful from "./components/visitor/ResetSuccessful";
 
 // Importing the Homepage component and its body
 import HomePage from "./Homepage"
-import HomepageBody from "./components/registered/HomepageBody";
 
 // Importing the ApparelCatalog component
-import ApparelCatalog from "./components/visitor/ApparelCatalog";
 import Apparel from "./Apparel";
+
+
+// Importing the AccessoriesCatalog component
+import Accessories from "./Accessories";
+
+// Importing the SignagesCatalog component
+import Signages from "./Signages-Posters";
+
+// Importing the CardsStickersCatalog component
+import CardsStickers from "./Cards-Stickers";
+
+// Importing the PackagingCatalog component
+import Packaging from "./Packaging";  
+
+// Importing the ThreeDPrintsCatalog component
+import ThreeDPrints from "./3D-Prints";
+
+// Importing the Search component
+import Search from "./Search";
+
 
 
 
@@ -35,11 +53,29 @@ export const router = createBrowserRouter([
 
   // Homepage routes
   { path: "/homepage", element: <HomePage /> },
-  { path: "/homepagebody", element: <HomepageBody /> },
+
 
   // Apparel routes
   { path: "/apparel", element: <Apparel /> },
-  { path: "/apparel-catalog", element: <ApparelCatalog /> },
 
-  
+
+
+  // Accessories routes
+  { path: "/accessories-decorations", element: <Accessories /> },
+
+  // Signages routes
+  { path: "/signage-posters", element: <Signages /> },
+
+
+  //Cards and Signages routes
+  { path: "/cards-stickers", element: <CardsStickers /> },
+
+  //packaging routes
+  { path: "/packaging", element: <Packaging /> },
+
+  // 3D Prints routes
+  { path: "/3d-prints-services", element: <ThreeDPrints /> },
+
+  //search routes
+  { path: "/search", element: <Search /> }
 ]);

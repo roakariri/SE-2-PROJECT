@@ -11,11 +11,11 @@ import Footer from "./components/visitor/Footer";
 function Apparel() {
   const { session } = UserAuth();
   return (
-    <>
+    <div className="font-dm-sans">
       {session ? <Navigation /> : <Header />}
       <ApparelCatalog />
       <Footer />
-    </>
+    </div>
   );
 }
 

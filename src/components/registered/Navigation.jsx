@@ -1,64 +1,118 @@
 import React, { useState } from "react";
-
 import { useNavigate, useLocation } from "react-router-dom";
+import { UserAuth } from "../../context/AuthContext";
+import { supabase } from "../../supabaseClient";
+
+const SUPABASE_PROJECT_REF = "abcd1234";
 
 const Navigation = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { signOut } = UserAuth();
 
-
-  // Removed loading state
+  // Hover states
   const [isProjectsHovered, setIsProjectsHovered] = useState(false);
   const [isFavoritesHovered, setIsFavoritesHovered] = useState(false);
   const [isCartHovered, setIsCartHovered] = useState(false);
   const [isProfileHovered, setIsProfileHovered] = useState(false);
 
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  // Search bar states and logic
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState("");
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
-  const subNavLinks = [
-    "Deals",
-    "Apparel",
-    "Accessories & Documentation",
-    "Signage & Posters",
-    "Cards & Stickers",
-    "Packaging",
-    "3D Print Services"
-  ];
+  React.useEffect(() => {
+    if (searchTerm.trim() === "") {
+      setSearchResults([]);
+      setShowSuggestions(false);
+      return;
+    }
+    let active = true;
+    setSearchLoading(true);
+    setSearchError("");
+    supabase
+      .from("products")
+      .select("*")
+      .ilike("name", `%${searchTerm}%`)
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          setSearchError(error.message);
+          setSearchResults([]);
+        } else {
+          setSearchResults(data);
+          setShowSuggestions(true);
+        }
+        setSearchLoading(false);
+      })
+      .catch(() => {
+        if (!active) return;
+        setSearchError("Unexpected error. Please try again.");
+        setSearchResults([]);
+        setSearchLoading(false);
+      });
+    return () => { active = false; };
+  }, [searchTerm]);
 
-  // Map subNavLinks to their corresponding route paths
-  const subNavRoutes = {
-    "Deals": "/deals",
-    "Apparel": "/apparel",
-    "Accessories & Documentation": "/",
-    "Signage & Posters": "/signage",
-    "Cards & Stickers": "/cards",
-    "Packaging": "/packaging",
-    "3D Print Services": "/3d-print"
+  const handleSearch = (e) => {
+    e.preventDefault();
+    setShowSuggestions(false);
+    if (searchTerm.trim() !== "") {
+      navigate(`/search?q=${encodeURIComponent(searchTerm.trim())}`);
+    }
   };
 
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+    
+      const subNavLinks = [
+      "Deals",
+      "Apparel",
+      "Accessories & Decorations",
+      "Signage & Posters",
+      "Cards & Stickers",
+      "Packaging",
+      "3D Print Services"
+    ];
+  
+    // Map subNavLinks to their corresponding route paths
+    const subNavRoutes = {
+      "Deals": "/deals",
+      "Apparel": "/apparel",
+      "Accessories & Decorations": "/accessories-decorations",
+      "Signage & Posters": "/signage-posters",
+      "Cards & Stickers": "/cards-stickers",
+      "Packaging": "/packaging",
+      "3D Print Services": "/3d-prints-services"
+    };
+
   return (
-    <div className="fixed w-full bg-cover bg-white z-50">
+    <div className="fixed w-full bg-cover bg-white z-50 ">
       {/* Header */}
-      <div className="w-full h-15  bg-white border border-[#171738]">
+      <div className="w-full h-15  bg-white border border-b-[#171738]">
         <div className="p-1 phone:grid phone:grid-cols-1 phone:items-center phone:justify-center phone:align-center tablet:grid tablet:justify-center tablet:items-center laptop:flex bigscreen:flex justify-center items-center  laptop:gap-6">
           {/* Logo */}
           <div className="phone:w-50 phone:h-10 tablet:h-15 laptop:h-20 bigscreen:h-20 bigscreen:mr-[1px]  ">
             <img 
               src="/logo-icon/logo.png" 
-              className="object-contain w-[120px] h-[32px] phone:w-[100px] phone:h-[28px] tablet:w-[140px] tablet:h-[40px] laptop:w-[220px] laptop:h-[80px] bigscreen:w-[220px] bigscreen:h-[80px] mx-auto" 
+              className="object-contain w-[120px] h-[32px] phone:w-[100px] phone:h-[28px] tablet:w-[140px] tablet:h-[40px] laptop:w-[220px] laptop:h-[80px] bigscreen:w-[220px] bigscreen:h-[80px] mx-auto cursor-pointer" 
               alt="Logo" 
+              onClick={() => navigate("/")}
             />
           </div>
 
           {/* Search Bar */}
           <div className="phone:mt-4  flex justify-center items-center bigscreen:ml-[100px] laptop:mt-0">
-            <form className="flex items-center mx-auto w-full phone:max-w-md md:max-w-lg lg:max-w-xl laptop:max-w-2xl">
+            <form className="flex items-center mx-auto w-full phone:max-w-md md:max-w-lg lg:max-w-xl laptop:max-w-2xl" onSubmit={handleSearch}>
               <input
                 type="text"
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
                 placeholder="What would you like to customize today?"
                 className="bg-white text-black caret-black border border-black rounded-l-[5px] rounded-r-none w-[400px] min-w-0 phone:h-[34.56px] tablet:h-[41.48px] laptop:h-[2.7vw] big-laptop:h-[41.48px] px-[19px] py-[19px] focus:outline-none text-xs sm:text-sm md:text-base"
               />
-              <button type="button" className="bg-[#3B5B92] h-[400px] flex items-center justify-center ml-0 rounded-r-md rounded-l-none phone:h-[40px] tablet:h-[41.48px] big-laptop:h-[41.48px]  p-0 min-w-0" style={{ width: '3.5vw', minWidth: '34.56px', maxWidth: '41.48px' }}>
+              <button type="submit" className="bg-[#3B5B92] h-[400px] flex items-center justify-center ml-0 rounded-r-md rounded-l-none phone:h-[40px] tablet:h-[41.48px] big-laptop:h-[41.48px]  p-0 min-w-0" style={{ width: '3.5vw', minWidth: '34.56px', maxWidth: '41.48px' }}>
                 <img 
                   src="/logo-icon/search-icon.svg" 
                   alt="Search" 
@@ -66,12 +120,15 @@ const Navigation = () => {
                 />
               </button>
             </form>
+            {/* Search Results */}
+            {searchLoading && <div className="mt-2 text-xs text-gray-500"></div>}
+            {searchError && <div className="mt-2 text-xs text-red-500">{searchError}</div>}
           </div>
 
             {/* Header Buttons */}
             <div className="flex items-center gap-2 phone:gap-[45px] laptop:gap-4 justify-center phone:mt-1 laptop:mt-0">
                 <button
-                className="project-btn flex items-center text-xs laptop:text-xs"
+                className="project-btn flex items-center font-bold text-base laptop:text-base font-dm-sans"
                 onClick={() => navigate("/shopping")}
                 onMouseEnter={() => setIsProjectsHovered(true)}
                 onMouseLeave={() => setIsProjectsHovered(false)}
@@ -85,11 +142,11 @@ const Navigation = () => {
                         alt="Projects"
                         className=" transition duration-200 w-5 h-5 laptop:w-6 laptop:h-6"
                     />
-                <span className="hidden semi-bigscreen:inline ml-2">My Projects</span>
+                <span className="hidden semi-bigscreen:inline ml-2 font-dm-sans">My Projects</span>
                 </button>
 
                 <button
-                className="project-btn flex items-center text-xs laptop:text-xs"
+                className="project-btn flex items-center font-bold text-base laptop:text-base font-dm-sans"
                 onClick={() => navigate("/shopping")}
                 onMouseEnter={() => setIsFavoritesHovered(true)}
                 onMouseLeave={() => setIsFavoritesHovered(false)}
@@ -103,11 +160,11 @@ const Navigation = () => {
                     alt="Favorites"
                     className="transition duration-200 w-6 h-6 laptop:w-5 laptop:h-5"
                 />
-                <span className="hidden semi-bigscreen:inline ml-2">Favorites</span>
+                <span className="hidden semi-bigscreen:inline ml-2 font-dm-sans">Favorites</span>
                 </button>
 
                 <button
-                className="project-btn flex items-center text-xs laptop:text-xs"
+                className="project-btn flex items-center font-bold text-base laptop:text-base font-dm-sans"
                 onClick={() => navigate("/shopping")}
                 onMouseEnter={() => setIsCartHovered(true)}
                 onMouseLeave={() => setIsCartHovered(false)}
@@ -121,26 +178,46 @@ const Navigation = () => {
                     alt="Cart"
                     className=" transition duration-200 w-6 h-6 laptop:w-5 laptop:h-5"
                 />
-                <span className="hidden  semi-bigscreen:inline ml-2">Cart</span>
+                <span className="hidden  semi-bigscreen:inline ml-2 font-dm-sans">Cart</span>
                 </button>
 
-                <button
-                  className="project-btn flex items-center text-xs laptop:text-xs"
-                  onClick={() => navigate("/profile")}
+                <div
+                  className="relative flex flex-col items-center"
                   onMouseEnter={() => setIsProfileHovered(true)}
                   onMouseLeave={() => setIsProfileHovered(false)}
                 >
-                  <img
-                    src={
-                    isProfileHovered
-                        ? "/logo-icon/profile-icon-hovered.svg"
-                        : "/logo-icon/profile-icon.svg"
-                    }
-                    alt="Profile"
-                    className=" transition duration-200 w-6 h-6 laptop:w-5 laptop:h-5"
-                  />
-                <span className="hidden semi-bigscreen:inline ml-2">Profile</span>
-                </button>
+                  <button
+                    className="project-btn flex items-center font-bold text-base laptop:text-base font-dm-sans"
+                    onClick={() => navigate("/profile")}
+                  >
+                    <img
+                      src={
+                        isProfileHovered
+                          ? "/logo-icon/profile-icon-hovered.svg"
+                          : "/logo-icon/profile-icon.svg"
+                      }
+                      alt="Profile"
+                      className="transition duration-200 w-6 h-6 laptop:w-5 laptop:h-5"
+                    />
+                    <span className="hidden semi-bigscreen:inline ml-2 font-dm-sans">Profile</span>
+                  </button>
+                  <div
+                    className={`absolute top-full left-1/2 transform -translate-x-1/2 mt-2 bg-white border rounded shadow-lg z-50 min-w-[120px] flex flex-col items-center ${isProfileHovered ? 'block' : 'hidden'}`}
+                    style={{ height: '60px', width: '120px', display: isProfileHovered ? 'block' : 'none' }}
+                    onMouseEnter={() => setIsProfileHovered(true)}
+                    onMouseLeave={() => setIsProfileHovered(false)}
+                  >
+                    <button
+                      className="text-[#3B5B92] font-semibold cursor-pointer hover:text-blue-600 transition px-2 py-1 font-dm-sans border-b last:border-b-0 w-full"
+                      onClick={async () => {
+                        await signOut();
+                        navigate("/");
+                      }}
+                    >
+                      Sign Out
+                    </button>
+                  </div>
+                </div>
 
 
             </div>

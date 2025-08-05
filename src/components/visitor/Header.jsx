@@ -1,6 +1,10 @@
 import React, { useState } from "react";
 import "../../Header.css";
 import { useNavigate, useLocation } from "react-router-dom";
+import { supabase } from "../../supabaseClient";
+
+// Set your actual Supabase project ref here (e.g. abcd1234)
+const SUPABASE_PROJECT_REF = "abcd1234";
 
 const Header = () => {
   const navigate = useNavigate();
@@ -11,6 +15,11 @@ const Header = () => {
   const [isProjectsHovered, setIsProjectsHovered] = useState(false);
   const [isFavoritesHovered, setIsFavoritesHovered] = useState(false);
   const [isCartHovered, setIsCartHovered] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState("");
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   const handleLogin = () => {
     navigate("/signin");
@@ -20,12 +29,54 @@ const Header = () => {
     navigate("/signup");
   };
 
+  // Fetch suggestions as user types
+  React.useEffect(() => {
+    if (searchTerm.trim() === "") {
+      setSearchResults([]);
+      setShowSuggestions(false);
+      return;
+    }
+    let active = true;
+    setSearchLoading(true);
+    setSearchError("");
+    supabase
+      .from("products")
+      .select("*")
+      .ilike("name", `%${searchTerm}%`)
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          setSearchError(error.message);
+          setSearchResults([]);
+        } else {
+          setSearchResults(data);
+          setShowSuggestions(true);
+        }
+        setSearchLoading(false);
+      })
+      .catch(() => {
+        if (!active) return;
+        setSearchError("Unexpected error. Please try again.");
+        setSearchResults([]);
+        setSearchLoading(false);
+      });
+    return () => { active = false; };
+  }, [searchTerm]);
+
+  const handleSearch = (e) => {
+    e.preventDefault();
+    setShowSuggestions(false);
+    if (searchTerm.trim() !== "") {
+      navigate(`/search?q=${encodeURIComponent(searchTerm.trim())}`);
+    }
+  };
+
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   
     const subNavLinks = [
     "Deals",
     "Apparel",
-    "Accessories & Documentation",
+    "Accessories & Decorations",
     "Signage & Posters",
     "Cards & Stickers",
     "Packaging",
@@ -36,11 +87,11 @@ const Header = () => {
   const subNavRoutes = {
     "Deals": "/deals",
     "Apparel": "/apparel",
-    "Accessories & Documentation": "/",
-    "Signage & Posters": "/signage",
-    "Cards & Stickers": "/cards",
+    "Accessories & Decorations": "/accessories-decorations",
+    "Signage & Posters": "/signage-posters",
+    "Cards & Stickers": "/cards-stickers",
     "Packaging": "/packaging",
-    "3D Print Services": "/3d-print"
+    "3D Print Services": "/3d-prints-services"
   };
 
 
@@ -48,14 +99,15 @@ const Header = () => {
   return (
     <div className="fixed w-full bg-cover bg-white z-50">
       {/* Header */}
-      <div className="w-full h-15  bg-white border border-[#171738]">
-        <div className="p-1 phone:grid phone:grid-cols-1 phone:items-center phone:justify-center phone:align-center tablet:grid tablet:justify-center tablet:items-center laptop:flex bigscreen:flex border justify-center items-center  laptop:gap-5">
+      <div className="w-full h-15  bg-white border border-b-[#323344]">
+        <div className="p-1 phone:grid phone:grid-cols-1 phone:items-center phone:justify-center phone:align-center tablet:grid tablet:justify-center tablet:items-center laptop:flex bigscreen:flex justify-center items-center  laptop:gap-5">
           {/* Logo */}
-          <div className="phone:w-full phone:h-10 border tablet:h-15 laptop:h-20 bigscreen:h-20 bigscreen:mr-[0px] flex phone:flex-row phone:items-center phone:justify-between align-start laptop:w-[210px]">
+          <div className="phone:w-full phone:h-10 tablet:h-15 laptop:h-20 bigscreen:h-20 bigscreen:mr-[0px] flex phone:flex-row phone:items-center phone:justify-between align-start laptop:w-[210px]">
             <img
               src="/logo-icon/logo.png"
-              className="object-contain w-[120px] h-[32px] phone:w-[100px] phone:h-[28px] tablet:w-[140px] tablet:h-[40px] laptop:w-[220px] laptop:h-[80px] bigscreen:w-[220px] bigscreen:h-[80px] phone:ml-0"
+              className="object-contain w-[120px] h-[32px] phone:w-[100px] phone:h-[28px] tablet:w-[140px] tablet:h-[40px] laptop:w-[220px] laptop:h-[80px] bigscreen:w-[220px] bigscreen:h-[80px] phone:ml-0 cursor-pointer"
               alt="Logo"
+              onClick={() => navigate("/")}
             />
 
             {/* Auth Buttons for phone only */}
@@ -76,14 +128,16 @@ const Header = () => {
           </div>
 
           {/* Search Bar */}
-          <div className="phone:mt-4  flex justify-center items-center border bigscreen:ml-[20px] laptop:mt-0">
-            <form className="flex items-center mx-auto w-full phone:max-w-md md:max-w-lg lg:max-w-xl laptop:max-w-2xl border ">
+          <div className="phone:mt-4  flex flex-col justify-center items-center bigscreen:ml-[20px] laptop:mt-0">
+            <form className="flex items-center mx-auto w-full phone:max-w-md md:max-w-lg lg:max-w-xl laptop:max-w-2xl" onSubmit={handleSearch}>
               <input
                 type="text"
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
                 placeholder="What would you like to customize today?"
                 className="bg-white text-black caret-black border border-black rounded-l-[5px] rounded-r-none w-[400px] min-w-0 phone:h-[34.56px] tablet:h-[41.48px] laptop:h-[2.7vw] big-laptop:h-[41.48px] px-[19px] py-[19px] focus:outline-none text-xs sm:text-sm md:text-base"
               />
-              <button type="button" className="bg-[#3B5B92] h-[400px] flex items-center justify-center ml-0 rounded-r-md rounded-l-none phone:h-[40px] tablet:h-[41.48px] big-laptop:h-[41.48px]  p-0 min-w-0" style={{ width: '3.5vw', minWidth: '34.56px', maxWidth: '41.48px' }}>
+              <button type="submit" className="bg-[#3B5B92] h-[400px] flex items-center justify-center ml-0 rounded-r-md rounded-l-none phone:h-[40px] tablet:h-[41.48px] big-laptop:h-[41.48px]  p-0 min-w-0" style={{ width: '3.5vw', minWidth: '34.56px', maxWidth: '41.48px' }}>
                 <img 
                   src="/logo-icon/search-icon.svg" 
                   alt="Search" 
@@ -91,10 +145,13 @@ const Header = () => {
                 />
               </button>
             </form>
+            {/* Search Results */}
+            {searchLoading && <div className="mt-2 text-xs text-gray-500"></div>}
+            {searchError && <div className="mt-2 text-xs text-red-500">{searchError}</div>}
           </div>
 
             {/* Header Buttons */}
-            <div className="flex items-center gap-2 laptop:gap-4 justify-center phone:mt-1 laptop:mt-0 border phone:flex-col laptop:flex-row">
+            <div className="flex items-center gap-2 laptop:gap-4 justify-center phone:mt-1 laptop:mt-0 phone:flex-col laptop:flex-row">
               {/* Icon Buttons */}
               <div className="flex items-center gap-2 phone:gap-[45px] laptop:gap-4">
                 <button
@@ -112,7 +169,7 @@ const Header = () => {
                     alt="Projects"
                     className="transition duration-200 w-5 h-5 laptop:w-6 laptop:h-6"
                   />
-                  <span className="hidden semi-bigscreen:inline ml-2">My Projects</span>
+                  <span className="hidden semi-bigscreen:inline ml-2 font-dm-sans">My Projects</span>
                 </button>
 
                 <button
@@ -130,7 +187,7 @@ const Header = () => {
                     alt="Favorites"
                     className="transition duration-200 w-6 h-6 laptop:w-5 laptop:h-5"
                   />
-                  <span className="hidden semi-bigscreen:inline ml-2">Favorites</span>
+                  <span className="hidden semi-bigscreen:inline ml-2 font-dm-sans">Favorites</span>
                 </button>
 
                 <button
@@ -148,7 +205,7 @@ const Header = () => {
                     alt="Cart"
                     className="transition duration-200 w-6 h-6 laptop:w-5 laptop:h-5"
                   />
-                  <span className="hidden semi-bigscreen:inline ml-2">Cart</span>
+                  <span className="hidden semi-bigscreen:inline ml-2 font-dm-sans">Cart</span>
                 </button>
               </div>
               {/* Auth Buttons */}
@@ -203,7 +260,7 @@ const Header = () => {
       </div>
 
       {/* Sub Nav for laptop and up */}
-      <div className="w-full  bg-white border-b phone:hidden laptop:hidden big-laptop:block">
+      <div className="w-full  bg-white border-b phone:hidden laptop:hidden big-laptop:block border border-b-[black]">
         <div className="subheader-home flex flex-nowrap mt-2 justify-center items-center laptop:justify-around p-8 gap-4 ">
           {subNavLinks.map((label) => {
             const isActive = location.pathname === subNavRoutes[label];

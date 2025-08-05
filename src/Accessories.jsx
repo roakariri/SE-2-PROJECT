@@ -1,22 +1,22 @@
 
 import { UserAuth } from "./context/AuthContext";
-import Navigation from "./components/registered/Navigation";
-import HomepageBody from "./components/registered/HomepageBody";
 import Header from "./components/visitor/Header";
+import Navigation from "./components/registered/Navigation";
 import Footer from "./components/visitor/Footer";
-import ErrorBoundary from "./components/ErrorBoundary";
+import AccessoriesCatalog from "./components/visitor/AccesoriesCatalog";
 
 
 
-function Homepage() {
+
+function Accessories() {
   const { session } = UserAuth();
   return (
     <div className="font-dm-sans">
       {session ? <Navigation /> : <Header />}
-      <HomepageBody />
+      <AccessoriesCatalog />
       <Footer />
     </div>
   );
 }
 
-export default Homepage;
+export default Accessories;

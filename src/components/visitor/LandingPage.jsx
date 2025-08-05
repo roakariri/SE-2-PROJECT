@@ -27,7 +27,7 @@ const LandingPage = () => {
  
 
   return (
-    <div className="min-h-screen w-full bg-white phone:pt-[212px] tablet:pt-[160px] laptop:pt-[166px] relative z-0">
+    <div className="min-h-screen w-full bg-white phone:pt-[212px] tablet:pt-[205px] laptop:pt-[166px] relative z-0">
       {/* Hero Banner */}
       <div className="flex flex-col items-center justify-center z-5">
         <img src="/images/hero-banner.png" className="w-full object-cover" />
@@ -94,7 +94,7 @@ const LandingPage = () => {
           {/* Business Cards */}
           <div className="flex flex-col border rounded-[4px] tablet:w-[300px] laptop:w-[350px] tablet:h-[350px] laptop:h-[425px]">
             <img src="/images/business-cards.png" className="w-full h-[80%] border-b border-[#171738] rounded-t-[4px] object-cover" />
-            <div className="text-center text-[#171738] font-dm-sans tablet:text-[24px] laptop:text-[30px] p-5 laptop:h-[30px]">Business Cards</div>
+            <div className="text-center text-[#171738] font-dm-sans tablet:text-[24px] laptop:text-[30px] p-5 laptop:h-[30px] ">Business Cards</div>
           </div>
           {/* Posters */}
           <div className="flex flex-col border rounded-[4px] tablet:w-[300px] laptop:w-[350px] tablet:h-[350px] laptop:h-[425px]">

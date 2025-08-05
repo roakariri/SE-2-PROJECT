@@ -1,22 +1,23 @@
 
 import { UserAuth } from "./context/AuthContext";
-import Navigation from "./components/registered/Navigation";
-import HomepageBody from "./components/registered/HomepageBody";
 import Header from "./components/visitor/Header";
+import Navigation from "./components/registered/Navigation";
 import Footer from "./components/visitor/Footer";
-import ErrorBoundary from "./components/ErrorBoundary";
+import CardsStickerCatalog from "./components/visitor/Cards-Stickers-Catalog";
 
 
 
-function Homepage() {
+
+
+function CardsStickers() {
   const { session } = UserAuth();
   return (
     <div className="font-dm-sans">
       {session ? <Navigation /> : <Header />}
-      <HomepageBody />
+      <CardsStickerCatalog />
       <Footer />
     </div>
   );
 }
 
-export default Homepage;
+export default CardsStickers;

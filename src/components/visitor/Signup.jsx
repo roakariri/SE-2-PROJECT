@@ -6,6 +6,8 @@ import { supabase } from "../../supabaseClient";
 
 
 const Signup = () => {
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const loaderRef = React.useRef();
   const signUpWithGoogle = async () => {
       await supabase.auth.signInWithOAuth({
@@ -59,7 +61,10 @@ const Signup = () => {
       email: email.toLowerCase(),
       password: password,
       options: {
-        redirectTo: window.location.origin + "/Homepage" // <-- Use your production URL here
+        redirectTo: window.location.origin + "/Homepage",
+        data: {
+          display_name: `${firstName} ${lastName}`
+        }
       }
     });
     console.log("Signup result:", { data, error });
@@ -124,16 +129,45 @@ const Signup = () => {
 
 
 
-      <div className="w-full header bg-white">
-        <div className="header">
+      <div className="fixed w-full header bg-white">
+        <div className="header ">
           <img src={"/logo-icon/logo.png"} className="header-logo" alt="Logo" />
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center mt-6 my-6">
+      <div className="flex-1 flex flex-col items-center justify-center mt-[120px] my-6">
         <div className="container flex flex-col justify-center mt-9">
           <form onSubmit={handleSignUp}>
             <h2 className="header-notice">Sign Up</h2>
+            {/* First Name and Last Name fields in one row */}
+            <div className="flex flex-row gap-4 py-2">
+              <div className="flex flex-col w-1/2">
+                <p>First Name</p>
+                <input
+                  onChange={(e) => setFirstName(e.target.value)}
+                  className="p-3 mt-2 text-black bg-white border border-gray-500 rounded"
+                  type="text"
+                  name="firstName"
+                  id="firstName"
+                  placeholder="First Name"
+                  value={firstName}
+                  required
+                />
+              </div>
+              <div className="flex flex-col w-1/2">
+                <p>Last Name</p>
+                <input
+                  onChange={(e) => setLastName(e.target.value)}
+                  className="p-3 mt-2 text-black bg-white border border-gray-500 rounded"
+                  type="text"
+                  name="lastName"
+                  id="lastName"
+                  placeholder="Last Name"
+                  value={lastName}
+                  required
+                />
+              </div>
+            </div>
             <div className="flex flex-col py-4">
               <p>Email address</p>
               <input
