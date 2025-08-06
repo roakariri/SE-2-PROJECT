@@ -61,7 +61,7 @@ const Signup = () => {
       email: email.toLowerCase(),
       password: password,
       options: {
-        redirectTo: window.location.origin + "/Homepage",
+        redirectTo: window.location.origin + "/signin",
         data: {
           display_name: `${firstName} ${lastName}`
         }
@@ -82,7 +82,7 @@ const Signup = () => {
       return;
     }
 
-    // ✨ NEW: Check for duplicate email via identities array
+    // Check for duplicate email in the supabase auth namin
     if (data?.user?.identities?.length === 0) {
       setError("This email is already registered. Please log in or use Google sign-in.");
       setConfirmationMessage("");
@@ -90,7 +90,7 @@ const Signup = () => {
       return;
     }
 
-    // Proceed with success messaging for actual new signup
+    // if not duplicate then proceed dito
     else if (
       !error &&
       data &&
@@ -110,7 +110,6 @@ const Signup = () => {
       }
     }
 
-    // Fallback
     else {
       setError("Signup failed. Please try again or use another email.");
       setConfirmationMessage("");
@@ -139,7 +138,8 @@ const Signup = () => {
         <div className="container flex flex-col justify-center mt-9">
           <form onSubmit={handleSignUp}>
             <h2 className="header-notice">Sign Up</h2>
-            {/* First Name and Last Name fields in one row */}
+            
+            {/* First Name and Last Name */}
             <div className="flex flex-row gap-4 py-2">
               <div className="flex flex-col w-1/2">
                 <p>First Name</p>
@@ -168,6 +168,8 @@ const Signup = () => {
                 />
               </div>
             </div>
+
+            {/* Email input */}
             <div className="flex flex-col py-4">
               <p>Email address</p>
               <input
@@ -179,6 +181,8 @@ const Signup = () => {
                 placeholder="Email"
               />
             </div>
+
+            {/* Create Password */}
             <div className="flex flex-col">
               <p>Create Password</p>
               <div className="relative">
@@ -203,6 +207,10 @@ const Signup = () => {
                 </button>
               </div>
             </div>
+
+            
+            
+            {/* CONFIRM Create Pasword */}
             <div className="flex flex-col py-5">
               <p>Confirm Password</p>
               <div className="relative">

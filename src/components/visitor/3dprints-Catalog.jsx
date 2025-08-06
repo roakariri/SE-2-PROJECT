@@ -16,13 +16,14 @@ const ThreeDPrintsCatalog = () => {
          }, []);
        
          useEffect(() => {
-           // Only run fetchProductTypes after products are loaded
+           // Fetch types
            if (products.length > 0) {
              fetchProductTypes();
            }
          }, [products]);
        
          useEffect(() => {
+           // Filter types
            filterByProductTypeOnly();
          }, [products, productTypeFilter, selectAll]);
        
@@ -34,7 +35,7 @@ const ThreeDPrintsCatalog = () => {
            if (error) {
              console.error("Error fetching products:", error);
            } else {
-             // Only show products whose type's category is '3D Print Services'
+             // Show products
              const threeDPrintProducts = data.filter(product =>
                product.product_types?.product_categories?.name === '3D Print Services'
              );
@@ -44,7 +45,7 @@ const ThreeDPrintsCatalog = () => {
          };
        
          const fetchProductTypes = async () => {
-           // Only show product types present in 3D Print Services products
+           // Show types
            const typesInThreeDPrints = new Set();
            products.forEach(product => {
              if (product.product_types?.id && product.product_types?.name) {
@@ -56,6 +57,7 @@ const ThreeDPrintsCatalog = () => {
          };
        
          const handleProductTypeChange = (event, typeId) => {
+           // Type change
            const { checked } = event.target;
            setSelectAll(false);
            setProductTypeFilter(prev =>
@@ -64,16 +66,19 @@ const ThreeDPrintsCatalog = () => {
          };
        
          const handleSelectAllChange = () => {
+           // Select all
            setSelectAll(prev => !prev);
            setProductTypeFilter([]);
          };
        
          const handlePriceChange = (event) => {
+           // Price change
            const { name, value } = event.target;
            setPriceRange(prev => ({ ...prev, [name]: value }));
          };
        
          const filterByProductTypeOnly = () => {
+           // Filter only
            let temp = [...products];
            if (!selectAll && productTypeFilter.length > 0) {
              temp = temp.filter(product =>
@@ -81,10 +86,11 @@ const ThreeDPrintsCatalog = () => {
              );
            }
            setFilteredProducts(temp);
-           setSortOption("relevance"); // Reset sort on filter change
+           setSortOption("relevance"); 
          };
        
          const applyFilters = () => {
+           // Apply filters
            let temp = [...products];
        
            if (!selectAll && productTypeFilter.length > 0) {
@@ -102,10 +108,11 @@ const ThreeDPrintsCatalog = () => {
            }
        
            setFilteredProducts(temp);
-           setSortOption("relevance"); // Reset sort when applying price filter
+           setSortOption("relevance"); 
          };
        
          const handleSortChange = (e) => {
+           // Sort change
            const sortValue = e.target.value;
            setSortOption(sortValue);
            let sorted = [...filteredProducts];
@@ -123,7 +130,8 @@ const ThreeDPrintsCatalog = () => {
            setFilteredProducts(sorted);
          };
        
-         // Hamburger menu state for mobile filter drawer
+         // Hamburger menu
+         // Menu state
          const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
        
          return (
@@ -151,7 +159,7 @@ const ThreeDPrintsCatalog = () => {
                  </button>
                </div>
        
-                 {/* Filters Section - drawer on mobile only, not rendered unless open */}
+                 {/* Filters Section - drawer on mobile only*/}
                  {filterDrawerOpen && (
                    <div className="fixed top-0 pt-[250px] left-0 w-full h-full overflow-auto z-50 bg-white border border-gray-800 rounded-md p-6" style={{ boxShadow: '0 0 0 9999px rgba(0,0,0,0.3)' }}>
                      <div className="flex justify-between items-center mb-4">
@@ -247,7 +255,7 @@ const ThreeDPrintsCatalog = () => {
                    </div>
                  )}
        
-                 {/* Filters Section - visible on tablet/laptop only */}
+                 {/* Filters Section - visible on tablet & laptop only */}
                  <div className="hidden tablet:block laptop:block w-full tablet:w-[280px] tablet:min-w-[220px] tablet:max-w-[320px] border border-gray-800 rounded-md p-6 h-fit mb-8 tablet:mb-0">
                    <h2 className="text-xl font-bold mb-4 text-black">Product Type</h2>
                    <div className="space-y-2">

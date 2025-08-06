@@ -79,16 +79,27 @@ const SearchPage = () => {
       const searchResults = data.filter(product => {
         const name = product.name?.toLowerCase() || "";
         const desc = product.description?.toLowerCase() || "";
-        // Direct includes
+        // For short search terms (<=3 chars), only allow direct substring matches
+        if (term.length <= 3) {
+          return (
+            name.includes(term) ||
+            name.includes(altTerm) ||
+            desc.includes(term) ||
+            desc.includes(altTerm)
+          );
+        }
+        // For longer terms, allow fuzzy matching
         if (
           name.includes(term) ||
           name.includes(altTerm) ||
           desc.includes(term) ||
           desc.includes(altTerm)
         ) return true;
-        // Fuzzy match any word in name/desc
         const words = (name + " " + desc).split(/\s+/);
-        return words.some(word => levenshtein(word, term) <= threshold || levenshtein(word, altTerm) <= threshold);
+        return words.some(word => {
+          if (word.length <= 2) return false;
+          return (levenshtein(word, term) <= threshold || levenshtein(word, altTerm) <= threshold);
+        });
       });
       setProducts(searchResults);
       setFilteredProducts(searchResults);
@@ -237,7 +248,7 @@ const SearchPage = () => {
                   name="min"
                   value={priceRange.min}
                   onChange={handlePriceChange}
-                  className="w-full border border-gray-400 rounded p-2 font-dm-sans"
+                  className="w-full border bg-white border-gray-400 rounded p-2 font-dm-sans"
                 />
                 <span className="text-black font-dm-sans">to</span>
                 <input
@@ -245,7 +256,7 @@ const SearchPage = () => {
                   name="max"
                   value={priceRange.max}
                   onChange={handlePriceChange}
-                  className="w-full border border-gray-400 rounded p-2 font-dm-sans"
+                  className="w-full border border-gray-400 bg-white rounded p-2 font-dm-sans"
                 />
               </div>
               <button

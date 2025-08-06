@@ -123,7 +123,7 @@ const AccessoriesCatalog = () => {
       setFilteredProducts(sorted);
     };
   
-    // Hamburger menu state for mobile filter drawer
+    // Hamburger menu state for mobile 
     const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
   
     return (

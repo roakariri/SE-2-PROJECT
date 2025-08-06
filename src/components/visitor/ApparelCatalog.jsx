@@ -81,7 +81,7 @@ const ApparelCatalog = () => {
       );
     }
     setFilteredProducts(temp);
-    setSortOption("relevance"); // Reset sort on filter change
+    setSortOption("relevance"); 
   };
 
   const applyFilters = () => {

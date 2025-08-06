@@ -7,7 +7,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 const LandingPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  // Show loader on mount and on browser navigation (back/forward/forward)
+
   React.useLayoutEffect(() => {
     setLoading(true);
     gsap.set(".gsap-loader", { opacity: 1, display: "flex" });

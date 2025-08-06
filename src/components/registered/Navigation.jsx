@@ -6,17 +6,36 @@ import { supabase } from "../../supabaseClient";
 const SUPABASE_PROJECT_REF = "abcd1234";
 
 const Navigation = () => {
+
+  const dropdownHideTimer = React.useRef(null);
+ 
+  const showProfileDropdown = () => {
+    if (dropdownHideTimer.current) {
+      clearTimeout(dropdownHideTimer.current);
+      dropdownHideTimer.current = null;
+    }
+    setIsProfileHovered(true);
+  };
+
+  const hideProfileDropdown = () => {
+    if (dropdownHideTimer.current) {
+      clearTimeout(dropdownHideTimer.current);
+    }
+    dropdownHideTimer.current = setTimeout(() => {
+      setIsProfileHovered(false);
+    }, 120); 
+  };
   const navigate = useNavigate();
   const location = useLocation();
-  const { signOut } = UserAuth();
+  const { session, signOut } = UserAuth();
 
-  // Hover states
+ 
   const [isProjectsHovered, setIsProjectsHovered] = useState(false);
   const [isFavoritesHovered, setIsFavoritesHovered] = useState(false);
   const [isCartHovered, setIsCartHovered] = useState(false);
   const [isProfileHovered, setIsProfileHovered] = useState(false);
 
-  // Search bar states and logic
+  // Logic ng search bar 
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -76,7 +95,6 @@ const Navigation = () => {
       "3D Print Services"
     ];
   
-    // Map subNavLinks to their corresponding route paths
     const subNavRoutes = {
       "Deals": "/deals",
       "Apparel": "/apparel",
@@ -128,7 +146,7 @@ const Navigation = () => {
             {/* Header Buttons */}
             <div className="flex items-center gap-2 phone:gap-[45px] laptop:gap-4 justify-center phone:mt-1 laptop:mt-0">
                 <button
-                className="project-btn flex items-center font-bold text-base laptop:text-base font-dm-sans"
+                className="flex items-center font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]"
                 onClick={() => navigate("/shopping")}
                 onMouseEnter={() => setIsProjectsHovered(true)}
                 onMouseLeave={() => setIsProjectsHovered(false)}
@@ -146,7 +164,7 @@ const Navigation = () => {
                 </button>
 
                 <button
-                className="project-btn flex items-center font-bold text-base laptop:text-base font-dm-sans"
+                className="flex items-center font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]"
                 onClick={() => navigate("/shopping")}
                 onMouseEnter={() => setIsFavoritesHovered(true)}
                 onMouseLeave={() => setIsFavoritesHovered(false)}
@@ -164,7 +182,7 @@ const Navigation = () => {
                 </button>
 
                 <button
-                className="project-btn flex items-center font-bold text-base laptop:text-base font-dm-sans"
+                className="flex items-center font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]"
                 onClick={() => navigate("/shopping")}
                 onMouseEnter={() => setIsCartHovered(true)}
                 onMouseLeave={() => setIsCartHovered(false)}
@@ -183,38 +201,57 @@ const Navigation = () => {
 
                 <div
                   className="relative flex flex-col items-center"
-                  onMouseEnter={() => setIsProfileHovered(true)}
-                  onMouseLeave={() => setIsProfileHovered(false)}
                 >
                   <button
-                    className="project-btn flex items-center font-bold text-base laptop:text-base font-dm-sans"
+                    className="flex items-center font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]"
                     onClick={() => navigate("/profile")}
+                    onMouseEnter={showProfileDropdown}
+                    onMouseLeave={hideProfileDropdown}
                   >
                     <img
                       src={
                         isProfileHovered
-                          ? "/logo-icon/profile-icon-hovered.svg"
+                          ? "/logo-icon/hovered-profile-icon.svg"
                           : "/logo-icon/profile-icon.svg"
                       }
                       alt="Profile"
                       className="transition duration-200 w-6 h-6 laptop:w-5 laptop:h-5"
                     />
-                    <span className="hidden semi-bigscreen:inline ml-2 font-dm-sans">Profile</span>
+                    <span className={`hidden semi-bigscreen:inline ml-2 font-dm-sans ${isProfileHovered ? 'text-[#c4c4c4]' : ''}`}>Profile</span>
                   </button>
                   <div
-                    className={`absolute top-full left-1/2 transform -translate-x-1/2 mt-2 bg-white border rounded shadow-lg z-50 min-w-[120px] flex flex-col items-center ${isProfileHovered ? 'block' : 'hidden'}`}
-                    style={{ height: '60px', width: '120px', display: isProfileHovered ? 'block' : 'none' }}
-                    onMouseEnter={() => setIsProfileHovered(true)}
-                    onMouseLeave={() => setIsProfileHovered(false)}
+                    className={`absolute top-full left-1/2 p-0 transform -translate-x-1/2 mt-2 bg-white border rounded shadow-lg z-50 min-w-[355px] flex flex-col items-start ${isProfileHovered ? 'block' : 'hidden'}`}
+                    style={{ minWidth: '355px', display: isProfileHovered ? 'block' : 'none' }}
+                    onMouseEnter={showProfileDropdown}
+                    onMouseLeave={hideProfileDropdown}
                   >
+                    {/* Profile Header */}
+                    <div className="flex items-center gap-4 px-6 pt-6 pb-2 w-full">
+                      <img src="/logo-icon/profile-icon.svg" alt="User Avatar" className="w-14 h-14 rounded-full object-cover" />
+                      <div className="flex flex-col">
+                        <span className="font-bold text-lg text-[#171738]">{session?.user?.user_metadata?.display_name || session?.user?.user_metadata?.full_name || 'User'}</span>
+                        <span className="text-[#171738] text-base">{session?.user?.email || ''}</span>
+                      </div>
+                    </div>
+                    <div className="w-full border-t border-gray-200 my-2"></div>
+                    {/* Menu Items */}
+                    <button className="text-[#171738] bg-white font-semibold text-left px-6 py-2 w-full hover:text-[#c4c4c4] font-dm-sans">View Profile</button>
+                    <div className="w-full border-t border-gray-200 my-2"></div>
+                    <button className="text-[#171738] bg-white font-bold text-left px-6 py-2 w-full hover:text-[#c4c4c4] font-dm-sans">My Orders</button>
+                    <button className="text-[#171738] bg-white font-semibold text-left px-6 py-2 w-full hover:text-[#c4c4c4] font-dm-sans">Production Status</button>
+                    <button className="text-[#171738] bg-white font-semibold text-left px-6 py-2 w-full hover:text-[#c4c4c4] font-dm-sans">Track My Order</button>
+                    <div className="w-full border-t border-gray-200 my-2"></div>
+                    <button className="text-[#171738] bg-white font-bold text-left px-6 py-2 w-full hover:text-[#c4c4c4] font-dm-sans">Upload a Design</button>
+                    <button className="text-[#171738] bg-white font-semibold text-left px-6 py-2 w-full hover:text-[#c4c4c4] font-dm-sans">Create New Project</button>
+                    <div className="w-full border-t border-gray-200 my-2"></div>
                     <button
-                      className="text-[#3B5B92] font-semibold cursor-pointer hover:text-blue-600 transition px-2 py-1 font-dm-sans border-b last:border-b-0 w-full"
+                      className="text-[#171738] bg-white font-bold text-left px-6 py-2 w-full hover:text-[#c4c4c4] font-dm-sans"
                       onClick={async () => {
                         await signOut();
                         navigate("/");
                       }}
                     >
-                      Sign Out
+                      Log Out
                     </button>
                   </div>
                 </div>
@@ -224,7 +261,7 @@ const Navigation = () => {
         </div>
       </div>
 
-      {/* Sub Nav Hamburger for phone/tablet */}
+      {/* Sub Nav Hamburger for phone & tablet */}
       <div className="w-full bg-white border-b big-laptop:hidden">
         <div className="flex items-center justify-between px-5 py-2">
           <span className="font-bold text-base text-[#3B5B92] ">Menu</span>
@@ -248,8 +285,7 @@ const Navigation = () => {
           </div>
         )}
       </div>
-
-      {/* Sub Nav for laptop and up */}
+      
       {/* Sub Nav for laptop and up */}
       <div className="w-full  bg-white border-b phone:hidden laptop:hidden big-laptop:block">
         <div className="subheader-home flex flex-nowrap mt-2 justify-center items-center laptop:justify-around p-8 gap-4 ">

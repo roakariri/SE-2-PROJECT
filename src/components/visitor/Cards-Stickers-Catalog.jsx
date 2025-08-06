@@ -102,7 +102,7 @@ const CardsStickersCatalog = () => {
          }
      
          setFilteredProducts(temp);
-         setSortOption("relevance"); // Reset sort when applying price filter
+         setSortOption("relevance"); 
        };
      
        const handleSortChange = (e) => {
