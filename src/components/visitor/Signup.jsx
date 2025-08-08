@@ -130,7 +130,7 @@ const Signup = () => {
 
       <div className="fixed w-full header bg-white">
         <div className="header ">
-          <img src={"/logo-icon/logo.png"} className="header-logo" alt="Logo" />
+          <img src={"/logo-icon/logo.png"} className="header-logo cursor-pointer" alt="Logo" onClick={() => navigate("/")}/>
         </div>
       </div>
 

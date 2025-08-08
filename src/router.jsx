@@ -36,8 +36,12 @@ import ThreeDPrints from "./3D-Prints";
 // Importing the Search component
 import Search from "./Search";
 
+// Importing the Account component
+import UserAccount from "./User-Account";
+import PrivateRoute from "./components/PrivateRoute";
 
 
+import Product from "./Product"; // Importing the Product component
 
 export const router = createBrowserRouter([
   // Landing page routes
@@ -46,7 +50,6 @@ export const router = createBrowserRouter([
   { path: "/signin", element: <Signin /> },
   { path: "/forgot-password", element: <ForgotPassword /> },
   { path: "/reset-confirmation", element: <ResetConfirmation /> },
-  { path: "/forgotpassword", element: <ForgotPassword /> },
   { path: "/reset-password", element: <ResetPassword /> },
   { path: "/landingpage", element: <LandingPage /> },
   { path: "/reset-successful", element: <ResetSuccessful /> },
@@ -77,5 +80,11 @@ export const router = createBrowserRouter([
   { path: "/3d-prints-services", element: <ThreeDPrints /> },
 
   //search routes
-  { path: "/search", element: <Search /> }
+  { path: "/search", element: <Search /> },
+
+  // Account routes
+  { path: "/account", element: <PrivateRoute><UserAccount /></PrivateRoute> },
+
+  // Product routes
+  { path: "/product", element: <PrivateRoute><Product /></PrivateRoute> }
 ]);

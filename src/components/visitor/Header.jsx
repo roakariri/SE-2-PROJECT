@@ -105,7 +105,7 @@ const Header = () => {
           <div className="phone:w-full phone:h-10 tablet:h-15 laptop:h-20 bigscreen:h-20 bigscreen:mr-[0px] flex phone:flex-row phone:items-center phone:justify-between align-start laptop:w-[210px]">
             <img
               src="/logo-icon/logo.png"
-              className="object-contain w-[120px] h-[32px] phone:w-[100px] phone:h-[28px] tablet:w-[140px] tablet:h-[40px] laptop:w-[220px] laptop:h-[80px] bigscreen:w-[220px] bigscreen:h-[80px] phone:ml-0 cursor-pointer"
+              className="object-contain w-[120px] h-[32px] phone:w-[100px] phone:h-[28px] tablet:w-[140px] tablet:h-[40px] laptop:w-[220px] laptop:h-[80px] bigscreen:w-[220px] bigscreen:h-[80px] phone:ml-0 cursor-pointer laptop:ml-[0px] biggest:ml-[-300px]"
               alt="Logo"
               onClick={() => navigate("/")}
             />
@@ -151,63 +151,61 @@ const Header = () => {
           </div>
 
             {/* Header Buttons */}
-            <div className="flex items-center gap-2 laptop:gap-4 justify-center phone:mt-1 laptop:mt-0 phone:flex-col laptop:flex-row">
-              {/* Icon Buttons */}
-              <div className="flex items-center gap-2 phone:gap-[45px] laptop:gap-4">
+            <div className="flex items-center  phone:gap-[45px] laptop:gap-1 justify-center phone:mt-1 laptop:mt-0 biggest:mr-[-300px]">
                 <button
-                  className="project-btn flex items-center text-xs laptop:text-xs"
-                  onClick={() => navigate("/shopping")}
-                  onMouseEnter={() => setIsProjectsHovered(true)}
-                  onMouseLeave={() => setIsProjectsHovered(false)}
+                className="flex items-center font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]"
+                onClick={() => navigate("/shopping")}
+                onMouseEnter={() => setIsProjectsHovered(true)}
+                onMouseLeave={() => setIsProjectsHovered(false)}
                 >
-                  <img
-                    src={
-                      isProjectsHovered
-                        ? "/logo-icon/hovered-project-icon.svg"
-                        : "/logo-icon/project-icon.svg"
-                    }
-                    alt="Projects"
-                    className="transition duration-200 w-5 h-5 laptop:w-6 laptop:h-6"
-                  />
-                  <span className="hidden semi-bigscreen:inline ml-2 font-dm-sans">My Projects</span>
+                    <img
+                        src={
+                        isProjectsHovered
+                            ? "/logo-icon/hovered-project-icon.svg"
+                            : "/logo-icon/project-icon.svg"
+                        }
+                        alt="Projects"
+                        className=" transition duration-200 w-5 h-5 laptop:w-5 laptop:h-5"
+                    />
+                <span className="hidden semi-bigscreen:inline ml-2 font-dm-sans">My Projects</span>
                 </button>
 
                 <button
-                  className="project-btn flex items-center text-xs laptop:text-xs"
-                  onClick={() => navigate("/shopping")}
-                  onMouseEnter={() => setIsFavoritesHovered(true)}
-                  onMouseLeave={() => setIsFavoritesHovered(false)}
+                className="flex items-center font-bold font-dm-sans bg-white text-black text-[17px] hover:text-[#c4c4c4]"
+                onClick={() => navigate("/shopping")}
+                onMouseEnter={() => setIsFavoritesHovered(true)}
+                onMouseLeave={() => setIsFavoritesHovered(false)}
                 >
-                  <img
+                <img
                     src={
-                      isFavoritesHovered
+                    isFavoritesHovered
                         ? "/logo-icon/favorites-icon-hovered.svg"
                         : "/logo-icon/favorites-icon.svg"
                     }
                     alt="Favorites"
                     className="transition duration-200 w-6 h-6 laptop:w-5 laptop:h-5"
-                  />
-                  <span className="hidden semi-bigscreen:inline ml-2 font-dm-sans">Favorites</span>
+                />
+                <span className="hidden semi-bigscreen:inline ml-2 font-dm-sans">Favorites</span>
                 </button>
 
                 <button
-                  className="project-btn flex items-center text-xs laptop:text-xs"
-                  onClick={() => navigate("/shopping")}
-                  onMouseEnter={() => setIsCartHovered(true)}
-                  onMouseLeave={() => setIsCartHovered(false)}
+                className="flex items-center font-bold font-dm-sans bg-white text-black text-[18px] hover:text-[#c4c4c4]"
+                onClick={() => navigate("/shopping")}
+                onMouseEnter={() => setIsCartHovered(true)}
+                onMouseLeave={() => setIsCartHovered(false)}
                 >
-                  <img
+                <img
                     src={
-                      isCartHovered
+                    isCartHovered
                         ? "/logo-icon/cart-icon-hovered.svg"
                         : "/logo-icon/cart-icon.svg"
                     }
                     alt="Cart"
-                    className="transition duration-200 w-6 h-6 laptop:w-5 laptop:h-5"
-                  />
-                  <span className="hidden semi-bigscreen:inline ml-2 font-dm-sans">Cart</span>
+                    className=" transition duration-200 w-6 h-6 laptop:w-5 laptop:h-5"
+                />
+                <span className="hidden  semi-bigscreen:inline ml-2 font-dm-sans">Cart</span>
+              
                 </button>
-              </div>
               {/* Auth Buttons */}
               <div className="flex items-center gap-2 phone:hidden laptop:flex">
                 <button

@@ -9,7 +9,7 @@ const PrivateRoute = ({ children }) => {
     return <div>Loading...</div>;
   }
 
-  return <div>{session ? <>{children}</> : <Navigate to="/signup" />}</div>;
+  return <div>{session ? <>{children}</> : <Navigate to="/" />}</div>;
 };
 
 export default PrivateRoute;

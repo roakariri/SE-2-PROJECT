@@ -3,13 +3,17 @@ import { supabase } from "../../supabaseClient";
 import { useNavigate } from "react-router-dom";
 
 const HomePage = () => {
- 
+  const navigate = useNavigate();
+
+
   return (
     
     <div className="min-h-screen w-full bg-white phone:pt-[212px] tablet:pt-[215px] laptop:pt-[166px] relative z-0">
-      {/* Hero Banner */}
+
+     {/* Hero Banner */}
       <div className="flex flex-col items-center justify-center z-5">
-        <img src="/images/hero-banner.png" className="w-full object-cover" />
+        <img src="/images/hero-banner.jpeg" className="w-full object-cover cursor-pointer" onClick={() => navigate('/3d-prints-services')}/>
+
       </div>
 
       {/* New Arrivals */}

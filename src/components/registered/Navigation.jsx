@@ -111,14 +111,16 @@ const Navigation = () => {
       <div className="w-full h-15  bg-white border border-b-[#171738]">
         <div className="p-1 phone:grid phone:grid-cols-1 phone:items-center phone:justify-center phone:align-center tablet:grid tablet:justify-center tablet:items-center laptop:flex bigscreen:flex justify-center items-center  laptop:gap-6">
           {/* Logo */}
-          <div className="phone:w-50 phone:h-10 tablet:h-15 laptop:h-20 bigscreen:h-20 bigscreen:mr-[1px]  ">
-            <img 
-              src="/logo-icon/logo.png" 
-              className="object-contain w-[120px] h-[32px] phone:w-[100px] phone:h-[28px] tablet:w-[140px] tablet:h-[40px] laptop:w-[220px] laptop:h-[80px] bigscreen:w-[220px] bigscreen:h-[80px] mx-auto cursor-pointer" 
-              alt="Logo" 
+          <div className="phone:w-full phone:h-10 tablet:h-15 laptop:h-20 bigscreen:h-20 bigscreen:mr-[0px] flex phone:flex-row phone:items-center phone:justify-between align-start laptop:w-[210px]">
+            <img
+              src="/logo-icon/logo.png"
+              className="object-contain w-[120px] h-[32px] phone:w-[100px] phone:h-[28px] tablet:w-[140px] tablet:h-[40px] laptop:w-[220px] laptop:h-[80px] bigscreen:w-[220px] bigscreen:h-[80px] phone:ml-0 cursor-pointer laptop:ml-[0px] biggest:ml-[-300px]"
+              alt="Logo"
               onClick={() => navigate("/")}
             />
+
           </div>
+        
 
           {/* Search Bar */}
           <div className="phone:mt-4  flex justify-center items-center bigscreen:ml-[100px] laptop:mt-0">
@@ -144,7 +146,7 @@ const Navigation = () => {
           </div>
 
             {/* Header Buttons */}
-            <div className="flex items-center gap-2 phone:gap-[45px] laptop:gap-4 justify-center phone:mt-1 laptop:mt-0">
+            <div className="flex items-center gap-2 phone:gap-[45px] laptop:gap-1 justify-center phone:mt-1 laptop:mt-0 biggest:mr-[-300px]">
                 <button
                 className="flex items-center font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]"
                 onClick={() => navigate("/shopping")}
@@ -158,7 +160,7 @@ const Navigation = () => {
                             : "/logo-icon/project-icon.svg"
                         }
                         alt="Projects"
-                        className=" transition duration-200 w-5 h-5 laptop:w-6 laptop:h-6"
+                        className=" transition duration-200 w-5 h-5 laptop:w-5 laptop:h-5"
                     />
                 <span className="hidden semi-bigscreen:inline ml-2 font-dm-sans">My Projects</span>
                 </button>
@@ -204,7 +206,7 @@ const Navigation = () => {
                 >
                   <button
                     className="flex items-center font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]"
-                    onClick={() => navigate("/profile")}
+                    onClick={() => navigate("/account")}
                     onMouseEnter={showProfileDropdown}
                     onMouseLeave={hideProfileDropdown}
                   >
@@ -235,15 +237,7 @@ const Navigation = () => {
                     </div>
                     <div className="w-full border-t border-gray-200 my-2"></div>
                     {/* Menu Items */}
-                    <button className="text-[#171738] bg-white font-semibold text-left px-6 py-2 w-full hover:text-[#c4c4c4] font-dm-sans">View Profile</button>
-                    <div className="w-full border-t border-gray-200 my-2"></div>
-                    <button className="text-[#171738] bg-white font-bold text-left px-6 py-2 w-full hover:text-[#c4c4c4] font-dm-sans">My Orders</button>
-                    <button className="text-[#171738] bg-white font-semibold text-left px-6 py-2 w-full hover:text-[#c4c4c4] font-dm-sans">Production Status</button>
-                    <button className="text-[#171738] bg-white font-semibold text-left px-6 py-2 w-full hover:text-[#c4c4c4] font-dm-sans">Track My Order</button>
-                    <div className="w-full border-t border-gray-200 my-2"></div>
-                    <button className="text-[#171738] bg-white font-bold text-left px-6 py-2 w-full hover:text-[#c4c4c4] font-dm-sans">Upload a Design</button>
-                    <button className="text-[#171738] bg-white font-semibold text-left px-6 py-2 w-full hover:text-[#c4c4c4] font-dm-sans">Create New Project</button>
-                    <div className="w-full border-t border-gray-200 my-2"></div>
+                    
                     <button
                       className="text-[#171738] bg-white font-bold text-left px-6 py-2 w-full hover:text-[#c4c4c4] font-dm-sans"
                       onClick={async () => {
