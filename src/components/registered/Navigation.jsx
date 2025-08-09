@@ -148,7 +148,7 @@ const Navigation = () => {
             {/* Header Buttons */}
             <div className="flex items-center gap-2 phone:gap-[45px] laptop:gap-1 justify-center phone:mt-1 laptop:mt-0 biggest:mr-[-300px]">
                 <button
-                className="flex items-center font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]"
+                className="flex items-center focus:outline-none focus:ring-0 font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]"
                 onClick={() => navigate("/shopping")}
                 onMouseEnter={() => setIsProjectsHovered(true)}
                 onMouseLeave={() => setIsProjectsHovered(false)}
@@ -166,7 +166,7 @@ const Navigation = () => {
                 </button>
 
                 <button
-                className="flex items-center font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]"
+                className="flex items-center focus:outline-none focus:ring-0 font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]"
                 onClick={() => navigate("/shopping")}
                 onMouseEnter={() => setIsFavoritesHovered(true)}
                 onMouseLeave={() => setIsFavoritesHovered(false)}
@@ -184,7 +184,7 @@ const Navigation = () => {
                 </button>
 
                 <button
-                className="flex items-center font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]"
+                className="flex items-center focus:outline-none focus:ring-0 font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]"
                 onClick={() => navigate("/shopping")}
                 onMouseEnter={() => setIsCartHovered(true)}
                 onMouseLeave={() => setIsCartHovered(false)}
@@ -201,54 +201,23 @@ const Navigation = () => {
                 <span className="hidden  semi-bigscreen:inline ml-2 font-dm-sans">Cart</span>
                 </button>
 
-                <div
-                  className="relative flex flex-col items-center"
+                <button
+                  className="flex items-center font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4] focus:outline-none focus:ring-0"
+                  onClick={() => navigate("/account")}
+                  onMouseEnter={() => setIsProfileHovered(true)}
+                  onMouseLeave={() => setIsProfileHovered(false)}
                 >
-                  <button
-                    className="flex items-center font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]"
-                    onClick={() => navigate("/account")}
-                    onMouseEnter={showProfileDropdown}
-                    onMouseLeave={hideProfileDropdown}
-                  >
-                    <img
-                      src={
-                        isProfileHovered
-                          ? "/logo-icon/hovered-profile-icon.svg"
-                          : "/logo-icon/profile-icon.svg"
-                      }
-                      alt="Profile"
-                      className="transition duration-200 w-6 h-6 laptop:w-5 laptop:h-5"
-                    />
-                    <span className={`hidden semi-bigscreen:inline ml-2 font-dm-sans ${isProfileHovered ? 'text-[#c4c4c4]' : ''}`}>Profile</span>
-                  </button>
-                  <div
-                    className={`absolute top-full left-1/2 p-0 transform -translate-x-1/2 mt-2 bg-white border rounded shadow-lg z-50 min-w-[355px] flex flex-col items-start ${isProfileHovered ? 'block' : 'hidden'}`}
-                    style={{ minWidth: '355px', display: isProfileHovered ? 'block' : 'none' }}
-                    onMouseEnter={showProfileDropdown}
-                    onMouseLeave={hideProfileDropdown}
-                  >
-                    {/* Profile Header */}
-                    <div className="flex items-center gap-4 px-6 pt-6 pb-2 w-full">
-                      <img src="/logo-icon/profile-icon.svg" alt="User Avatar" className="w-14 h-14 rounded-full object-cover" />
-                      <div className="flex flex-col">
-                        <span className="font-bold text-lg text-[#171738]">{session?.user?.user_metadata?.display_name || session?.user?.user_metadata?.full_name || 'User'}</span>
-                        <span className="text-[#171738] text-base">{session?.user?.email || ''}</span>
-                      </div>
-                    </div>
-                    <div className="w-full border-t border-gray-200 my-2"></div>
-                    {/* Menu Items */}
-                    
-                    <button
-                      className="text-[#171738] bg-white font-bold text-left px-6 py-2 w-full hover:text-[#c4c4c4] font-dm-sans"
-                      onClick={async () => {
-                        await signOut();
-                        navigate("/");
-                      }}
-                    >
-                      Log Out
-                    </button>
-                  </div>
-                </div>
+                  <img
+                    src={
+                      isProfileHovered
+                        ? "/logo-icon/hovered-profile-icon.svg"
+                        : "/logo-icon/profile-icon.svg"
+                    }
+                    alt="Profile"
+                    className="transition duration-200 w-6 h-6 laptop:w-5 laptop:h-5"
+                  />
+                  <span className={`hidden semi-bigscreen:inline ml-2 font-dm-sans ${isProfileHovered ? 'text-[#c4c4c4]' : ''}`}>Profile</span>
+                </button>
 
 
             </div>
@@ -260,7 +229,7 @@ const Navigation = () => {
         <div className="flex items-center justify-between px-5 py-2">
           <span className="font-bold text-base text-[#3B5B92] ">Menu</span>
           <button
-            className="focus:outline-none"
+            className="focus:outline-none focus:ring-0"
             onClick={() => setIsMenuOpen((prev) => !prev)}
             aria-label="Toggle subnav menu"
           >
