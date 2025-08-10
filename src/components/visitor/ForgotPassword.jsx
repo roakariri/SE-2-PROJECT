@@ -50,7 +50,7 @@ const ForgotPassword = () => {
             
             <form onSubmit={handleReset}>
                 <div className="flex flex-col py-4">
-                <p className="text-gray-600">Enter your email address or username</p>
+                <p className="text-gray-600">Enter your email address</p>
                 <input
                     onChange={(e) => setEmail(e.target.value)}
                     className="p-3 mt-2 bg-white border border-gray-300 rounded text-black"

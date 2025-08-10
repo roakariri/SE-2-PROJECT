@@ -1,6 +1,7 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
 import { UserAuth } from "../../context/AuthContext";
+import { supabase } from "../../supabaseClient";
 
 const DEFAULT_AVATAR = "/logo-icon/profile-icon.svg";
 
@@ -16,6 +17,22 @@ const AccountPage = () => {
     const [selectedFile, setSelectedFile] = React.useState(null);
     const [successMsg, setSuccessMsg] = React.useState(""); // Success message state
     const [email, setEmail] = React.useState(""); // Editable email state
+    const [currentPassword, setCurrentPassword] = React.useState(""); // Current password state
+    const [newPassword, setNewPassword] = React.useState(""); // New password state
+    const [repeatPassword, setRepeatPassword] = React.useState(""); // Repeat password state
+    const [isCurrentPasswordIncorrect, setIsCurrentPasswordIncorrect] = React.useState(false); // Current password validation state
+    const [passwordSuccessMsg, setPasswordSuccessMsg] = React.useState(""); // Password change success message state
+    const [addressForm, setAddressForm] = React.useState({
+        first_name: "",
+        last_name: "",
+        street: "",
+        province: "",
+        city: "",
+        postal_code: "",
+        phone_number: "",
+        address_type: "home",
+        is_default: false,
+    });
 
     // Fetch user and profile info
     const fetchUserAndProfile = React.useCallback(async () => {
@@ -146,6 +163,79 @@ const AccountPage = () => {
         fetchUserAndProfile();
     };
 
+    const handleSavePasswordChanges = async () => {
+        const { supabase } = await import("../../supabaseClient");
+        const user = session?.user;
+        if (!user) return;
+
+        // Validate current password
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+            email: user.email,
+            password: currentPassword,
+        });
+
+        if (signInError) {
+            setIsCurrentPasswordIncorrect(true);
+            return;
+        } else {
+            setIsCurrentPasswordIncorrect(false);
+        }
+
+        // Validate new password and repeat password match
+        if (newPassword !== repeatPassword) {
+            alert("New password and repeat password do not match.");
+            return;
+        }
+
+        // Update password in Supabase Auth
+        const { error } = await supabase.auth.updateUser({
+            password: newPassword,
+        });
+        if (error) {
+            alert("Error updating password: " + error.message);
+            console.error("Error updating password:", error.message);
+            return;
+        }
+
+        setCurrentPassword("");
+        setNewPassword("");
+        setRepeatPassword("");
+        setPasswordSuccessMsg("Password updated successfully!");
+        setTimeout(() => setPasswordSuccessMsg(""), 3000);
+    };
+
+    const handleAddressChange = (e) => {
+        const { name, value, type, checked } = e.target;
+        setAddressForm((prev) => ({
+            ...prev,
+            [name]: type === "checkbox" ? checked : value,
+        }));
+    };
+
+    const handleAddressSubmit = async (e) => {
+        e.preventDefault();
+        if (!session?.user?.id) return;
+        const { error } = await supabase
+            .from("addresses")
+            .insert({
+                ...addressForm,
+                user_id: session.user.id,
+            });
+        if (!error) {
+            setAddressForm({
+                first_name: "",
+                last_name: "",
+                street: "",
+                province: "",
+                city: "",
+                postal_code: "",
+                phone_number: "",
+                address_type: "home",
+                is_default: false,
+            });
+        }
+    };
+
     return (
         <div className="min-h-screen w-full bg-white phone:pt-[212px] tablet:pt-[215px] laptop:pt-[166px] relative z-0">
             <div className="flex flex-row justify-center gap-[100px]  h-full p-4 px-[100px]">
@@ -236,7 +326,7 @@ const AccountPage = () => {
                         </div>
                         <div className="mt-6">
                             <p className="text-[24px] text-black font-dm-sans">Personal Information</p>
-                            <p className="mt-10">MY INFORMATION</p>
+                            <p className="mt-10 font-dm-sans text-black">MY INFORMATION</p>
                             <div className="flex flex-row gap-10 mt-8 items-start">
                                 {/* Profile Picture Upload */}
                                 <div className="relative flex flex-col items-center">
@@ -275,7 +365,7 @@ const AccountPage = () => {
                                             className="border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white"
                                             value={lastName}
                                             onChange={e => setLastName(e.target.value)}
-                                            placeholder={session?.user?.user_metadata?.display_name?.split(' ')[1] || ""}
+                                            placeholder={session?.user?.user_metadata?.display_name?.split(' ')[2] || "User"}
                                         />
                                     </div>
                                     <div className="flex flex-col col-span-2">
@@ -292,20 +382,247 @@ const AccountPage = () => {
                                 </form>
                             </div>
                             <div className="flex w-full justify-end mt-6">
-                                {successMsg && (
-                                    <div className="text-green-600 font-semibold mb-4">{successMsg}</div>
-                                )}
+
                                 <button
                                     type="button"
                                     className="bg-[#3B5B92] text-white font-bold font-dm-sans px-6 py-2 rounded-md hover:bg-[#2a4370] focus:outline-none focus:ring-0"
                                     onClick={handleSaveChanges}
                                 >
-                                    Save Changes
+                                    {successMsg ? successMsg : "Save Changes"}
                                 </button>
                             </div>
                         </div>
+                        <hr className="my-2 border-black mb-4 mt-5" />
+
+                        {/*Change Password*/}
+                        <div>
+                            <p className="mt-10 font-dm-sans text-black">CHANGE PASSWORD</p>
+                            <form className="mt-7 w-full">
+                                <p className="font-dm-sans">Current Password</p>
+                                <div className="relative">
+                                    <input
+                                        type="password"
+                                        className="w-[49%] border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white"
+                                        value={currentPassword}
+                                        onChange={e => setCurrentPassword(e.target.value)}
+                                        placeholder="Enter your current password"
+                                    />
+                                    {isCurrentPasswordIncorrect && (
+                                        <span className="ml-4 text-red-600">
+                                            Incorrect password!!
+                                        </span>
+                                    )}
+                                </div>
+                            </form>
+
+                            <a href="/forgot-password">Forgot Password?</a>
+
+                            <form className="mt-2 w-full grid grid-cols-2 gap-4">
+                                <div>
+                                    <p className="font-dm-sans">New Password</p>
+                                    <input
+                                        type="password"
+                                        className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white"
+                                        value={newPassword}
+                                        onChange={e => setNewPassword(e.target.value)}
+                                        placeholder="Enter your new password"
+                                    />
+                                </div>
+                                <div>
+                                    <p className="font-dm-sans">Repeat Password</p>
+                                    <input
+                                        type="password"
+                                        className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white"
+                                        value={repeatPassword}
+                                        onChange={e => setRepeatPassword(e.target.value)}
+                                        placeholder="Repeat password"
+                                    />
+                                </div>
+                            </form>
+
+                            <div className="flex justify-end mt-4">
+                                <button
+                                    type="button"
+                                    className="bg-[#3B5B92] text-white font-bold font-dm-sans px-6 py-2 rounded-md hover:bg-[#2a4370] focus:outline-none focus:ring-0"
+                                    onClick={() => {
+                                        if (!isCurrentPasswordIncorrect) {
+                                            handleSavePasswordChanges();
+                                        }
+                                    }}
+                                >
+                                    {passwordSuccessMsg ? passwordSuccessMsg : "Save Changes"}
+                                </button>
+                            </div>
+                        </div>
+
+                        <hr className="my-2 border-black mb-4 mt-5" />
+
+
+                        <div>
+                            {/*Saved Address*/}
+                            <p className="mt-10 text-black font-dm-sans">SAVED ADDRESSES</p>
+                            <div className="grid grid-cols-3 gap-5">
+                                <div className="border p-5 w-[295px] border-black rounded">
+                                    <p>Users</p>
+                                    <p>Philippines  </p>
+
+                                    <div className="flex flex-row w-full">
+                                        <div className="w-full">
+                                            <button className="h-[30px] w-[58] text-[10px] mt-6">
+                                                DEFAULT
+                                            </button>
+                                        </div>
+                                        <div className="flex ml-[15px] flex-row justify-end gap-2">
+                                            <button className="h-[30px] w-[58] text-[8px] mt-6">
+                                                DEFAULT
+                                            </button>
+                                            <button className="h-[30px] w-[58] text-[8px] mt-6">
+                                                DEFAULT
+                                            </button>
+                                        </div>
+
+                                    </div>
+
+                                </div>
+
+
+                                <div className=" ml-[40px] flex flex-col justify-center align-center ">
+                                    <button
+                                        type="button"
+                                        className="border border-black rounded-full w-16 h-16 flex items-center justify-center bg-white hover:bg-[#f0f0f0] shadow-md"
+                                        aria-label="Add Address"
+                                    >
+                                        <img src="/logo-icon/add-icon.svg"></img>
+
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/*Address Editor*/}
+                            <div className="w-full p-2 bg-[#F7F7F7] mt-5 border border-dashed border-[#c5c5c5]">
+                                <p className="mt-5 text-black font-dm-sans">EDIT ADDRESSES</p>
+                                <form onSubmit={handleAddressSubmit} className="w-full">
+                                    {/* All address fields and controls go here, preserving your layout */}
+                                    <div className="grid grid-cols-2 gap-4 mt-2">
+                                        <div>
+                                            <p className="text-[16px] mt-2 font-dm-sans">Name</p>
+                                            <input
+                                                type="text"
+                                                className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white"
+                                                placeholder="Name"
+                                                name="first_name"
+                                                value={addressForm.first_name}
+                                                onChange={handleAddressChange}
+                                            />
+                                        </div>
+                                        <div>
+                                            <p className="text-[16px] mt-2 font-dm-sans">Surname</p>
+                                            <input
+                                                type="text"
+                                                className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white"
+                                                placeholder="Last Name"
+                                                name="last_name"
+                                                value={addressForm.last_name}
+                                                onChange={handleAddressChange}
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="mt-2">
+                                        <p className="text-[16px] mt-2 font-dm-sans">Street Name/Building/House No.</p>
+                                        <input
+                                            type="text"
+                                            className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white mt-2"
+                                            placeholder="Street Name/Building/House No."
+                                            name="street"
+                                            value={addressForm.street}
+                                            onChange={handleAddressChange}
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4 mt-2">
+                                        <div>
+                                            <p className="text-[16px] mt-2 font-dm-sans">Province</p>
+                                            <input
+                                                type="text"
+                                                className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white mt-2"
+                                                placeholder="Province"
+                                                name="province"
+                                                value={addressForm.province}
+                                                onChange={handleAddressChange}
+                                            />
+                                        </div>
+                                        <div>
+                                            <p className="text-[16px] mt-2 font-dm-sans">City</p>
+                                            <input
+                                                type="text"
+                                                className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white mt-2"
+                                                placeholder="City"
+                                                name="city"
+                                                value={addressForm.city}
+                                                onChange={handleAddressChange}
+                                            />
+                                        </div>
+                                        <div>
+                                            <p className="text-[16px] mt-2 font-dm-sans">Postal Code/Zip Code</p>
+                                            <input
+                                                type="text"
+                                                className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white mt-2"
+                                                placeholder="Postal Code/Zip Code"
+                                                name="postal_code"
+                                                value={addressForm.postal_code}
+                                                onChange={handleAddressChange}
+                                            />
+                                        </div>
+                                        <div>
+                                            <p className="text-[16px] mt-2 font-dm-sans">Phone Number</p>
+                                            <input
+                                                type="text"
+                                                className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white mt-2"
+                                                placeholder="Phone Number"
+                                                name="phone_number"
+                                                value={addressForm.phone_number}
+                                                onChange={handleAddressChange}
+                                            />
+                                        </div>
+                                    </div>
+                                    <p className="text-[16px] mt-4 font-dm-sans">Label As</p>
+                                    <div className="flex justify-start mt-2 gap-4">
+                                        <button type="button" className="w-[202px] h-[40px] bg-white text-black border border-black"
+                                            onClick={() => setAddressForm(f => ({ ...f, address_type: 'work' }))}
+                                            style={{ backgroundColor: addressForm.address_type === 'work' ? '#3B5B92' : 'white', color: addressForm.address_type === 'work' ? 'white' : 'black' }}
+                                        >Work</button>
+                                        <button type="button" className="w-[202px] h-[40px] bg-white text-black border border-black"
+                                            onClick={() => setAddressForm(f => ({ ...f, address_type: 'home' }))}
+                                            style={{ backgroundColor: addressForm.address_type === 'home' ? '#3B5B92' : 'white', color: addressForm.address_type === 'home' ? 'white' : 'black' }}
+                                        >Home</button>
+                                    </div>
+                                    <div className="flex justify-end mt-2">
+                                        <label className="flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                className="form-checkbox h-5 w-5 text-[#3B5B92]"
+                                                name="is_default"
+                                                checked={addressForm.is_default}
+                                                onChange={handleAddressChange}
+                                            />
+                                            <span className="text-black font-dm-sans">Set as default address</span>
+                                        </label>
+                                    </div>
+                                    <div className="flex justify-end mt-6">
+                                        <button
+                                            type="button"
+                                            className="bg-[#3B5B92] text-white font-bold font-dm-sans px-6 py-2 rounded-md hover:bg-[#2a4370] focus:outline-none focus:ring-0"
+                                            onClick={handleAddressSubmit}
+                                        >
+                                            Save Changes
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
                     </div>
+
                 )}
+
 
             </div>
         </div>
