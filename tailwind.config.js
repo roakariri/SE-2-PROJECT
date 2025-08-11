@@ -9,6 +9,7 @@ export default {
       'laptop': '1024px',
       'big-laptop': '1182px',
       'biggest' : '1645px',
+        'semi-biggest': '1440px',
       'semi-bigscreen': '1237px',
       'bigscreen': '1280px',
     },
