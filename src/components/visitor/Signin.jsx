@@ -154,7 +154,7 @@ const Signin = () => {
       </div>
 
       <div className="flex-1 flex flex-col items-center justify-center mt-[100px] my-6">
-        <div className="container flex flex-col  justify-center mt-9">
+        <div className="bg-white laptop:w-[40%] phone:h-[100%] p-[50px] phone:w-[100%] flex flex-col  justify-center mt-9">
           <h2 className="header-notice">Login</h2>
           
           <form onSubmit={handleSignIn}>
@@ -193,7 +193,7 @@ const Signin = () => {
               </div>
               <div className="pt-2 text-right ">
                 <p>
-                  <a href="/forgotpassword" className="text-blue-600 underline text-sm ">Forgot your Password?</a>
+                  <a href="/forgot-password" className="text-blue-600 underline text-sm ">Forgot your Password?</a>
                 </p>
               </div>
             </div>

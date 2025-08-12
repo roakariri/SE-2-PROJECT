@@ -10,7 +10,9 @@ const PackagingCatalog = () => {
          const [priceRange, setPriceRange] = useState({ min: '', max: '' });
          const [selectAll, setSelectAll] = useState(false);
          const [sortOption, setSortOption] = useState("relevance");
-       
+         const [session, setSession] = useState(null);
+         const navigate = useNavigate();
+
          useEffect(() => {
            fetchProducts();
          }, []);
@@ -26,6 +28,22 @@ const PackagingCatalog = () => {
            filterByProductTypeOnly();
          }, [products, productTypeFilter, selectAll]);
        
+         useEffect(() => {
+           // Get current session
+           supabase.auth.getSession().then(({ data: { session } }) => {
+             setSession(session);
+           });
+           // Listen for auth changes
+           const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+             setSession(newSession);
+           });
+           return () => {
+             if (listener && typeof listener.subscription?.unsubscribe === 'function') {
+               listener.subscription.unsubscribe();
+             }
+           };
+         }, []);
+
          const fetchProducts = async () => {
            const { data, error } = await supabase
              .from("products")
@@ -342,8 +360,9 @@ const PackagingCatalog = () => {
                                  : "/apparel-images/caps.png"
                              }
                              alt={product.name}
-                             className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-125"
+                             className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-125 cursor-pointer"
                              onError={e => { e.target.src = "/apparel-images/caps.png"; }}
+                             onClick={() => session ? navigate('/product', { state: { product } }) : navigate('/signin')}
                            />
                            <button className="absolute bottom-3 right-5 bg-white p-1.5 rounded-full shadow-md">
                              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -351,7 +370,12 @@ const PackagingCatalog = () => {
                              </svg>
                            </button>
                          </div>
-                         <h3 className="font-semibold mt-2 text-black text-center tablet:text-center semibig:text-center laptop:text-center">{product.name}</h3>
+                           <h3
+                               className="font-semibold mt-2 text-black text-center tablet:text-center semibig:text-center laptop:text-center cursor-pointer"
+                               onClick={() => session ? navigate('/product', { state: { product } }) : navigate('/signin')}
+                           >
+                               {product.name}
+                           </h3>
                          <p className="text-gray-500">from ₱{product.starting_price.toFixed(2)}</p>
                        </div>
                      ))}

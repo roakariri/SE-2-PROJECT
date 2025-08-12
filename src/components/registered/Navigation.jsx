@@ -105,6 +105,37 @@ const Navigation = () => {
       "3D Print Services": "/3d-prints-services"
     };
 
+  // Profile photo logic
+  const DEFAULT_AVATAR = "/logo-icon/profile-icon.svg";
+  const [profilePhotoUrl, setProfilePhotoUrl] = useState(DEFAULT_AVATAR);
+  React.useEffect(() => {
+    async function fetchProfilePhoto() {
+      if (!session?.user?.id) {
+        setProfilePhotoUrl(DEFAULT_AVATAR);
+        return;
+      }
+      // Use authenticated request, RLS will allow only own row
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('avatar_url')
+        .eq('user_id', session.user.id)
+        .single();
+      if (error || !data || !data.avatar_url) {
+        setProfilePhotoUrl(DEFAULT_AVATAR);
+      } else {
+        // avatar_url should be the file path in storage, e.g. 'user-id-timestamp.png'
+        // Check if avatar_url is a full URL or just a file path
+        let publicUrl = data.avatar_url;
+        if (!publicUrl.startsWith('http')) {
+          const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(data.avatar_url);
+          publicUrl = urlData?.publicUrl || DEFAULT_AVATAR;
+        }
+        setProfilePhotoUrl(publicUrl);
+      }
+    }
+    fetchProfilePhoto();
+  }, [session]);
+
   return (
     <div className="fixed w-full bg-cover bg-white z-50 ">
       {/* Header */}
@@ -149,7 +180,7 @@ const Navigation = () => {
             <div className="flex items-center gap-2 phone:gap-[45px] laptop:gap-1 justify-center phone:mt-1 laptop:mt-0 biggest:mr-[-300px]">
                 <button
                 className="flex items-center focus:outline-none focus:ring-0 font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]"
-                onClick={() => navigate("/shopping")}
+                onClick={() => navigate("/projects")}
                 onMouseEnter={() => setIsProjectsHovered(true)}
                 onMouseLeave={() => setIsProjectsHovered(false)}
                 >
@@ -167,7 +198,7 @@ const Navigation = () => {
 
                 <button
                 className="flex items-center focus:outline-none focus:ring-0 font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]"
-                onClick={() => navigate("/shopping")}
+                onClick={() => navigate("/favorites")}
                 onMouseEnter={() => setIsFavoritesHovered(true)}
                 onMouseLeave={() => setIsFavoritesHovered(false)}
                 >
@@ -185,7 +216,7 @@ const Navigation = () => {
 
                 <button
                 className="flex items-center focus:outline-none focus:ring-0 font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]"
-                onClick={() => navigate("/shopping")}
+                onClick={() => navigate("/cart")}
                 onMouseEnter={() => setIsCartHovered(true)}
                 onMouseLeave={() => setIsCartHovered(false)}
                 >
@@ -201,23 +232,17 @@ const Navigation = () => {
                 <span className="hidden  semi-bigscreen:inline ml-2 font-dm-sans">Cart</span>
                 </button>
 
-                <button
-                  className="flex items-center font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4] focus:outline-none focus:ring-0"
-                  onClick={() => navigate("/account")}
-                  onMouseEnter={() => setIsProfileHovered(true)}
-                  onMouseLeave={() => setIsProfileHovered(false)}
-                >
+                <a href="/account" className="flex items-center semi-bigscreen:ml-2 focus:outline-none focus:ring-0 font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]">
                   <img
-                    src={
-                      isProfileHovered
-                        ? "/logo-icon/hovered-profile-icon.svg"
-                        : "/logo-icon/profile-icon.svg"
-                    }
+                    src={profilePhotoUrl || DEFAULT_AVATAR}
                     alt="Profile"
-                    className="transition duration-200 w-6 h-6 laptop:w-5 laptop:h-5"
+                    className="w-10 h-10 rounded-full object-cover bg-gray-300"
+                    onError={e => { e.target.onerror = null; e.target.src = DEFAULT_AVATAR; }}
                   />
-                  <span className={`hidden semi-bigscreen:inline ml-2 font-dm-sans ${isProfileHovered ? 'text-[#c4c4c4]' : ''}`}>Profile</span>
-                </button>
+                  <span className="hidden semi-bigscreen:inline ml-2 text-black font-dm-sans text-[16px] hover:text-[#c4c4c4]">
+                    {(session?.user?.user_metadata?.display_name || session?.user?.user_metadata?.full_name || session?.user?.email || "User").split(" ")[0]}
+                  </span>
+                </a>
 
 
             </div>

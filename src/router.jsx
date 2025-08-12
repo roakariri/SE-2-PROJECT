@@ -43,6 +43,19 @@ import PrivateRoute from "./components/PrivateRoute";
 
 import Product from "./Product"; // Importing the Product component
 
+// Importing the Favorites component
+import Favorites from "./Favorites";
+
+//Importing the Cart Component
+import Cart from "./Cart";
+
+//importing the Projects Component
+import Projects from "./Projects";
+
+// Importing the Deals Component
+import Deals from "./Deals";
+
+
 export const router = createBrowserRouter([
   // Landing page routes
   { path: "/", element: <Landing /> },
@@ -86,5 +99,17 @@ export const router = createBrowserRouter([
   { path: "/account", element: <PrivateRoute><UserAccount /></PrivateRoute> },
 
   // Product routes
-  { path: "/product", element: <PrivateRoute><Product /></PrivateRoute> }
+  { path: "/product", element: <PrivateRoute><Product /></PrivateRoute> },
+
+  //Favorites routes
+    {path: "/favorites", element: <PrivateRoute><Favorites /></PrivateRoute>},
+
+  //Cart Routes
+    {path: "/cart", element: <PrivateRoute><Cart /></PrivateRoute>},
+
+    //Projects Routes
+  {path: "/projects", element: <PrivateRoute><Projects /></PrivateRoute>},
+
+   //Deals Routes
+    {path: "/deals", element: <Deals />}
 ]);

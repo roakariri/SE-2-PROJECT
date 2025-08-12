@@ -18,7 +18,14 @@ export default {
       fontFamily: {
         'dm-sans': ['DM Sans', 'sans-serif'],
       },
+
+        textShadow: {
+            glow: '0 0 5px #fff, 0 0 5px #ffd700, 0 0 5px #ffd700',
+        },
     },
   },
-  plugins: [],
+  plugins: [
+
+      require('tailwindcss-textshadow'),
+  ],
 };

@@ -154,7 +154,7 @@ const Header = () => {
             <div className="flex items-center  phone:gap-[45px] laptop:gap-1 justify-center phone:mt-1 laptop:mt-0 biggest:mr-[-300px]">
                 <button
                 className="flex items-center font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]"
-                onClick={() => navigate("/shopping")}
+                onClick={() => navigate("/signin")}
                 onMouseEnter={() => setIsProjectsHovered(true)}
                 onMouseLeave={() => setIsProjectsHovered(false)}
                 >
@@ -172,7 +172,7 @@ const Header = () => {
 
                 <button
                 className="flex items-center font-bold font-dm-sans bg-white text-black text-[17px] hover:text-[#c4c4c4]"
-                onClick={() => navigate("/shopping")}
+                onClick={() => navigate("/signin")}
                 onMouseEnter={() => setIsFavoritesHovered(true)}
                 onMouseLeave={() => setIsFavoritesHovered(false)}
                 >
@@ -190,7 +190,7 @@ const Header = () => {
 
                 <button
                 className="flex items-center font-bold font-dm-sans bg-white text-black text-[18px] hover:text-[#c4c4c4]"
-                onClick={() => navigate("/shopping")}
+                onClick={() => navigate("/signin")}
                 onMouseEnter={() => setIsCartHovered(true)}
                 onMouseLeave={() => setIsCartHovered(false)}
                 >
