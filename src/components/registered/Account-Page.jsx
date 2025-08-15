@@ -41,6 +41,27 @@ const AccountPage = () => {
         is_default: false,
         address_id: undefined,
     });
+    // Province list
+    const PROVINCES = [
+        "Abra", "Agusan Del Norte", "Agusan Del Sur", "Aklan", "Albay", "Antique", "Apayao", "Aurora", "Basilan", "Bataan", "Batanes", "Batangas", "Benguet", "Biliran", "Bohol", "Bukidnon", "Bulacan", "Cagayan", "Camarines Norte", "Camarines Sur", "Camiguin", "Capiz", "Catanduanes", "Cavite", "Cebu", "Compostela Valley", "Cotabato", "Davao de Oro", "Davao del Norte", "Davao del Sur", "Davao Occidental", "Davao Oriental", "Dinagat Islands", "Eastern Samar", "Guimaras", "Ifugao", "Ilocos Norte", "Ilocos Sur", "Iloilo", "Isabela", "Kalinga", "La Union", "Laguna", "Lanao del Norte", "Lanao del Sur", "Leyte", "Maguindanao", "Marinduque", "Masbate", "Misamis Occidental", "Misamis Oriental", "Mountain Province", "Negros Occidental", "Negros Oriental", "Northern Samar", "Nueva Ecija", "Nueva Vizcaya", "Occidental Mindoro", "Oriental Mindoro", "Palawan", "Pampanga", "Pangasinan", "Quezon", "Quirino", "Rizal", "Romblon", "Samar", "Sarangani", "Siquijor", "Sorsogon", "South Cotabato", "Southern Leyte", "Sultan Kudarat", "Sulu", "Surigao del Norte", "Surigao del Sur", "Tarlac", "Tawi-Tawi", "Zambales", "Zamboanga del Norte", "Zamboanga del Sur", "Zamboanga Sibugay"
+    ];
+    // Typable province dropdown state
+    const [provinceInput, setProvinceInput] = React.useState("");
+    const [showProvinceDropdown, setShowProvinceDropdown] = React.useState(false);
+    const provinceInputRef = React.useRef(null);
+    // Typable city dropdown state
+    const [cityInput, setCityInput] = React.useState("");
+    const [showCityDropdown, setShowCityDropdown] = React.useState(false);
+    const cityInputRef = React.useRef(null);
+    // Show all provinces unless input matches a province exactly (case-insensitive), then show only that province
+    const filteredProvinces = (() => {
+        if (!provinceInput) return PROVINCES;
+        const exactMatch = PROVINCES.find(
+            p => p.toLowerCase() === provinceInput.trim().toLowerCase()
+        );
+        if (exactMatch) return [exactMatch];
+        return PROVINCES;
+    })();
     // Get city options for selected province
     const cityOptions = addressForm.province && PH_CITIES_BY_PROVINCE[addressForm.province]
         ? PH_CITIES_BY_PROVINCE[addressForm.province]
@@ -276,6 +297,7 @@ const AccountPage = () => {
         setAddressErrorMsg("");
         setTimeout(() => setAddressSuccessMsg(""), 3000);
         fetchUserAndProfile();
+        setShowAddressEditor(false);
         setTimeout(() => {
             setAddressForm({
                 first_name: "",
@@ -294,6 +316,7 @@ const AccountPage = () => {
 
     const handleEditAddress = (address) => {
         setAddressForm(address);
+        setProvinceInput(address.province || "");
         setAddressErrorMsg("");
         setShowAddressEditor(true);
     };
@@ -573,23 +596,29 @@ const AccountPage = () => {
                                     {addresses.map((address) => (
                                         <div key={address.address_id} className="border p-5 w-[295px] border-black rounded">
                                             <p className="font-dm-sans font-bold">{address.first_name} {address.last_name}</p>
-                                            <p className="font-dm-sans">{address.street_address}</p>
-                                            <p className="font-dm-sans">{address.city}, {address.province} {address.postal_code}</p>
+                                            <p className="font-dm-sans">{address.street_address},</p>
+                                            <p className="font-dm-sans">{address.city}, {address.province}.</p>
+                                            <p className="font-dm-sans">{address.postal_code}</p>
                                             <p className="font-dm-sans">{address.phone_number}</p>
-                                            <p className="font-dm-sans capitalize">{address.label}</p>
+                                            <p className="font-dm-sans capitalize">{address.label}.</p>
 
-                                            <div className="flex flex-row w-full mt-4 gap-[50px] items-center justify-center">
+                                            <div className="flex flex-row w-full p-1 mt-6 gap-[50px] items-center justify-center">
 
                                                 {address.is_default && (
-                                                    <div className="bg-[#F19B7D] p-1 rounded">
-                                                       <p className="font-dm-sans text-green-600">Default</p>
+                                                    <div className="flex justify-center items-center w-full h-full">
+                                                        <div className="bg-[#F19B7D] p-1 rounded">
+                                                            <p className="font-dm-sans text-black text-[12px]">DEFAULT</p>
+
+                                                       </div>
+                                                       <p> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</p>
                                                     </div>
+                                                   
                                                     
                                                 )}
 
                                                 {!address.is_default && (
                                                     <div className="bg-[#F19B7D] p-1 rounded">
-                                                       <p className="font-dm-sans text-black">Alternative</p>
+                                                       <p className="font-dm-sans text-black text-[12px]">ALTERNATIVE</p>
                                                     </div>
                                                 )}
 
@@ -636,6 +665,7 @@ const AccountPage = () => {
                                                     is_default: false,
                                                     address_id: undefined,
                                                 });
+                                                setProvinceInput("");
                                                 setAddressErrorMsg("");
                                                 setAddressSuccessMsg("");
                                                 setShowAddressEditor(true);
@@ -701,112 +731,117 @@ const AccountPage = () => {
                                         <div className="grid grid-cols-2 gap-4 mt-2">
                                             <div>
                                                 <p className="text-[16px] mt-2 font-dm-sans">Province</p>
-                                                <select
-                                                    className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans mt-2"
-                                                    name="province"
-                                                    value={addressForm.province}
-                                                    onChange={handleAddressChange}
-                                                    style={{ backgroundColor: 'white' }}
-                                                >
-                                                    <option value="">Select Province</option>
-                                                    <option value="Abra">Abra</option>
-                                                    <option value="Agusan del Norte">Agusan del Norte</option>
-                                                    <option value="Agusan del Sur">Agusan del Sur</option>
-                                                    <option value="Aklan">Aklan</option>
-                                                    <option value="Albay">Albay</option>
-                                                    <option value="Antique">Antique</option>
-                                                    <option value="Apayao">Apayao</option>
-                                                    <option value="Aurora">Aurora</option>
-                                                    <option value="Basilan">Basilan</option>
-                                                    <option value="Bataan">Bataan</option>
-                                                    <option value="Batanes">Batanes</option>
-                                                    <option value="Batangas">Batangas</option>
-                                                    <option value="Benguet">Benguet</option>
-                                                    <option value="Biliran">Biliran</option>
-                                                    <option value="Bohol">Bohol</option>
-                                                    <option value="Bukidnon">Bukidnon</option>
-                                                    <option value="Bulacan">Bulacan</option>
-                                                    <option value="Cagayan">Cagayan</option>
-                                                    <option value="Camarines Norte">Camarines Norte</option>
-                                                    <option value="Camarines Sur">Camarines Sur</option>
-                                                    <option value="Camiguin">Camiguin</option>
-                                                    <option value="Capiz">Capiz</option>
-                                                    <option value="Catanduanes">Catanduanes</option>
-                                                    <option value="Cavite">Cavite</option>
-                                                    <option value="Cebu">Cebu</option>
-                                                    <option value="Compostela Valley">Compostela Valley</option>
-                                                    <option value="Cotabato">Cotabato</option>
-                                                    <option value="Davao de Oro">Davao de Oro</option>
-                                                    <option value="Davao del Norte">Davao del Norte</option>
-                                                    <option value="Davao del Sur">Davao del Sur</option>
-                                                    <option value="Davao Occidental">Davao Occidental</option>
-                                                    <option value="Davao Oriental">Davao Oriental</option>
-                                                    <option value="Dinagat Islands">Dinagat Islands</option>
-                                                    <option value="Eastern Samar">Eastern Samar</option>
-                                                    <option value="Guimaras">Guimaras</option>
-                                                    <option value="Ifugao">Ifugao</option>
-                                                    <option value="Ilocos Norte">Ilocos Norte</option>
-                                                    <option value="Ilocos Sur">Ilocos Sur</option>
-                                                    <option value="Iloilo">Iloilo</option>
-                                                    <option value="Isabela">Isabela</option>
-                                                    <option value="Kalinga">Kalinga</option>
-                                                    <option value="La Union">La Union</option>
-                                                    <option value="Laguna">Laguna</option>
-                                                    <option value="Lanao del Norte">Lanao del Norte</option>
-                                                    <option value="Lanao del Sur">Lanao del Sur</option>
-                                                    <option value="Leyte">Leyte</option>
-                                                    <option value="Maguindanao">Maguindanao</option>
-                                                    <option value="Marinduque">Marinduque</option>
-                                                    <option value="Masbate">Masbate</option>
-                                                    <option value="Misamis Occidental">Misamis Occidental</option>
-                                                    <option value="Misamis Oriental">Misamis Oriental</option>
-                                                    <option value="Mountain Province">Mountain Province</option>
-                                                    <option value="Negros Occidental">Negros Occidental</option>
-                                                    <option value="Negros Oriental">Negros Oriental</option>
-                                                    <option value="Northern Samar">Northern Samar</option>
-                                                    <option value="Nueva Ecija">Nueva Ecija</option>
-                                                    <option value="Nueva Vizcaya">Nueva Vizcaya</option>
-                                                    <option value="Occidental Mindoro">Occidental Mindoro</option>
-                                                    <option value="Oriental Mindoro">Oriental Mindoro</option>
-                                                    <option value="Palawan">Palawan</option>
-                                                    <option value="Pampanga">Pampanga</option>
-                                                    <option value="Pangasinan">Pangasinan</option>
-                                                    <option value="Quezon">Quezon</option>
-                                                    <option value="Quirino">Quirino</option>
-                                                    <option value="Rizal">Rizal</option>
-                                                    <option value="Romblon">Romblon</option>
-                                                    <option value="Samar">Samar</option>
-                                                    <option value="Sarangani">Sarangani</option>
-                                                    <option value="Siquijor">Siquijor</option>
-                                                    <option value="Sorsogon">Sorsogon</option>
-                                                    <option value="South Cotabato">South Cotabato</option>
-                                                    <option value="Southern Leyte">Southern Leyte</option>
-                                                    <option value="Sultan Kudarat">Sultan Kudarat</option>
-                                                    <option value="Sulu">Sulu</option>
-                                                    <option value="Surigao del Norte">Surigao del Norte</option>
-                                                    <option value="Surigao del Sur">Surigao del Sur</option>
-                                                    <option value="Tarlac">Tarlac</option>
-                                                    <option value="Tawi-Tawi">Tawi-Tawi</option>
-                                                    <option value="Zambales">Zambales</option>
-                                                    <option value="Zamboanga del Norte">Zamboanga del Norte</option>
-                                                    <option value="Zamboanga del Sur">Zamboanga del Sur</option>
-                                                    <option value="Zamboanga Sibugay">Zamboanga Sibugay</option>
-                                                </select>
+                                                <div className="relative mt-2">
+                                                    <div className="flex items-center">
+                                                        <input
+                                                            type="text"
+                                                            className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white pr-10"
+                                                            placeholder="Select Province"
+                                                            name="province_typable"
+                                                            autoComplete="off"
+                                                            value={provinceInput}
+                                                            ref={provinceInputRef}
+                                                            onFocus={() => setShowProvinceDropdown(true)}
+                                                            onChange={e => {
+                                                                const value = e.target.value;
+                                                                setProvinceInput(value);
+                                                                setShowProvinceDropdown(true);
+                                                                if (value === "") {
+                                                                    setAddressForm(f => ({ ...f, city: "", province: "" }));
+                                                                }
+                                                            }}
+                                                            onBlur={() => setTimeout(() => setShowProvinceDropdown(false), 150)}
+                                                        />
+                                                        <button
+                                                            type="button"
+                                                            className="absolute right-2 top-1/2 bg-white transform -translate-y-1/2 p-1"
+                                                            tabIndex={-1}
+                                                            onMouseDown={e => {
+                                                                e.preventDefault();
+                                                                setShowProvinceDropdown(v => !v);
+                                                                provinceInputRef.current && provinceInputRef.current.focus();
+                                                            }}
+                                                        >
+                                                            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="black"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                                                        </button>
+                                                    </div>
+                                                    {/* Dropdown */}
+                                                    {showProvinceDropdown && filteredProvinces.length > 0 && (
+                                                        <ul className="absolute z-10 w-full bg-white border border-[#3B5B92] rounded-md max-h-48 overflow-y-auto shadow-lg mt-1">
+                                                            {filteredProvinces.map(prov => (
+                                                                <li
+                                                                    key={prov}
+                                                                    className={`px-4 py-2 cursor-pointer hover:bg-[#eaeaea] text-black ${addressForm.province === prov ? 'bg-[#eaeaea]' : ''}`}
+                                                                    style={{ color: 'black', backgroundColor: 'white' }} // <-- Ensures dropdown item background is white
+                                                                    onMouseDown={e => {
+                                                                        e.preventDefault();
+                                                                        setAddressForm(f => ({ ...f, province: prov, city: "" }));
+                                                                        setProvinceInput(prov);
+                                                                        setShowProvinceDropdown(false);
+                                                                    }}
+                                                                >
+                                                                    {prov}
+                                                                </li>
+                                                            ))}
+                                                        </ul>
+                                                    )}
+                                                </div>
                                             </div>
                                             <div>
                                                 <p className="text-[16px] mt-2 font-dm-sans">City</p>
-                                                <select
-                                                    className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white mt-2"
-                                                    name="city"
-                                                    value={addressForm.city}
-                                                    onChange={handleAddressChange}
-                                                    disabled={!addressForm.province}
-                                                >
-                                                    <option value="">{addressForm.province ? "Select City/Municipality" : "Select Province First"}</option>
-                                                    {cityOptions.map(city => (
-                                                        <option key={city} value={city}>{city}</option>
-                                                    ))}
-                                                </select>
+                                                <div className="relative mt-2">
+                                                    <div className="flex items-center">
+                                                        <input
+                                                            type="text"
+                                                            className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white pr-10"
+                                                            placeholder={provinceInput ? (addressForm.province ? "Select City/Municipality" : "Select Province First") : "Select Province First"}
+                                                            name="city_typable"
+                                                            autoComplete="off"
+                                                            value={addressForm.city}
+                                                            ref={cityInputRef}
+                                                            disabled={!provinceInput}
+                                                            onFocus={() => { if (provinceInput) setShowCityDropdown(true); }}
+                                                            onChange={e => {
+                                                                setAddressForm(f => ({ ...f, city: e.target.value }));
+                                                                setShowCityDropdown(true);
+                                                            }}
+                                                            onBlur={() => setTimeout(() => setShowCityDropdown(false), 150)}
+                                                        />
+                                                        <button
+                                                            type="button"
+                                                            className="absolute bg-white right-2 top-1/2 transform -translate-y-1/2 p-1"
+                                                            tabIndex={-1}
+                                                            disabled={!provinceInput}
+                                                            onMouseDown={e => {
+                                                                if (!provinceInput) return;
+                                                                e.preventDefault();
+                                                                setShowCityDropdown(v => !v);
+                                                                cityInputRef.current && cityInputRef.current.focus();
+                                                            }}
+                                                        >
+                                                            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="black"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                                                        </button>
+                                                    </div>
+                                                    {/* Dropdown */}
+                                                    {showCityDropdown && addressForm.province && cityOptions.filter(c => c.toLowerCase().includes((addressForm.city || "").toLowerCase())).length > 0 && (
+                                                        <ul className="absolute z-10 w-full bg-white border border-[#3B5B92] rounded-md max-h-48 overflow-y-auto shadow-lg mt-1">
+                                                            {cityOptions.filter(c => c.toLowerCase().includes((addressForm.city || "").toLowerCase())).map(city => (
+                                                                <li
+                                                                    key={city}
+                                                                    className={`px-4 py-2 cursor-pointer hover:bg-[#eaeaea] text-black ${addressForm.city === city ? 'bg-[#eaeaea]' : ''}`}
+                                                                    style={{ color: 'black' }}
+                                                                    onMouseDown={e => {
+                                                                        e.preventDefault();
+                                                                        setAddressForm(f => ({ ...f, city }));
+                                                                        setShowCityDropdown(false);
+                                                                    }}
+                                                                >
+                                                                    {city}
+                                                                </li>
+                                                            ))}
+                                                        </ul>
+                                                    )}
+                                                </div>
                                             </div>
                                             <div>
                                                 <p className="text-[16px] mt-2 font-dm-sans">Postal Code/Zip Code</p>
