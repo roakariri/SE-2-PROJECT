@@ -1,9 +1,11 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "../../supabaseClient";
 
 const FavoritesPage = () => {
     const [favorites, setFavorites] = React.useState([]);
     const [loading, setLoading] = React.useState(true);
+    const navigate = useNavigate();
 
     React.useEffect(() => {
         const fetchFavorites = async () => {
@@ -107,6 +109,7 @@ const FavoritesPage = () => {
                                         alt={product.name}
                                         className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-125 cursor-pointer"
                                         onError={e => { e.target.src = "/logo-icon/logo.png"; }}
+                                        onClick={() => navigate('/product', { state: { product } })}
                                     />
                                     {/* Heart icon: red by default, click to remove from favorites */}
                                     <button
@@ -134,7 +137,8 @@ const FavoritesPage = () => {
                                     </button>
                                 </div>
                                 <h3
-                                    className="font-semibold mt-2 text-black text-center tablet:text-center semibig:text-center laptop:text-center cursor-default"
+                                    className="font-semibold mt-2 text-black text-center tablet:text-center semibig:text-center laptop:text-center cursor-pointer hover:underline"
+                                    onClick={() => navigate('/product', { state: { product } })}
                                 >
                                     {product.name}
                                 </h3>

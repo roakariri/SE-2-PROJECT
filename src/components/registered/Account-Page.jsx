@@ -1,12 +1,18 @@
 import React from "react";
+import { v4 as uuidv4 } from 'uuid';
 import { useNavigate } from "react-router-dom";
 import { UserAuth } from "../../context/AuthContext";
 import { supabase } from "../../supabaseClient";
-import { v4 as uuidv4 } from "uuid";
+import PH_CITIES_BY_PROVINCE from "../../PH_CITIES_BY_PROVINCE.js";
+
+
+
 
 const DEFAULT_AVATAR = "/logo-icon/profile-icon.svg";
 
 const AccountPage = () => {
+    // Use imported PH_CITIES_BY_PROVINCE from './province.js'
+
     const [activeTab, setActiveTab] = React.useState("homebase");
     const navigate = useNavigate();
     const { signOut } = UserAuth();
@@ -35,6 +41,16 @@ const AccountPage = () => {
         is_default: false,
         address_id: undefined,
     });
+    // Get city options for selected province
+    const cityOptions = addressForm.province && PH_CITIES_BY_PROVINCE[addressForm.province]
+        ? PH_CITIES_BY_PROVINCE[addressForm.province]
+        : [];
+
+
+
+
+
+
     const [addresses, setAddresses] = React.useState([]);
     const [addressSuccessMsg, setAddressSuccessMsg] = React.useState("");
     const [addressErrorMsg, setAddressErrorMsg] = React.useState("");
@@ -234,10 +250,12 @@ const AccountPage = () => {
                 .eq("user_id", session.user.id);
         }
 
+        // If editing, keep the same address_id, else generate new
+        const isEditing = !!addressForm.address_id;
         const upsertData = {
             ...addressForm,
             user_id: session.user.id,
-            address_id: addressForm.address_id || uuidv4(),
+            address_id: isEditing ? addressForm.address_id : uuidv4(),
         };
 
         const { error } = await supabase
@@ -254,22 +272,24 @@ const AccountPage = () => {
             return;
         }
 
-        setAddressForm({
-            first_name: "",
-            last_name: "",
-            street_address: "",
-            province: "",
-            city: "",
-            postal_code: "",
-            phone_number: "",
-            label: "Home",
-            is_default: false,
-            address_id: undefined,
-        });
         setAddressSuccessMsg("Address saved successfully!");
         setAddressErrorMsg("");
         setTimeout(() => setAddressSuccessMsg(""), 3000);
         fetchUserAndProfile();
+        setTimeout(() => {
+            setAddressForm({
+                first_name: "",
+                last_name: "",
+                street_address: "",
+                province: "",
+                city: "",
+                postal_code: "",
+                phone_number: "",
+                label: "Home",
+                is_default: false,
+                address_id: undefined,
+            });
+        }, 100);
     };
 
     const handleEditAddress = (address) => {
@@ -561,11 +581,16 @@ const AccountPage = () => {
                                             <div className="flex flex-row w-full mt-4 gap-[50px] items-center justify-center">
 
                                                 {address.is_default && (
-                                                    <p className="font-dm-sans text-green-600">Default</p>
+                                                    <div className="bg-[#F19B7D] p-1 rounded">
+                                                       <p className="font-dm-sans text-green-600">Default</p>
+                                                    </div>
+                                                    
                                                 )}
 
                                                 {!address.is_default && (
-                                                    <p className="font-dm-sans text-green-600">Alternative</p>
+                                                    <div className="bg-[#F19B7D] p-1 rounded">
+                                                       <p className="font-dm-sans text-black">Alternative</p>
+                                                    </div>
                                                 )}
 
                                                 <div className="flex flex-row gap-2">
@@ -580,7 +605,7 @@ const AccountPage = () => {
 
                                                     <div>
                                                         <button
-                                                            className="h-[30px] w-[58px] text-[10px] border border-black rounded bg-red-600 text-white hover:bg-red-600 hover:text-white"
+                                                            className="h-[30px] w-[58px] text-[10px] border border-black rounded bg-white text-black hover:bg-red-600 hover:text-white"
                                                             onClick={() => handleDeleteAddress(address.address_id)}
                                                         >
                                                             Delete
@@ -611,6 +636,8 @@ const AccountPage = () => {
                                                     is_default: false,
                                                     address_id: undefined,
                                                 });
+                                                setAddressErrorMsg("");
+                                                setAddressSuccessMsg("");
                                                 setShowAddressEditor(true);
                                             }}
                                         >
@@ -674,25 +701,112 @@ const AccountPage = () => {
                                         <div className="grid grid-cols-2 gap-4 mt-2">
                                             <div>
                                                 <p className="text-[16px] mt-2 font-dm-sans">Province</p>
-                                                <input
-                                                    type="text"
-                                                    className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white mt-2"
-                                                    placeholder="Province"
+                                                <select
+                                                    className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans mt-2"
                                                     name="province"
                                                     value={addressForm.province}
                                                     onChange={handleAddressChange}
-                                                />
+                                                    style={{ backgroundColor: 'white' }}
+                                                >
+                                                    <option value="">Select Province</option>
+                                                    <option value="Abra">Abra</option>
+                                                    <option value="Agusan del Norte">Agusan del Norte</option>
+                                                    <option value="Agusan del Sur">Agusan del Sur</option>
+                                                    <option value="Aklan">Aklan</option>
+                                                    <option value="Albay">Albay</option>
+                                                    <option value="Antique">Antique</option>
+                                                    <option value="Apayao">Apayao</option>
+                                                    <option value="Aurora">Aurora</option>
+                                                    <option value="Basilan">Basilan</option>
+                                                    <option value="Bataan">Bataan</option>
+                                                    <option value="Batanes">Batanes</option>
+                                                    <option value="Batangas">Batangas</option>
+                                                    <option value="Benguet">Benguet</option>
+                                                    <option value="Biliran">Biliran</option>
+                                                    <option value="Bohol">Bohol</option>
+                                                    <option value="Bukidnon">Bukidnon</option>
+                                                    <option value="Bulacan">Bulacan</option>
+                                                    <option value="Cagayan">Cagayan</option>
+                                                    <option value="Camarines Norte">Camarines Norte</option>
+                                                    <option value="Camarines Sur">Camarines Sur</option>
+                                                    <option value="Camiguin">Camiguin</option>
+                                                    <option value="Capiz">Capiz</option>
+                                                    <option value="Catanduanes">Catanduanes</option>
+                                                    <option value="Cavite">Cavite</option>
+                                                    <option value="Cebu">Cebu</option>
+                                                    <option value="Compostela Valley">Compostela Valley</option>
+                                                    <option value="Cotabato">Cotabato</option>
+                                                    <option value="Davao de Oro">Davao de Oro</option>
+                                                    <option value="Davao del Norte">Davao del Norte</option>
+                                                    <option value="Davao del Sur">Davao del Sur</option>
+                                                    <option value="Davao Occidental">Davao Occidental</option>
+                                                    <option value="Davao Oriental">Davao Oriental</option>
+                                                    <option value="Dinagat Islands">Dinagat Islands</option>
+                                                    <option value="Eastern Samar">Eastern Samar</option>
+                                                    <option value="Guimaras">Guimaras</option>
+                                                    <option value="Ifugao">Ifugao</option>
+                                                    <option value="Ilocos Norte">Ilocos Norte</option>
+                                                    <option value="Ilocos Sur">Ilocos Sur</option>
+                                                    <option value="Iloilo">Iloilo</option>
+                                                    <option value="Isabela">Isabela</option>
+                                                    <option value="Kalinga">Kalinga</option>
+                                                    <option value="La Union">La Union</option>
+                                                    <option value="Laguna">Laguna</option>
+                                                    <option value="Lanao del Norte">Lanao del Norte</option>
+                                                    <option value="Lanao del Sur">Lanao del Sur</option>
+                                                    <option value="Leyte">Leyte</option>
+                                                    <option value="Maguindanao">Maguindanao</option>
+                                                    <option value="Marinduque">Marinduque</option>
+                                                    <option value="Masbate">Masbate</option>
+                                                    <option value="Misamis Occidental">Misamis Occidental</option>
+                                                    <option value="Misamis Oriental">Misamis Oriental</option>
+                                                    <option value="Mountain Province">Mountain Province</option>
+                                                    <option value="Negros Occidental">Negros Occidental</option>
+                                                    <option value="Negros Oriental">Negros Oriental</option>
+                                                    <option value="Northern Samar">Northern Samar</option>
+                                                    <option value="Nueva Ecija">Nueva Ecija</option>
+                                                    <option value="Nueva Vizcaya">Nueva Vizcaya</option>
+                                                    <option value="Occidental Mindoro">Occidental Mindoro</option>
+                                                    <option value="Oriental Mindoro">Oriental Mindoro</option>
+                                                    <option value="Palawan">Palawan</option>
+                                                    <option value="Pampanga">Pampanga</option>
+                                                    <option value="Pangasinan">Pangasinan</option>
+                                                    <option value="Quezon">Quezon</option>
+                                                    <option value="Quirino">Quirino</option>
+                                                    <option value="Rizal">Rizal</option>
+                                                    <option value="Romblon">Romblon</option>
+                                                    <option value="Samar">Samar</option>
+                                                    <option value="Sarangani">Sarangani</option>
+                                                    <option value="Siquijor">Siquijor</option>
+                                                    <option value="Sorsogon">Sorsogon</option>
+                                                    <option value="South Cotabato">South Cotabato</option>
+                                                    <option value="Southern Leyte">Southern Leyte</option>
+                                                    <option value="Sultan Kudarat">Sultan Kudarat</option>
+                                                    <option value="Sulu">Sulu</option>
+                                                    <option value="Surigao del Norte">Surigao del Norte</option>
+                                                    <option value="Surigao del Sur">Surigao del Sur</option>
+                                                    <option value="Tarlac">Tarlac</option>
+                                                    <option value="Tawi-Tawi">Tawi-Tawi</option>
+                                                    <option value="Zambales">Zambales</option>
+                                                    <option value="Zamboanga del Norte">Zamboanga del Norte</option>
+                                                    <option value="Zamboanga del Sur">Zamboanga del Sur</option>
+                                                    <option value="Zamboanga Sibugay">Zamboanga Sibugay</option>
+                                                </select>
                                             </div>
                                             <div>
                                                 <p className="text-[16px] mt-2 font-dm-sans">City</p>
-                                                <input
-                                                    type="text"
+                                                <select
                                                     className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white mt-2"
-                                                    placeholder="City"
                                                     name="city"
                                                     value={addressForm.city}
                                                     onChange={handleAddressChange}
-                                                />
+                                                    disabled={!addressForm.province}
+                                                >
+                                                    <option value="">{addressForm.province ? "Select City/Municipality" : "Select Province First"}</option>
+                                                    {cityOptions.map(city => (
+                                                        <option key={city} value={city}>{city}</option>
+                                                    ))}
+                                                </select>
                                             </div>
                                             <div>
                                                 <p className="text-[16px] mt-2 font-dm-sans">Postal Code/Zip Code</p>
@@ -702,18 +816,40 @@ const AccountPage = () => {
                                                     placeholder="Postal Code/Zip Code"
                                                     name="postal_code"
                                                     value={addressForm.postal_code}
-                                                    onChange={handleAddressChange}
+                                                    onChange={e => {
+                                                        // Only allow numbers
+                                                        const value = e.target.value.replace(/[^0-9]/g, '');
+                                                        handleAddressChange({
+                                                            target: {
+                                                                name: 'postal_code',
+                                                                value,
+                                                                type: 'text',
+                                                            }
+                                                        });
+                                                    }}
+                                                    maxLength={4}
                                                 />
                                             </div>
                                             <div>
-                                                <p className="text-[16px] mt-2 font-dm-sans">Phone Number</p>
+                                                <p className="text-[16px] mt-2 font-dm-sans">Phone Number <span className="text-gray-400">(ex. 09123456789)</span></p>
                                                 <input
                                                     type="text"
                                                     className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white mt-2"
                                                     placeholder="Phone Number"
                                                     name="phone_number"
                                                     value={addressForm.phone_number}
-                                                    onChange={handleAddressChange}
+                                                    onChange={e => {
+                                                        // Only allow numbers
+                                                        const value = e.target.value.replace(/[^0-9]/g, '');
+                                                        handleAddressChange({
+                                                            target: {
+                                                                name: 'phone_number',
+                                                                value,
+                                                                type: 'text',
+                                                            }
+                                                        });
+                                                    }}
+                                                    maxLength={11}
                                                 />
                                             </div>
                                         </div>
@@ -746,9 +882,8 @@ const AccountPage = () => {
                                         </div>
                                         <div className="flex justify-end mt-6">
                                             <button
-                                                type="button"
+                                                type="submit"
                                                 className="bg-[#3B5B92] text-white font-bold font-dm-sans px-6 py-2 rounded-md hover:bg-[#2a4370] focus:outline-none focus:ring-0"
-                                                onClick={handleAddressSubmit}
                                             >
                                                 Save Changes
                                             </button>
