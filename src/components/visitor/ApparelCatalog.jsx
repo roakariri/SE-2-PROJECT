@@ -24,6 +24,7 @@ const ApparelCatalog = () => {
   const [priceRange, setPriceRange] = useState({ min: '', max: '' });
   const [selectAll, setSelectAll] = useState(false);
   const [sortOption, setSortOption] = useState("relevance");
+  const [favoriteIds, setFavoriteIds] = useState([]);
 
   useEffect(() => {
     fetchProducts();
@@ -39,6 +40,22 @@ const ApparelCatalog = () => {
   useEffect(() => {
     filterByProductTypeOnly();
   }, [products, productTypeFilter, selectAll]);
+
+  // Fetch user's favorites on mount and when session changes
+  useEffect(() => {
+    const fetchFavorites = async () => {
+      if (!session) {
+        setFavoriteIds([]);
+        return;
+      }
+      const { data: favs } = await supabase
+        .from('favorites')
+        .select('product_id')
+        .eq('user_id', session.user.id);
+      setFavoriteIds(favs ? favs.map(fav => fav.product_id) : []);
+    };
+    fetchFavorites();
+  }, [session]);
 
   const fetchProducts = async () => {
     const { data, error } = await supabase
@@ -343,38 +360,66 @@ const ApparelCatalog = () => {
             </div>
 
             <div className="grid grid-cols-1 phone:grid-cols-1 tablet:grid-cols-2 laptop:grid-cols-3 semi-bigscreen:grid-cols-4 biggest:grid-cols-5 gap-6 mb-10">
-              {filteredProducts.map((product) => (
-                <div
-                  key={product.id}
-                  className="p-0 text-center group relative w-[230px] mx-auto"
-                >
-                  <div className="relative w-[230px] h-48 mb-4 mx-auto overflow-hidden">
-                    <img
-                      src={
-                        product.image_url
-                          ? supabase.storage.from('apparel-images').getPublicUrl(product.image_url).data.publicUrl
-                          : "/apparel-images/caps.png"
-                      }
-                      alt={product.name}
-                      className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-125 cursor-pointer"
-                      onError={e => { e.target.src = "/apparel-images/caps.png"; }}
-                      onClick={() => session ? navigate('/product', { state: { product } }) : navigate('/signin')}
-                    />
-                    <button className="absolute bottom-3 right-5 bg-white p-1.5 rounded-full shadow-md" onClick={e => e.stopPropagation()}>
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-                      </svg>
-                    </button>
-                  </div>
-                  <h3
-                    className="font-semibold mt-2 text-black text-center tablet:text-center semibig:text-center laptop:text-center cursor-pointer"
-                    onClick={() => session ? navigate('/product', { state: { product } }) : navigate('/signin')}
+              {filteredProducts.map((product) => {
+                const isFavorite = favoriteIds.includes(product.id);
+                return (
+                  <div
+                    key={product.id}
+                    className="p-0 text-center group relative w-[230px] mx-auto"
                   >
-                    {product.name}
-                  </h3>
-                  <p className="text-gray-500">from ₱{product.starting_price.toFixed(2)}</p>
-                </div>
-              ))}
+                    <div className="relative w-[230px] h-48 mb-4 mx-auto overflow-hidden">
+                      <img
+                        src={
+                          product.image_url
+                            ? supabase.storage.from('apparel-images').getPublicUrl(product.image_url).data.publicUrl
+                            : "/apparel-images/caps.png"
+                        }
+                        alt={product.name}
+                        className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-125 cursor-pointer"
+                        onError={e => { e.target.src = "/apparel-images/caps.png"; }}
+                        onClick={() => session ? navigate('/product', { state: { product } }) : navigate('/signin')}
+                      />
+                      <button
+                        className="absolute bottom-3 right-5 bg-white p-1.5 rounded-full shadow-md"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (!session) {
+                            navigate('/signin');
+                            return;
+                          }
+                          if (isFavorite) {
+                            // Remove from favorites
+                            await supabase
+                              .from('favorites')
+                              .delete()
+                              .eq('user_id', session.user.id)
+                              .eq('product_id', product.id);
+                            setFavoriteIds(ids => ids.filter(id => id !== product.id));
+                          } else {
+                            // Add to favorites
+                            await supabase
+                              .from('favorites')
+                              .insert({ user_id: session.user.id, product_id: product.id });
+                            setFavoriteIds(ids => [...ids, product.id]);
+                          }
+                        }}
+                        aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 ${isFavorite ? 'text-red-600 fill-red-600' : 'text-gray-700'}`} fill={isFavorite ? 'red' : 'none'} viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                        </svg>
+                      </button>
+                    </div>
+                    <h3
+                      className="font-semibold mt-2 text-black text-center tablet:text-center semibig:text-center laptop:text-center cursor-pointer"
+                      onClick={() => session ? navigate('/product', { state: { product } }) : navigate('/signin')}
+                    >
+                      {product.name}
+                    </h3>
+                    <p className="text-gray-500">from ₱{product.starting_price.toFixed(2)}</p>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { supabase } from "../../supabaseClient";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 const SearchPage = () => {
   const location = useLocation();
@@ -14,6 +14,9 @@ const SearchPage = () => {
   const [priceRange, setPriceRange] = useState({ min: '', max: '' });
   const [selectAll, setSelectAll] = useState(false);
   const [sortOption, setSortOption] = useState("relevance");
+  const [session, setSession] = useState(null);
+  const [favoriteIds, setFavoriteIds] = useState([]);
+  const navigate = useNavigate();
 
   useEffect(() => {
     fetchProducts();
@@ -28,6 +31,42 @@ const SearchPage = () => {
   useEffect(() => {
     filterByProductTypeOnly();
   }, [products, productTypeFilter, selectAll]);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session && session.user) {
+        supabase
+          .from('favorites')
+          .select('product_id')
+          .eq('user_id', session.user.id)
+          .then(({ data }) => {
+            setFavoriteIds(data ? data.map(fav => fav.product_id) : []);
+          });
+      } else {
+        setFavoriteIds([]);
+      }
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+      if (newSession && newSession.user) {
+        supabase
+          .from('favorites')
+          .select('product_id')
+          .eq('user_id', newSession.user.id)
+          .then(({ data }) => {
+            setFavoriteIds(data ? data.map(fav => fav.product_id) : []);
+          });
+      } else {
+        setFavoriteIds([]);
+      }
+    });
+    return () => {
+      if (listener && typeof listener.subscription?.unsubscribe === 'function') {
+        listener.subscription.unsubscribe();
+      }
+    };
+  }, []);
 
   const fetchProducts = async () => {
     const { data, error } = await supabase
@@ -313,8 +352,37 @@ const SearchPage = () => {
                         className="w-full h-full object-contain rounded-lg font-dm-sans"
                         onError={e => { e.target.src = "/logo-icon/logo.png"; }}
                       />
-                      <button className="absolute bottom-3 right-[30px] bg-white p-1.5 rounded-full shadow-md font-dm-sans">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-700 font-dm-sans" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <button
+                        className="absolute bottom-3 right-[30px] bg-white p-1.5 rounded-full shadow-md font-dm-sans"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (!session) {
+                            navigate('/signin');
+                            return;
+                          }
+                          const user = session.user;
+                          if (!user) return;
+                          if (favoriteIds.includes(product.id)) {
+                            // Remove from favorites
+                            await supabase
+                              .from('favorites')
+                              .delete()
+                              .eq('user_id', user.id)
+                              .eq('product_id', product.id);
+                            setFavoriteIds(favoriteIds.filter(id => id !== product.id));
+                          } else {
+                            // Add to favorites
+                            await supabase
+                              .from('favorites')
+                              .insert([
+                                { user_id: user.id, product_id: product.id }
+                              ]);
+                            setFavoriteIds([...favoriteIds, product.id]);
+                          }
+                        }}
+                        aria-label={favoriteIds.includes(product.id) ? "Remove from favorites" : "Add to favorites"}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 ${favoriteIds.includes(product.id) ? 'text-red-600 fill-red-600' : 'text-white fill-white stroke-gray-700'}`} viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
                         </svg>
                       </button>

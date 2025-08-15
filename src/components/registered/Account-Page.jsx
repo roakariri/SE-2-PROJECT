@@ -376,7 +376,7 @@ const AccountPage = () => {
 
                 {/* Orders */}
                 {activeTab === "orders" && (
-                    <div className="flex flex-col rounded-lg p-4 w-[80vw] border">
+                    <div className="flex flex-col rounded-lg p-4 w-[80vw]">
                         <div className="flex flex-row justify-end">
                             <p className="text-right text-black font-dm-sans font-bold text-[36px]">My Account</p>
                         </div>
@@ -388,7 +388,7 @@ const AccountPage = () => {
                                 <input
                                     type="text"
                                     placeholder="Search by Order # or Product Name"
-                                    className="w-1000px] rounded-full border border-gray-300 py-4 pl-8 pr-12 text-[24px] text-gray-400 font-dm-sans focus:outline-none bg-white"
+                                    className="w-full rounded-full border border-gray-300 py-4 pl-8 pr-12 text-[24px] text-gray-400 font-dm-sans focus:outline-none bg-white"
                                 />
                                 <span className="absolute right-6 top-1/2 transform -translate-y-1/2 text-gray-400">
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">

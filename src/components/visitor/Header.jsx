@@ -210,7 +210,7 @@ const Header = () => {
               <div className="flex items-center gap-2 phone:hidden laptop:flex">
                 <button
                   onClick={handleLogin}
-                  className="px-6 py-2 text-black border-[#171738] rounded-sm font-semibold bg-[#FFA07A] hover:bg-[#ffbfa6] transition mr-1"
+                  className="px-6 py-2 text-white border-[#171738] rounded-sm font-semibold bg-[#2B4269] hover:bg-blue-950 transition mr-1"
                 >
                   LOGIN
                 </button>

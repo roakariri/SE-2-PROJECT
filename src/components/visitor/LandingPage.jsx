@@ -2,7 +2,7 @@ import React from "react";
 import gsap from "gsap";
 import "../../LandingPage.css";
 import { useNavigate, useLocation } from "react-router-dom";
-
+import { supabase } from "../../supabaseClient";
 
 const LandingPage = () => {
   const navigate = useNavigate();
@@ -46,7 +46,17 @@ const LandingPage = () => {
             <h2 className="phone:text-[22px] tablet:text-[28px] laptop:text-[36px] font-bold">Textured Glaze Mugs</h2>
             <p className="phone:text-[16px] tablet:text-[20px] laptop:text-[24px] italic text-[#171738]">Subtle, artisan feel. Your design printed on slightly rustic ceramic textures</p>
             <p className="text-right mt-9">
-              <a href="/signin" onClick={e => {e.preventDefault(); handleLogin();}} className="underline text-black not-italic phone:text-base tablet:text-lg laptop:text-lg hover:text-black">View more</a>
+                <a
+                    href={supabase.auth.getSession() ? "/products" : "/signin"}
+                    onClick={async e => {
+                        e.preventDefault();
+                        const { data: { session } } = await supabase.auth.getSession();
+                        navigate(session ? "/products" : "/signin");
+                    }}
+                    className="underline text-black not-italic phone:text-base tablet:text-lg laptop:text-lg hover:text-black"
+                >
+                    View more
+                </a>
             </p>
           </div>
         </div>
@@ -56,7 +66,16 @@ const LandingPage = () => {
             <h2 className="phone:text-[22px] tablet:text-[28px] laptop:text-[36px] font-bold">Embroidered Slogan Caps</h2>
             <p className="phone:text-[16px] tablet:text-[20px] laptop:text-[24px] italic text-[#171738]">Subtle, artisan feel. Your design printed on slightly rustic ceramic textures</p>
             <p className="text-left mt-9">
-              <a href="/signin" onClick={e => {e.preventDefault(); handleLogin();}} className="underline text-black not-italic phone:text-base tablet:text-lg laptop:text-lg hover:text-black">View more</a>
+                <a
+                    href="/signin"
+                    onClick={e => {
+                        e.preventDefault();
+                        navigate("/signin");
+                    }}
+                    className="underline text-black not-italic phone:text-base tablet:text-lg laptop:text-lg hover:text-black"
+                >
+                    View more
+                </a>
             </p>
           </div>
           <div className="border mt-5 laptop:ml-5 rounded-[4px]">
@@ -93,20 +112,39 @@ const LandingPage = () => {
         {/* Grid for tablet/laptop */}
         <div className="hidden tablet:hidden laptop:flex flex-col tablet:flex-row laptop:flex-row mt-10 gap-[5vw] w-full items-center justify-center">
           {/* Business Cards */}
-          <div className="flex flex-col border rounded-[4px] tablet:w-[300px] laptop:w-[350px] tablet:h-[350px] laptop:h-[425px]">
+          <a
+            className="flex flex-col border rounded-[4px] tablet:w-[300px] laptop:w-[350px] tablet:h-[350px] laptop:h-[425px]"
+            href="/cards-stickers"
+            onClick={e => {
+              e.preventDefault();
+              navigate("/cards-stickers");
+            }}
+          >
             <img src="/images/business-cards.png" className="w-full h-[80%] border-b border-[#171738] rounded-t-[4px] object-cover" />
             <div className="text-center text-[#171738] font-dm-sans tablet:text-[24px] laptop:text-[30px] p-5 laptop:h-[30px] ">Business Cards</div>
-          </div>
+          </a>
           {/* Posters */}
-          <div className="flex flex-col border rounded-[4px] tablet:w-[300px] laptop:w-[350px] tablet:h-[350px] laptop:h-[425px]">
+          <a className="flex flex-col border rounded-[4px] tablet:w-[300px] laptop:w-[350px] tablet:h-[350px] laptop:h-[425px]"
+             href="/signage-posters"
+             onClick={e => {
+                 e.preventDefault();
+                 navigate("/signage-posters");
+             }}
+          >
             <img src="/images/posters.png" className="w-full h-[80%] border-b border-[#171738] rounded-t-[4px] object-cover" />
             <div className="text-center text-[#171738] font-dm-sans tablet:text-[24px] laptop:text-[30px] p-5">Posters</div>
-          </div>
+          </a>
           {/* Stickers */}
-          <div className="flex flex-col border rounded-[4px] tablet:w-[300px] laptop:w-[350px] tablet:h-[350px] laptop:h-[425px]">
+          <a className="flex flex-col border rounded-[4px] tablet:w-[300px] laptop:w-[350px] tablet:h-[350px] laptop:h-[425px]"
+           href="/cards-stickers"
+           onClick={e => {
+               e.preventDefault();
+               navigate("/cards-stickers");
+           }}
+          >
             <img src="/images/stickers.png" className="w-full h-[80%] border-b border-[#171738] rounded-t-[4px] object-cover" />
             <div className="text-center text-[#171738] font-dm-sans tablet:text-[24px] laptop:text-[30px] p-5">Stickers</div>
-          </div>
+          </a>
         </div>
       </div>
 

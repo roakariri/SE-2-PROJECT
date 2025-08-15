@@ -1,31 +1,166 @@
-const FavoritesPage = () => {
+import React from "react";
+import { supabase } from "../../supabaseClient";
 
+const FavoritesPage = () => {
+    const [favorites, setFavorites] = React.useState([]);
+    const [loading, setLoading] = React.useState(true);
+
+    React.useEffect(() => {
+        const fetchFavorites = async () => {
+            setLoading(true);
+            // Get current user
+            const { data: { session } } = await supabase.auth.getSession();
+            const user = session?.user;
+            if (!user) {
+                setFavorites([]);
+                setLoading(false);
+                return;
+            }
+            // Fetch favorites for user
+            const { data: favs, error } = await supabase
+                .from("favorites")
+                .select("product_id")
+                .eq("user_id", user.id);
+
+            if (error || !favs || favs.length === 0) {
+                setFavorites([]);
+                setLoading(false);
+                return;
+            }
+
+            // Fetch product details for each favorite
+            const productIds = favs.map(fav => fav.product_id);
+            if (productIds.length === 0) {
+                setFavorites([]);
+                setLoading(false);
+                return;
+            }
+            const { data: products, error: prodError } = await supabase
+                .from("products")
+                .select("*")
+                .in("id", productIds);
+
+            // For each product, find the first bucket where the image actually exists
+            const buckets = [
+                'apparel-images',
+                'accessories-images',
+                'accessoriesdecorations-images',
+                'signage-posters-images',
+                'cards-stickers-images',
+                'packaging-images',
+                '3d-prints-images',
+            ];
+            const productsWithImage = await Promise.all((products || []).map(async (product) => {
+                let foundUrl = "/apparel-images/caps.png";
+                if (product.image_url) {
+                    for (const bucket of buckets) {
+                        const { data } = supabase.storage.from(bucket).getPublicUrl(product.image_url);
+                        // Actually try to fetch the image to see if it exists
+                        if (data && data.publicUrl && !data.publicUrl.endsWith('/')) {
+                            try {
+                                const res = await fetch(data.publicUrl, { method: 'HEAD' });
+                                if (res.ok) {
+                                    foundUrl = data.publicUrl;
+                                    break;
+                                }
+                            } catch (e) { /* ignore */ }
+                        }
+                    }
+                }
+                return { ...product, resolved_image_url: foundUrl };
+            }));
+
+            setFavorites(productsWithImage);
+            setLoading(false);
+        };
+
+        fetchFavorites();
+    }, []);
 
     return (
         <div className="min-h-screen p-[100px] w-full flex flex-col bg-white phone:pt-[212px] tablet:pt-[215px] laptop:pt-[166px] relative z-0">
-
             <div className="mt-10">
                 <p className="text-[36px] font-bold text-black font-dm-sans">Favorites</p>
-
             </div>
 
-            <div className="flex flex-col items-center font-dm-sans justify-center mt-[100px]">
-                <p className="text-[20px] font-bold text-black">No favorites yet.</p>
-                <p className="text-black font-dm-sans">Click the heart icon on any product to save it to your favorites.</p>
-            </div>
-
-
-
-
-
-
-
-
+            {loading ? (
+                <div className="flex flex-col items-center font-dm-sans justify-center mt-[100px]">
+                    <p className="text-[20px] font-bold text-black">Loading...</p>
+                </div>
+            ) : favorites.length === 0 ? (
+                <div className="flex flex-col items-center font-dm-sans justify-center mt-[100px]">
+                    <p className="text-[20px] font-bold text-black">No favorites yet.</p>
+                    <p className="text-black font-dm-sans">Click the heart icon on any product to save it to your favorites.</p>
+                </div>
+            ) : (
+                <div className="grid grid-cols-1 phone:grid-cols-1 tablet:grid-cols-2 laptop:grid-cols-3 semi-bigscreen:grid-cols-4 biggest:grid-cols-5 gap-6 mb-10">
+                    {favorites.map(product => {
+                        const imageUrl = product.resolved_image_url || "/apparel-images/caps.png";
+                        return (
+                            <div
+                                key={product.id}
+                                className="p-0 text-center group relative w-[230px] mx-auto"
+                            >
+                                <div className="relative w-[230px] h-48 mb-4 mx-auto overflow-hidden">
+                                    <img
+                                        src={imageUrl}
+                                        alt={product.name}
+                                        className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-125 cursor-pointer"
+                                        onError={e => { e.target.src = "/apparel-images/caps.png"; }}
+                                    />
+                                    {/* Heart icon: red by default, click to remove from favorites */}
+                                    <button
+                                        className="absolute bottom-3 right-5 bg-white p-1.5 rounded-full shadow-md"
+                                        aria-label="Remove from favorites"
+                                        onClick={async (e) => {
+                                            e.stopPropagation();
+                                            // Remove from favorites
+                                            setLoading(true);
+                                            // Find the favorite row for this user/product
+                                            const { data: { session } } = await supabase.auth.getSession();
+                                            const user = session?.user;
+                                            if (!user) return;
+                                            await supabase
+                                                .from('favorites')
+                                                .delete()
+                                                .eq('user_id', user.id)
+                                                .eq('product_id', product.id);
+                                            // Refetch favorites
+                                            const { data: favs } = await supabase
+                                                .from('favorites')
+                                                .select('product_id')
+                                                .eq('user_id', user.id);
+                                            if (!favs || favs.length === 0) {
+                                                setFavorites([]);
+                                            } else {
+                                                const productIds = favs.map(fav => fav.product_id);
+                                                const { data: products } = await supabase
+                                                    .from('products')
+                                                    .select('*')
+                                                    .in('id', productIds);
+                                                setFavorites(products || []);
+                                            }
+                                            setLoading(false);
+                                        }}
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-600 fill-red-600" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                                        </svg>
+                                    </button>
+                                </div>
+                                <h3
+                                    className="font-semibold mt-2 text-black text-center tablet:text-center semibig:text-center laptop:text-center cursor-default"
+                                >
+                                    {product.name}
+                                </h3>
+                                <p className="text-gray-500">from ₱{product.starting_price?.toFixed(2)}</p>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
         </div>
-
-
-
-    )
+    );
 }
 
 export default FavoritesPage;
