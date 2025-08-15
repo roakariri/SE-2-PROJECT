@@ -51,7 +51,7 @@ const FavoritesPage = () => {
                 '3d-prints-images',
             ];
             const productsWithImage = await Promise.all((products || []).map(async (product) => {
-                let foundUrl = "/apparel-images/caps.png";
+                let foundUrl = "/logo-icon/logo.png";
                 if (product.image_url) {
                     for (const bucket of buckets) {
                         const { data } = supabase.storage.from(bucket).getPublicUrl(product.image_url);
@@ -95,7 +95,7 @@ const FavoritesPage = () => {
             ) : (
                 <div className="grid grid-cols-1 phone:grid-cols-1 tablet:grid-cols-2 laptop:grid-cols-3 semi-bigscreen:grid-cols-4 biggest:grid-cols-5 gap-6 mb-10">
                     {favorites.map(product => {
-                        const imageUrl = product.resolved_image_url || "/apparel-images/caps.png";
+                        const imageUrl = product.resolved_image_url || "/logo-icon/logo.png";
                         return (
                             <div
                                 key={product.id}
@@ -106,7 +106,7 @@ const FavoritesPage = () => {
                                         src={imageUrl}
                                         alt={product.name}
                                         className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-125 cursor-pointer"
-                                        onError={e => { e.target.src = "/apparel-images/caps.png"; }}
+                                        onError={e => { e.target.src = "/logo-icon/logo.png"; }}
                                     />
                                     {/* Heart icon: red by default, click to remove from favorites */}
                                     <button
@@ -114,9 +114,9 @@ const FavoritesPage = () => {
                                         aria-label="Remove from favorites"
                                         onClick={async (e) => {
                                             e.stopPropagation();
-                                            // Remove from favorites
-                                            setLoading(true);
-                                            // Find the favorite row for this user/product
+                                            // Instantly update UI (remove from local state)
+                                            setFavorites(prev => prev.filter(fav => fav.id !== product.id));
+                                            // Remove from favorites in Supabase (background)
                                             const { data: { session } } = await supabase.auth.getSession();
                                             const user = session?.user;
                                             if (!user) return;
@@ -125,22 +125,7 @@ const FavoritesPage = () => {
                                                 .delete()
                                                 .eq('user_id', user.id)
                                                 .eq('product_id', product.id);
-                                            // Refetch favorites
-                                            const { data: favs } = await supabase
-                                                .from('favorites')
-                                                .select('product_id')
-                                                .eq('user_id', user.id);
-                                            if (!favs || favs.length === 0) {
-                                                setFavorites([]);
-                                            } else {
-                                                const productIds = favs.map(fav => fav.product_id);
-                                                const { data: products } = await supabase
-                                                    .from('products')
-                                                    .select('*')
-                                                    .in('id', productIds);
-                                                setFavorites(products || []);
-                                            }
-                                            setLoading(false);
+                                            // No loading state, no refetch needed
                                         }}
                                     >
                                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-600 fill-red-600" viewBox="0 0 24 24" stroke="currentColor">

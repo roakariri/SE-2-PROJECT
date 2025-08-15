@@ -107,34 +107,47 @@ const Navigation = () => {
 
   // Profile photo logic
   const DEFAULT_AVATAR = "/logo-icon/profile-icon.svg";
-  const [profilePhotoUrl, setProfilePhotoUrl] = useState(DEFAULT_AVATAR);
+  // Try to get cached profile photo from localStorage
+  const getCachedProfilePhoto = () => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('profilePhotoUrl') || DEFAULT_AVATAR;
+    }
+    return DEFAULT_AVATAR;
+  };
+  const [profilePhotoUrl, setProfilePhotoUrl] = useState(getCachedProfilePhoto());
+  // Only fetch profile photo when session.user.id changes
   React.useEffect(() => {
+    let isMounted = true;
     async function fetchProfilePhoto() {
       if (!session?.user?.id) {
-        setProfilePhotoUrl(DEFAULT_AVATAR);
+        if (isMounted) {
+          setProfilePhotoUrl(DEFAULT_AVATAR);
+          if (typeof window !== 'undefined') localStorage.setItem('profilePhotoUrl', DEFAULT_AVATAR);
+        }
         return;
       }
-      // Use authenticated request, RLS will allow only own row
       const { data, error } = await supabase
         .from('profiles')
         .select('avatar_url')
         .eq('user_id', session.user.id)
         .single();
+      if (!isMounted) return;
       if (error || !data || !data.avatar_url) {
         setProfilePhotoUrl(DEFAULT_AVATAR);
+        if (typeof window !== 'undefined') localStorage.setItem('profilePhotoUrl', DEFAULT_AVATAR);
       } else {
-        // avatar_url should be the file path in storage, e.g. 'user-id-timestamp.png'
-        // Check if avatar_url is a full URL or just a file path
         let publicUrl = data.avatar_url;
         if (!publicUrl.startsWith('http')) {
           const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(data.avatar_url);
           publicUrl = urlData?.publicUrl || DEFAULT_AVATAR;
         }
         setProfilePhotoUrl(publicUrl);
+        if (typeof window !== 'undefined') localStorage.setItem('profilePhotoUrl', publicUrl);
       }
     }
     fetchProfilePhoto();
-  }, [session]);
+    return () => { isMounted = false; };
+  }, [session?.user?.id]);
 
   return (
     <div className="fixed w-full bg-cover bg-white z-50 ">
@@ -232,7 +245,11 @@ const Navigation = () => {
                 <span className="hidden  semi-bigscreen:inline ml-2 font-dm-sans">Cart</span>
                 </button>
 
-                <a href="/account" className="flex items-center semi-bigscreen:ml-2 focus:outline-none focus:ring-0 font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]">
+                <button
+                  type="button"
+                  className="flex items-center semi-bigscreen:ml-2 focus:outline-none focus:ring-0 font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]"
+                  onClick={() => navigate('/account')}
+                >
                   <img
                     src={profilePhotoUrl || DEFAULT_AVATAR}
                     alt="Profile"
@@ -242,19 +259,19 @@ const Navigation = () => {
                   <span className="hidden semi-bigscreen:inline ml-2 text-black font-dm-sans text-[16px] hover:text-[#c4c4c4]">
                     {(session?.user?.user_metadata?.display_name || session?.user?.user_metadata?.full_name || session?.user?.email || "User").split(" ")[0]}
                   </span>
-                </a>
+                </button>
 
 
             </div>
         </div>
       </div>
 
-      {/* Sub Nav Hamburger for phone & tablet */}
-      <div className="w-full bg-white border-b big-laptop:hidden">
+      {/* Sub Nav Hamburger for phone/tablet */}
+      <div className="w-full bg-white text-bold border-b big-laptop:hidden">
         <div className="flex items-center justify-between px-5 py-2">
           <span className="font-bold text-base text-[#3B5B92] ">Menu</span>
           <button
-            className="focus:outline-none focus:ring-0"
+            className="focus:outline-none"
             onClick={() => setIsMenuOpen((prev) => !prev)}
             aria-label="Toggle subnav menu"
           >
@@ -265,14 +282,22 @@ const Navigation = () => {
         </div>
         {isMenuOpen && (
           <div className="flex flex-col items-center bg-white border-t py-2 animate-fade-in">
-            {subNavLinks.map((label) => (
-              <p key={label} className="text-[#3B5B92] font-semibold cursor-pointer hover:text-blue-600 transition px-4 py-2 w-full text-center font-dm-sans border-b last:border-b-0">
-                {label}
-              </p>
-            ))}
+            {subNavLinks.map((label) => {
+              const isActive = location.pathname === subNavRoutes[label];
+              return (
+                <p
+                  key={label}
+                  className={`font-semibold cursor-pointer transition px-4 py-2 w-full text-center font-dm-sans border-b last:border-b-0 ${isActive ? 'bg-[#3B5B92] text-white' : 'text-[#3B5B92] hover:text-blue-600'}`}
+                  onClick={() => navigate(subNavRoutes[label])}
+                >
+                  {label}
+                </p>
+              );
+            })}
           </div>
         )}
       </div>
+
       
       {/* Sub Nav for laptop and up */}
       <div className="w-full  bg-white border-b phone:hidden laptop:hidden big-laptop:block">

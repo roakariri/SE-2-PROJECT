@@ -114,7 +114,7 @@ const Header = () => {
             <div className="laptop:hidden phone:flex items-center gap-2 ml-2">
               <button
                 onClick={handleLogin}
-                className="px-3 py-1 text-black border-[#171738] rounded-sm font-semibold bg-[#FFA07A] hover:bg-[#ffbfa6] transition text-xs"
+                className="px-3 py-1 text-white border-[#171738] rounded-sm font-semibold bg-[#2B4269] hover:bg-[#ffbfa6] transition text-xs"
               >
                 LOGIN
               </button>
