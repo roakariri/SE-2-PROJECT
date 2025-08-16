@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { UserAuth } from "../../context/AuthContext";
 import { supabase } from "../../supabaseClient";
 import PH_CITIES_BY_PROVINCE from "../../PH_CITIES_BY_PROVINCE.js";
+import PH_BARANGAYS from "../../PH_BARANGAYS.js";
 
 
 
@@ -53,6 +54,10 @@ const AccountPage = () => {
     const [cityInput, setCityInput] = React.useState("");
     const [showCityDropdown, setShowCityDropdown] = React.useState(false);
     const cityInputRef = React.useRef(null);
+    // Typable barangay dropdown state
+    const [barangayInput, setBarangayInput] = React.useState("");
+    const [showBarangayDropdown, setShowBarangayDropdown] = React.useState(false);
+    const barangayInputRef = React.useRef(null);
     // Show all provinces unless input matches a province exactly (case-insensitive), then show only that province
     const filteredProvinces = (() => {
         if (!provinceInput) return PROVINCES;
@@ -66,6 +71,13 @@ const AccountPage = () => {
     const cityOptions = addressForm.province && PH_CITIES_BY_PROVINCE[addressForm.province]
         ? PH_CITIES_BY_PROVINCE[addressForm.province]
         : [];
+
+    // Get barangay options for selected province and city
+    const barangayOptions =
+        addressForm.province && addressForm.city &&
+        PH_BARANGAYS[addressForm.province] && PH_BARANGAYS[addressForm.province][addressForm.city]
+            ? PH_BARANGAYS[addressForm.province][addressForm.city]
+            : [];
 
 
 
@@ -594,15 +606,15 @@ const AccountPage = () => {
                             <div className="w-full overflow-x-auto">
                                 <div className="grid semi-biggest:grid-cols-2 biggest:grid-cols-3 semi-biggest:w-[500px] semi-biggest:gap-10 auto-cols-max justify-center gap-4 min-w-max">
                                     {addresses.map((address) => (
-                                        <div key={address.address_id} className="border p-5 w-[295px] border-black rounded">
+                                        <div key={address.address_id} className="border p-5 w-[295px] border-black rounded flex flex-col justify-between min-h-[280px]">
                                             <p className="font-dm-sans font-bold">{address.first_name} {address.last_name}</p>
-                                            <p className="font-dm-sans">{address.street_address},</p>
+                                            <p className="font-dm-sans">{address.street_address}, {address.barangay},</p>
                                             <p className="font-dm-sans">{address.city}, {address.province}.</p>
                                             <p className="font-dm-sans">{address.postal_code}</p>
                                             <p className="font-dm-sans">{address.phone_number}</p>
                                             <p className="font-dm-sans capitalize">{address.label}.</p>
 
-                                            <div className="flex flex-row w-full p-1 mt-6 gap-[50px] items-center justify-center">
+                                            <div className="flex flex-row w-full p-1 mt-auto gap-[50px] items-center justify-center">
 
                                                 {address.is_default && (
                                                     <div className="flex justify-center items-center w-full h-full">
@@ -729,6 +741,7 @@ const AccountPage = () => {
                                             />
                                         </div>
                                         <div className="grid grid-cols-2 gap-4 mt-2">
+                                            {/* Province */}
                                             <div>
                                                 <p className="text-[16px] mt-2 font-dm-sans">Province</p>
                                                 <div className="relative mt-2">
@@ -772,7 +785,7 @@ const AccountPage = () => {
                                                                 <li
                                                                     key={prov}
                                                                     className={`px-4 py-2 cursor-pointer hover:bg-[#eaeaea] text-black ${addressForm.province === prov ? 'bg-[#eaeaea]' : ''}`}
-                                                                    style={{ color: 'black', backgroundColor: 'white' }} // <-- Ensures dropdown item background is white
+                                                                    style={{ color: 'black', backgroundColor: 'white' }}
                                                                     onMouseDown={e => {
                                                                         e.preventDefault();
                                                                         setAddressForm(f => ({ ...f, province: prov, city: "" }));
@@ -787,6 +800,7 @@ const AccountPage = () => {
                                                     )}
                                                 </div>
                                             </div>
+                                            {/* City */}
                                             <div>
                                                 <p className="text-[16px] mt-2 font-dm-sans">City</p>
                                                 <div className="relative mt-2">
@@ -843,6 +857,64 @@ const AccountPage = () => {
                                                     )}
                                                 </div>
                                             </div>
+                                            {/* Barangay */}
+                                            <div>
+                                                <p className="text-[16px] mt-2 font-dm-sans">Barangay</p>
+                                                <div className="relative mt-2">
+                                                    <div className="flex items-center">
+                                                        <input
+                                                            type="text"
+                                                            className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white pr-10"
+                                                            placeholder={addressForm.city ? "Select Barangay" : "Select City First"}
+                                                            name="barangay_typable"
+                                                            autoComplete="off"
+                                                            value={addressForm.barangay || barangayInput}
+                                                            ref={barangayInputRef}
+                                                            disabled={!addressForm.city}
+                                                            onFocus={() => { if (addressForm.city) setShowBarangayDropdown(true); }}
+                                                            onChange={e => {
+                                                                setAddressForm(f => ({ ...f, barangay: e.target.value }));
+                                                                setShowBarangayDropdown(true);
+                                                            }}
+                                                            onBlur={() => setTimeout(() => setShowBarangayDropdown(false), 150)}
+                                                        />
+                                                        <button
+                                                            type="button"
+                                                            className="absolute bg-white right-2 top-1/2 transform -translate-y-1/2 p-1"
+                                                            tabIndex={-1}
+                                                            disabled={!addressForm.city}
+                                                            onMouseDown={e => {
+                                                                if (!addressForm.city) return;
+                                                                e.preventDefault();
+                                                                setShowBarangayDropdown(v => !v);
+                                                                barangayInputRef.current && barangayInputRef.current.focus();
+                                                            }}
+                                                        >
+                                                            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="black"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                                                        </button>
+                                                    </div>
+                                                    {/* Dropdown */}
+                                                    {showBarangayDropdown && addressForm.city && barangayOptions.filter(b => b.toLowerCase().includes((addressForm.barangay || "").toLowerCase())).length > 0 && (
+                                                        <ul className="absolute z-10 w-full bg-white border border-[#3B5B92] rounded-md max-h-48 overflow-y-auto shadow-lg mt-1">
+                                                            {barangayOptions.filter(b => b.toLowerCase().includes((addressForm.barangay || "").toLowerCase())).map(barangay => (
+                                                                <li
+                                                                    key={barangay}
+                                                                    className={`px-4 py-2 cursor-pointer hover:bg-[#eaeaea] text-black ${addressForm.barangay === barangay ? 'bg-[#eaeaea]' : ''}`}
+                                                                    style={{ color: 'black' }}
+                                                                    onMouseDown={e => {
+                                                                        e.preventDefault();
+                                                                        setAddressForm(f => ({ ...f, barangay }));
+                                                                        setShowBarangayDropdown(false);
+                                                                    }}
+                                                                >
+                                                                    {barangay}
+                                                                </li>
+                                                            ))}
+                                                        </ul>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            {/* Postal Code */}
                                             <div>
                                                 <p className="text-[16px] mt-2 font-dm-sans">Postal Code/Zip Code</p>
                                                 <input
@@ -865,7 +937,8 @@ const AccountPage = () => {
                                                     maxLength={4}
                                                 />
                                             </div>
-                                            <div>
+                                            {/* Phone Number */}
+                                            <div className="col-span-2">
                                                 <p className="text-[16px] mt-2 font-dm-sans">Phone Number <span className="text-gray-400">(ex. 09123456789)</span></p>
                                                 <input
                                                     type="text"
