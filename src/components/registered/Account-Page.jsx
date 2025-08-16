@@ -44,7 +44,7 @@ const AccountPage = () => {
     });
     // Province list
     const PROVINCES = [
-        "Abra", "Agusan Del Norte", "Agusan Del Sur", "Aklan", "Albay", "Antique", "Apayao", "Aurora", "Basilan", "Bataan", "Batanes", "Batangas", "Benguet", "Biliran", "Bohol", "Bukidnon", "Bulacan", "Cagayan", "Camarines Norte", "Camarines Sur", "Camiguin", "Capiz", "Catanduanes", "Cavite", "Cebu", "Compostela Valley", "Cotabato", "Davao de Oro", "Davao del Norte", "Davao del Sur", "Davao Occidental", "Davao Oriental", "Dinagat Islands", "Eastern Samar", "Guimaras", "Ifugao", "Ilocos Norte", "Ilocos Sur", "Iloilo", "Isabela", "Kalinga", "La Union", "Laguna", "Lanao del Norte", "Lanao del Sur", "Leyte", "Maguindanao", "Marinduque", "Masbate", "Misamis Occidental", "Misamis Oriental", "Mountain Province", "Negros Occidental", "Negros Oriental", "Northern Samar", "Nueva Ecija", "Nueva Vizcaya", "Occidental Mindoro", "Oriental Mindoro", "Palawan", "Pampanga", "Pangasinan", "Quezon", "Quirino", "Rizal", "Romblon", "Samar", "Sarangani", "Siquijor", "Sorsogon", "South Cotabato", "Southern Leyte", "Sultan Kudarat", "Sulu", "Surigao del Norte", "Surigao del Sur", "Tarlac", "Tawi-Tawi", "Zambales", "Zamboanga del Norte", "Zamboanga del Sur", "Zamboanga Sibugay"
+        "Abra", "Agusan Del Norte", "Agusan Del Sur", "Aklan", "Albay", "Antique", "Apayao", "Aurora", "Basilan", "Bataan", "Batanes", "Batangas", "Benguet", "Biliran", "Bohol", "Bukidnon", "Bulacan", "Cagayan", "Camarines Norte", "Camarines Sur", "Camiguin", "Capiz", "Catanduanes", "Cavite", "Cebu", "Compostela Valley", "Cotabato", "Davao de Oro", "Davao del Norte", "Davao del Sur", "Davao Occidental", "Davao Oriental", "Dinagat Islands", "Eastern Samar", "Guimaras", "Ifugao", "Ilocos Norte", "Ilocos Sur", "Iloilo", "Isabela", "Kalinga", "La Union", "Laguna", "Lanao del Norte", "Lanao del Sur", "Leyte", "Maguindanao", "Marinduque", "Masbate", "Misamis Occidental", "Misamis Oriental", "Mountain Province", "NCR", "Negros Occidental", "Negros Oriental", "Northern Samar", "Nueva Ecija", "Nueva Vizcaya", "Occidental Mindoro", "Oriental Mindoro", "Palawan", "Pampanga", "Pangasinan", "Quezon", "Quirino", "Rizal", "Romblon", "Samar", "Sarangani", "Siquijor", "Sorsogon", "South Cotabato", "Southern Leyte", "Sultan Kudarat", "Sulu", "Surigao del Norte", "Surigao del Sur", "Tarlac", "Tawi-Tawi", "Zambales", "Zamboanga del Norte", "Zamboanga del Sur", "Zamboanga Sibugay"
     ];
     // Typable province dropdown state
     const [provinceInput, setProvinceInput] = React.useState("");
@@ -937,44 +937,50 @@ const AccountPage = () => {
                                                     maxLength={4}
                                                 />
                                             </div>
-                                            {/* Phone Number */}
-                                            <div className="col-span-2">
-                                                <p className="text-[16px] mt-2 font-dm-sans">Phone Number <span className="text-gray-400">(ex. 09123456789)</span></p>
-                                                <input
-                                                    type="text"
-                                                    className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white mt-2"
-                                                    placeholder="Phone Number"
-                                                    name="phone_number"
-                                                    value={addressForm.phone_number}
-                                                    onChange={e => {
-                                                        // Only allow numbers
-                                                        const value = e.target.value.replace(/[^0-9]/g, '');
-                                                        handleAddressChange({
-                                                            target: {
-                                                                name: 'phone_number',
-                                                                value,
-                                                                type: 'text',
-                                                            }
-                                                        });
-                                                    }}
-                                                    maxLength={11}
-                                                />
+                                            {/* Phone Number & Label As side by side */}
+                                            <div className="col-span-2 flex gap-4 items-end">
+                                                <div className="flex-1">
+                                                    <p className="text-[16px] font-dm-sans mb-2">Phone Number</p>
+                                                    <input
+                                                        type="text"
+                                                        className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white"
+                                                        placeholder="Phone Number"
+                                                        name="phone_number"
+                                                        value={addressForm.phone_number}
+                                                        onChange={e => {
+                                                            // Only allow numbers
+                                                            const value = e.target.value.replace(/[^0-9]/g, '');
+                                                            handleAddressChange({
+                                                                target: {
+                                                                    name: 'phone_number',
+                                                                    value,
+                                                                    type: 'text',
+                                                                }
+                                                            });
+                                                        }}
+                                                        maxLength={11}
+                                                    />
+                                                </div>
+                                                <div className="flex flex-1 gap-4 items-end">
+                                                    <div className="flex-1 flex flex-col">
+                                                        <p className="text-[16px] font-dm-sans mb-2">Label As</p>
+                                                        <div className="flex gap-4">
+                                                            <button
+                                                                type="button"
+                                                                className={`w-full h-[48px] border border-[#3B5B92] rounded-md font-dm-sans text-[18px] font-bold ${addressForm.label === 'Work' ? 'bg-[#eaeaea] text-[#6B7280]' : 'bg-white text-black'}`}
+                                                                style={{ pointerEvents: addressForm.label === 'Work' ? 'none' : 'auto' }}
+                                                                onClick={() => setAddressForm(f => ({ ...f, label: 'Work' }))}
+                                                            >Work</button>
+                                                            <button
+                                                                type="button"
+                                                                className={`w-full h-[48px] border border-[#3B5B92] rounded-md font-dm-sans text-[18px] font-bold ${addressForm.label === 'Home' ? 'bg-[#eaeaea] text-[#6B7280]' : 'bg-white text-black'}`}
+                                                                style={{ pointerEvents: addressForm.label === 'Home' ? 'none' : 'auto' }}
+                                                                onClick={() => setAddressForm(f => ({ ...f, label: 'Home' }))}
+                                                            >Home</button>
+                                                        </div>
+                                                    </div>
+                                                </div>
                                             </div>
-                                        </div>
-                                        <p className="text-[16px] mt-4 font-dm-sans">Label As</p>
-                                        <div className="flex justify-start mt-2 gap-4">
-                                            <button
-                                                type="button"
-                                                className="w-[202px] h-[40px] bg-white text-black border border-black"
-                                                onClick={() => setAddressForm(f => ({ ...f, label: 'Work' }))}
-                                                style={{ backgroundColor: addressForm.label === 'Work' ? '#3B5B92' : 'white', color: addressForm.label === 'Work' ? 'white' : 'black' }}
-                                            >Work</button>
-                                            <button
-                                                type="button"
-                                                className="w-[202px] h-[40px] bg-white text-black border border-black"
-                                                onClick={() => setAddressForm(f => ({ ...f, label: 'Home' }))}
-                                                style={{ backgroundColor: addressForm.label === 'Home' ? '#3B5B92' : 'white', color: addressForm.label === 'Home' ? 'white' : 'black' }}
-                                            >Home</button>
                                         </div>
                                         <div className="flex justify-end mt-2">
                                             <label className="flex items-center gap-2">

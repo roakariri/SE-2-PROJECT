@@ -1121,6 +1121,25 @@ export const PH_CITIES_BY_PROVINCE = {
     "Sagada",
     "Tadian"
   ],
+
+  "NCR":[
+    "City of Caloocan",
+    "City of Las Piñas",
+    "City of Makati",
+    "City of Malabon",
+    "City of Manila",
+    "City of Marikina",
+    "City of Muntinlupa",
+    "City of Navotas",
+    "City of Parañaque",
+    "City of Pasay",
+    "City of Pasig",
+    "City of Quezon",
+    "City of San Juan",
+    "City of Taguig",
+    "City of Valenzuela"
+  ],
+  
   "Negros Occidental": [
     "Binalbagan",
     "Calatrava",
