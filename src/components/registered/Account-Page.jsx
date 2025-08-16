@@ -423,8 +423,8 @@ const AccountPage = () => {
                             <p className="mt-7">You have not placed any orders.</p>
                         </div>
                         <div className="mt-[50px]">
-                            <p className="text-[24px] text-black font-dm-sans">Your Last Order</p>
-                            <p className="mt-7">You have not placed any orders.</p>
+                            <p className="text-[24px] text-black font-dm-sans">Recently Viewed Products</p>
+                            <p className="mt-7">You have not viewed any products.</p>
                         </div>
                     </div>
                 )}
