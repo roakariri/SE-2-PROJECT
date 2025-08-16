@@ -160,7 +160,7 @@ const Navigation = () => {
               src="/logo-icon/logo.png"
               className="object-contain w-[120px] h-[32px] phone:w-[100px] phone:h-[28px] tablet:w-[140px] tablet:h-[40px] laptop:w-[220px] laptop:h-[80px] bigscreen:w-[220px] bigscreen:h-[80px] phone:ml-0 cursor-pointer laptop:ml-[0px] biggest:ml-[-300px]"
               alt="Logo"
-              onClick={() => navigate("/")}
+              onClick={() => navigate("/HomePage")}
             />
 
           </div>

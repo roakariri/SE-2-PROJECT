@@ -68,7 +68,7 @@ export const router = createBrowserRouter([
   { path: "/reset-successful", element: <ResetSuccessful /> },
 
   // Homepage routes
-  { path: "/homepage", element: <HomePage /> },
+  { path: "/homepage", element: <PrivateRoute><HomePage /></PrivateRoute> },
 
 
   // Apparel routes

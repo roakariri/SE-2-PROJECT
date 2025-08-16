@@ -47,11 +47,10 @@ const LandingPage = () => {
             <p className="phone:text-[16px] tablet:text-[20px] laptop:text-[24px] italic text-[#171738]">Subtle, artisan feel. Your design printed on slightly rustic ceramic textures</p>
             <p className="text-right mt-9">
                 <a
-                    href={supabase.auth.getSession() ? "/products" : "/signin"}
-                    onClick={async e => {
+                    href="/signin"
+                    onClick={e => {
                         e.preventDefault();
-                        const { data: { session } } = await supabase.auth.getSession();
-                        navigate(session ? "/products" : "/signin");
+                        navigate("/signin");
                     }}
                     className="underline text-black not-italic phone:text-base tablet:text-lg laptop:text-lg hover:text-black"
                 >

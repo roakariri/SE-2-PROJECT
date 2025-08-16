@@ -3,6 +3,10 @@ import { supabase } from "../../supabaseClient";
 import { useNavigate } from "react-router-dom";
 
 const AccessoriesCatalog = () => {
+  // Scroll to top on mount
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, []);
   const [products, setProducts] = useState([]);
     const [filteredProducts, setFilteredProducts] = useState([]);
     const [productTypeFilter, setProductTypeFilter] = useState([]);
@@ -160,6 +164,13 @@ const AccessoriesCatalog = () => {
   
     // Hamburger menu state for mobile 
     const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
+
+    // Scroll to top when filter drawer closes (for mobile UX)
+    useEffect(() => {
+      if (!filterDrawerOpen) {
+        window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+      }
+    }, [filterDrawerOpen]);
   
     return (
       <div className="w-full bg-cover bg-white phone:pt-[210px] tablet:pt-[220px] laptop:pt-[165px] landing-page-container z-0">
@@ -241,7 +252,7 @@ const AccessoriesCatalog = () => {
                     value={priceRange.min}
                     onChange={handlePriceChange}
                     className="w-full border border-gray-400 rounded p-2 bg-white"
-                    style={{ backgroundColor: 'white' }}
+                    style={{ backgroundColor: 'white', color: 'black' }}
                   />
                   <span className="text-black">to</span>
                   <input
@@ -250,7 +261,7 @@ const AccessoriesCatalog = () => {
                     value={priceRange.max}
                     onChange={handlePriceChange}
                     className="w-full border border-gray-400 rounded p-2 bg-white"
-                    style={{ backgroundColor: 'white' }}
+                    style={{ backgroundColor: 'white', color: 'black' }}
                   />
                 </div>
   
@@ -293,7 +304,7 @@ const AccessoriesCatalog = () => {
                     checked={selectAll}
                     onChange={handleSelectAllChange}
                     className="mr-2 bg-white"
-                    style={{ backgroundColor: 'white' }}
+                    style={{ accentColor: '#2B4269', backgroundColor: 'white', border: '1px solid black', width: '18px', height: '18px', borderRadius: '4px' }}
                   />
                   <label htmlFor="type-all" className="capitalize text-black">All</label>
                 </div>
@@ -307,7 +318,7 @@ const AccessoriesCatalog = () => {
                       checked={productTypeFilter.includes(type.id)}
                       onChange={(e) => handleProductTypeChange(e, type.id)}
                       className="mr-2 bg-white "
-                      style={{ backgroundColor: 'white' }}
+                      style={{ accentColor: '#2B4269', backgroundColor: 'white', border: '1px solid black', width: '18px', height: '18px', borderRadius: '4px' }}
                     />
                   <label htmlFor={`type-${type.id}`} className="capitalize text-black">
                     {type.name || `Type ${type.id}`}
@@ -324,8 +335,8 @@ const AccessoriesCatalog = () => {
                   name="min"
                   value={priceRange.min}
                   onChange={handlePriceChange}
-                  className="w-full border border-gray-400 rounded p-2 bg-white"
-                  style={{ backgroundColor: 'white' }}
+                className="w-full border border-gray-400 rounded p-2 bg-white"
+                style={{ backgroundColor: 'white', color: 'black' }}
                 />
                 <span className="text-black">to</span>
                 <input
@@ -333,8 +344,8 @@ const AccessoriesCatalog = () => {
                   name="max"
                   value={priceRange.max}
                   onChange={handlePriceChange}
-                  className="w-full border border-gray-400 rounded p-2 bg-white"
-                  style={{ backgroundColor: 'white' }}
+                className="w-full border border-gray-400 rounded p-2 bg-white"
+                style={{ backgroundColor: 'white', color: 'black' }}
                 />
               </div>
   

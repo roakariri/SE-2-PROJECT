@@ -33,7 +33,7 @@ const Footer = () => {
                 <div className="flex flex-col gap-1 min-w-[120px]">
                     <p className="font-bold text-base mb-2 text-white font-dm-sans">Our Services</p>
                     <p className="text-sm cursor-pointer hover:underline text-white font-dm-sans">FAQs</p>
-                    <p className="text-[15px] cursor-pointer hover:underline text-white font-dm-sans">All Products</p>
+
                     <p className="text-[15px] cursor-pointer hover:underline text-white font-dm-sans">Shipping</p>
                     <p className="text-[15px] cursor-pointer hover:underline text-white font-dm-sans">Order Tracking</p>
                     <p className="text-[15px] cursor-pointer hover:underline text-white font-dm-sans">Contact Support</p>
@@ -43,7 +43,7 @@ const Footer = () => {
                 <div className="flex flex-col gap-1 min-w-[120px] laptop:mt-[25px] phone:mt-[-30px]">
                     <p className="text-[15px] cursor-pointer hover:underline mt-2 text-white font-dm-sans">Returns Policy</p>
                     <p className="text-[15px] cursor-pointer hover:underline text-white font-dm-sans">3D Print Services</p>
-                    <p className="text-[15px] cursor-pointer hover:underline text-white font-dm-sans">Live Chat Support</p>
+
                 </div>
 
                 {/* Newsletter */}

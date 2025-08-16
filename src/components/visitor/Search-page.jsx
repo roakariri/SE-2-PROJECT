@@ -317,7 +317,7 @@ const SearchPage = () => {
                     value={priceRange.min}
                     onChange={handlePriceChange}
                     className="w-full border border-gray-400 rounded p-2 bg-white"
-                    style={{ backgroundColor: 'white' }}
+                    style={{ backgroundColor: 'white', color: 'black' }}
                   />
                   <span className="text-black">to</span>
                   <input
@@ -326,7 +326,7 @@ const SearchPage = () => {
                     value={priceRange.max}
                     onChange={handlePriceChange}
                     className="w-full border border-gray-400 rounded p-2 bg-white"
-                    style={{ backgroundColor: 'white' }}
+                    style={{ backgroundColor: 'white', color: 'black' }}
                   />
                 </div>
 
@@ -397,6 +397,7 @@ const SearchPage = () => {
                   value={priceRange.min}
                   onChange={handlePriceChange}
                   className="w-full border bg-white border-gray-400 rounded p-2 font-dm-sans"
+                  style={{ backgroundColor: 'white', color: 'black' }}
                 />
                 <span className="text-black font-dm-sans">to</span>
                 <input
@@ -405,6 +406,7 @@ const SearchPage = () => {
                   value={priceRange.max}
                   onChange={handlePriceChange}
                   className="w-full border border-gray-400 bg-white rounded p-2 font-dm-sans"
+                  style={{ backgroundColor: 'white', color: 'black' }}
                 />
               </div>
               <button
