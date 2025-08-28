@@ -15,14 +15,69 @@ const SearchPage = () => {
   const [selectAll, setSelectAll] = useState(false);
   const [sortOption, setSortOption] = useState("relevance");
   const [session, setSession] = useState(null);
+  const [productCategories, setProductCategories] = useState([]);
   const [favoriteIds, setFavoriteIds] = useState([]);
   // Hamburger menu state for mobile filter drawer
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
   const navigate = useNavigate();
 
+  // Resolve the best route for a product using the product's `routes` or `route` column.
+  // Supports several shapes: string (absolute path), array of strings, or object with a path property.
+  const resolveProductRoute = (product) => {
+    const candidate = product?.routes ?? product?.route ?? null;
+    if (!candidate) return null;
+
+    const normalize = (r) => {
+      if (!r) return null;
+      if (typeof r === 'string') return r.trim();
+      if (Array.isArray(r)) {
+        // return first absolute-looking entry
+        for (const item of r) {
+          if (typeof item === 'string' && (item.startsWith('/') || item.includes('/'))) return item.trim();
+        }
+        return null;
+      }
+      if (typeof r === 'object') {
+        if (typeof r.path === 'string') return r.path.trim();
+        if (typeof r.url === 'string') return r.url.trim();
+      }
+      return null;
+    };
+
+    const raw = normalize(candidate);
+    if (!raw) return null;
+
+    // If raw already looks like an absolute or contains a category, return normalized
+    if (raw.startsWith('/') || raw.includes('/')) {
+      return raw.startsWith('/') ? raw : `/${raw}`;
+    }
+
+    // Otherwise treat raw as a relative slug (e.g. 'cap') and build /{categorySlug}/{raw}
+    const slugify = (str = '') => str.toString().toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const categoryId = product.product_types?.category_id || product.product_types?.product_categories?.id;
+    const catFromTable = productCategories.find(c => c.id === categoryId)?.name;
+    const categoryName = catFromTable || product.product_types?.product_categories?.name || product.product_types?.name || '';
+    const categorySlug = slugify(categoryName || 'product');
+    const productSlug = slugify(raw);
+    return `/${categorySlug}/${productSlug}`;
+  };
+
   useEffect(() => {
     fetchProducts();
   }, [searchTerm]);
+
+  useEffect(() => {
+    // fetch product categories for building category slugs
+    const fetchCategories = async () => {
+      const { data, error } = await supabase.from('product_categories').select('*');
+      if (error) {
+        console.error('Error fetching product_categories:', error);
+        return;
+      }
+      setProductCategories(data || []);
+    };
+    fetchCategories();
+  }, []);
 
   useEffect(() => {
     if (products.length > 0) {
@@ -462,7 +517,21 @@ const SearchPage = () => {
                         alt={product.name}
                        className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-125 cursor-pointer"
                         onError={e => { e.target.src = "/logo-icon/logo.png"; }}
-                        onClick={() => session ? navigate('/product', { state: { product } }) : navigate('/signin')}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (!session) { navigate('/signin'); return; }
+                          const dbRoute = resolveProductRoute(product);
+                          if (dbRoute) { navigate(dbRoute); return; }
+
+                          const slugify = (str = '') => str.toString().toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+                          // Prefer category from product_categories table (fetched above)
+                          const categoryId = product.product_types?.category_id || product.product_types?.product_categories?.id;
+                          const catFromTable = productCategories.find(c => c.id === categoryId)?.name;
+                          const categoryName = catFromTable || product.product_types?.product_categories?.name || product.product_types?.name || '';
+                          const categorySlug = slugify(categoryName || 'product');
+                          const productSlug = slugify(product.name || product.id);
+                          navigate(`/${categorySlug}/${productSlug}`);
+                        }}
                       />
                       <button
                         className="absolute bottom-3 right-5 bg-white p-1.5 rounded-full shadow-md font-dm-sans"
@@ -501,7 +570,20 @@ const SearchPage = () => {
                     </div>
                     <h3
                       className="font-semibold mt-2 text-black text-center font-dm-sans cursor-pointer "
-                      onClick={() => session ? navigate('/product', { state: { product } }) : navigate('/signin')}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!session) { navigate('/signin'); return; }
+                        const dbRoute = resolveProductRoute(product);
+                        if (dbRoute) { navigate(dbRoute); return; }
+
+                        const slugify = (str = '') => str.toString().toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+                        const categoryId = product.product_types?.category_id || product.product_types?.product_categories?.id;
+                        const catFromTable = productCategories.find(c => c.id === categoryId)?.name;
+                        const categoryName = catFromTable || product.product_types?.product_categories?.name || product.product_types?.name || '';
+                        const categorySlug = slugify(categoryName || 'product');
+                        const productSlug = slugify(product.name || product.id);
+                        navigate(`/${categorySlug}/${productSlug}`);
+                      }}
                     >
                       {product.name}
                     </h3>

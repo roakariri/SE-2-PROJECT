@@ -152,7 +152,7 @@ const Navigation = () => {
   return (
     <div className="fixed w-full bg-cover bg-white z-50 ">
       {/* Header */}
-      <div className="w-full h-15  bg-white border border-b-[#171738]">
+      <div className="w-full h-15 bg-white border border-b border-b-[#171738]">
         <div className="p-1 phone:grid phone:grid-cols-1 phone:items-center phone:justify-center phone:align-center tablet:grid tablet:justify-center tablet:items-center laptop:flex bigscreen:flex justify-center items-center  laptop:gap-6">
           {/* Logo */}
           <div className="phone:w-full phone:h-10 tablet:h-15 laptop:h-20 bigscreen:h-20 bigscreen:mr-[0px] flex phone:flex-row phone:items-center phone:justify-between align-start laptop:w-[210px]">
@@ -267,7 +267,7 @@ const Navigation = () => {
       </div>
 
       {/* Sub Nav Hamburger for phone/tablet */}
-      <div className="w-full bg-white text-bold border-b big-laptop:hidden">
+      <div className="w-full bg-white text-bold border-b border-b-[#171738] big-laptop:hidden">
         <div className="flex items-center justify-between px-5 py-2">
           <span className="font-bold text-base text-[#3B5B92] ">Menu</span>
           <button
@@ -300,7 +300,7 @@ const Navigation = () => {
 
       
       {/* Sub Nav for laptop and up */}
-      <div className="w-full  bg-white border-b phone:hidden laptop:hidden big-laptop:block">
+      <div className="w-full bg-white border-b border-b-[#171738] phone:hidden laptop:hidden big-laptop:block">
         <div className="subheader-home flex flex-nowrap mt-2 justify-center items-center laptop:justify-around p-8 gap-4 ">
           {subNavLinks.map((label) => {
             const isActive = location.pathname === subNavRoutes[label];

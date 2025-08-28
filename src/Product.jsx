@@ -1,5 +1,5 @@
 import { UserAuth } from "./context/AuthContext";
-import ProductSample from "./components/Product-Pages/Productsample";
+import ProductSample from "./components/Product-Pages/Mockup-tool-page";
 import Footer from "./components/visitor/Footer";
 import Navigation from "./components/registered/Navigation";
 

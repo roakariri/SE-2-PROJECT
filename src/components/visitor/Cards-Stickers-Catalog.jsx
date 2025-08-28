@@ -397,7 +397,12 @@ const CardsStickersCatalog = () => {
                            alt={product.name}
                            className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-125 cursor-pointer"
                            onError={e => { e.target.src = "/logo-icon/logo.png"; }}
-                           onClick={() => session ? navigate('/product', { state: { product } }) : navigate('/signin')}
+                           onClick={() => {
+                             if (!session) { navigate('/signin'); return; }
+                             const route = product.route || product.routes;
+                             if (route) navigate(route);
+                             else navigate('/product', { state: { product } });
+                           }}
 
                          />
                          <button
@@ -437,7 +442,18 @@ const CardsStickersCatalog = () => {
                        </div>
                          <h3
                              className="font-semibold mt-2 text-black text-center tablet:text-center semibig:text-center laptop:text-center cursor-pointer"
-                             onClick={() => session ? navigate('/product', { state: { product } }) : navigate('/signin')}
+                             onClick={() => {
+                               if (!session) {
+                                 navigate('/signin');
+                                 return;
+                               }
+                               const route = product.route || product.routes;
+                               if (route) {
+                                 navigate(route);
+                               } else {
+                                 navigate('/product', { state: { product } });
+                               }
+                             }}
                          >
                              {product.name}
                          </h3>

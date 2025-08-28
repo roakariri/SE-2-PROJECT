@@ -2,7 +2,7 @@ import { UserAuth } from "./context/AuthContext";
 import Header from "./components/visitor/Header";
 import Navigation from "./components/registered/Navigation";
 import Footer from "./components/visitor/Footer";
-import CartPage from "./components/registered/Cart-Page.jsx";
+import CartPage from "./components/Order-Pages/Cart-Page.jsx";
 
 
 

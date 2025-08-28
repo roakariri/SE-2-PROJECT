@@ -14,14 +14,34 @@ const DEFAULT_AVATAR = "/logo-icon/profile-icon.svg";
 const AccountPage = () => {
     // Use imported PH_CITIES_BY_PROVINCE from './province.js'
 
-    const [activeTab, setActiveTab] = React.useState("homebase");
+    const [activeTab, setActiveTab] = React.useState(() => {
+        try {
+            return localStorage.getItem('accountActiveTab') || 'homebase';
+        } catch (err) {
+            return 'homebase';
+        }
+    });
     const navigate = useNavigate();
     const { signOut } = UserAuth();
     const [userName, setUserName] = React.useState("");
     const [session, setSession] = React.useState(null);
     const [firstName, setFirstName] = React.useState("");
     const [lastName, setLastName] = React.useState("");
+    const [firstNameError, setFirstNameError] = React.useState("");
+    const [lastNameError, setLastNameError] = React.useState("");
     const [profilePic, setProfilePic] = React.useState(DEFAULT_AVATAR);
+    // Try to get cached profile photo from localStorage
+    const getCachedProfilePhoto = () => {
+        if (typeof window !== 'undefined') {
+            try {
+                return localStorage.getItem('profilePhotoUrl') || DEFAULT_AVATAR;
+            } catch (e) {
+                return DEFAULT_AVATAR;
+            }
+        }
+        return DEFAULT_AVATAR;
+    };
+    const [profilePhotoUrl, setProfilePhotoUrl] = React.useState(getCachedProfilePhoto());
     const [selectedFile, setSelectedFile] = React.useState(null);
     const [successMsg, setSuccessMsg] = React.useState("");
     const [email, setEmail] = React.useState("");
@@ -93,24 +113,60 @@ const AccountPage = () => {
     const fetchUserAndProfile = React.useCallback(async () => {
         const { data: { session } } = await supabase.auth.getSession();
         setSession(session);
-        let displayName = session?.user?.user_metadata?.display_name || "User";
+        // derive display name from provider metadata (Google, etc.) or fallback
+        const meta = session?.user?.user_metadata || {};
+        let displayName = meta?.display_name || meta?.full_name || meta?.name || "";
+        // fallback to email local-part if no name from provider
+        if (!displayName) {
+            const emailLocal = (session?.user?.email || "").split("@")[0];
+            displayName = emailLocal || "User";
+        }
+
         setEmail(session?.user?.email || "");
         if (session?.user) {
+            // Upsert profile and include display_name/avatar if available from provider so
+            // the profiles table has the name immediately after social sign-up.
+            const profileUpsert = { user_id: session.user.id };
+            if (displayName) profileUpsert.display_name = displayName;
+            if (meta?.avatar_url) profileUpsert.avatar_url = meta.avatar_url;
+
             await supabase
                 .from("profiles")
-                .upsert({ user_id: session.user.id });
+                .upsert(profileUpsert, { onConflict: ['user_id'] });
 
             const { data: profileData } = await supabase
                 .from("profiles")
-                .select("avatar_url")
+                .select("avatar_url, display_name")
                 .eq("user_id", session.user.id)
                 .single();
+
             if (profileData && profileData.avatar_url) {
-                setProfilePic(profileData.avatar_url + "?t=" + Date.now());
+                try {
+                    let publicUrl = profileData.avatar_url;
+                    if (!publicUrl.startsWith('http')) {
+                        const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(profileData.avatar_url);
+                        publicUrl = urlData?.publicUrl || DEFAULT_AVATAR;
+                    }
+                    // cache the canonical public URL for other components (Navigation uses this)
+                    try {
+                        if (typeof window !== 'undefined') localStorage.setItem('profilePhotoUrl', publicUrl);
+                    } catch (e) {
+                        // ignore localStorage errors
+                    }
+                    setProfilePic(publicUrl + "?t=" + Date.now());
+                } catch (err) {
+                    setProfilePic(DEFAULT_AVATAR);
+                }
             } else {
                 setProfilePic(DEFAULT_AVATAR);
+                try {
+                    if (typeof window !== 'undefined') localStorage.setItem('profilePhotoUrl', DEFAULT_AVATAR);
+                } catch (e) {}
             }
-            const nameParts = displayName.split(" ");
+
+            // Prefer stored display_name from profiles, otherwise provider-derived
+            const finalDisplayName = (profileData && profileData.display_name) || displayName || "User";
+            const nameParts = finalDisplayName.split(" ");
             setFirstName(nameParts[0] || "");
             setLastName(nameParts[1] || "");
 
@@ -130,17 +186,285 @@ const AccountPage = () => {
         fetchUserAndProfile();
     }, [fetchUserAndProfile]);
 
+    // Listen for auth state changes (sign in / user update) and refresh profile so
+    // display name shows immediately after account creation or update.
+    React.useEffect(() => {
+        const onAuth = supabase.auth.onAuthStateChange((event, session) => {
+            // When a session appears or the user is updated, refresh profile data
+            if (session && (event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED')) {
+                fetchUserAndProfile();
+            }
+        });
+
+        return () => {
+            // Cleanup listener for both supabase v2 and v1 shapes
+            try {
+                if (onAuth?.data?.subscription?.unsubscribe) {
+                    onAuth.data.subscription.unsubscribe();
+                } else if (typeof onAuth === 'function') {
+                    onAuth();
+                }
+            } catch (err) {
+                // ignore cleanup errors
+            }
+        };
+    }, [fetchUserAndProfile]);
+
     React.useEffect(() => {
         if (activeTab === "profile") {
             fetchUserAndProfile();
         }
     }, [activeTab, fetchUserAndProfile]);
 
+    // Ensure profilePic is fetched directly from profiles table whenever the user id changes.
+    React.useEffect(() => {
+        let mounted = true;
+        const loadAvatar = async () => {
+            try {
+                if (!session?.user?.id) {
+                    if (mounted) setProfilePic(DEFAULT_AVATAR);
+                    return;
+                }
+                const { data, error } = await supabase
+                    .from('profiles')
+                    .select('avatar_url')
+                    .eq('user_id', session.user.id)
+                    .single();
+                if (!mounted) return;
+                if (error || !data || !data.avatar_url) {
+                    setProfilePic(DEFAULT_AVATAR);
+                    try { if (typeof window !== 'undefined') localStorage.setItem('profilePhotoUrl', DEFAULT_AVATAR); } catch(e){}
+                    return;
+                }
+                let publicUrl = data.avatar_url;
+                if (!publicUrl.startsWith('http')) {
+                    const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(publicUrl);
+                    publicUrl = urlData?.publicUrl || DEFAULT_AVATAR;
+                }
+                try { if (typeof window !== 'undefined') localStorage.setItem('profilePhotoUrl', publicUrl); } catch(e){}
+                if (mounted) setProfilePic(publicUrl + '?t=' + Date.now());
+            } catch (err) {
+                if (mounted) setProfilePic(DEFAULT_AVATAR);
+            }
+        };
+        loadAvatar();
+        return () => { mounted = false; };
+    }, [session?.user?.id]);
+
+    // derive auth providers from session (supporting multiple supabase shapes)
+    const providers = React.useMemo(() => {
+        try {
+            if (!session?.user) return [];
+            if (Array.isArray(session.user.identities) && session.user.identities.length > 0) {
+                return session.user.identities.map(i => (i.provider || '').toLowerCase()).filter(Boolean);
+            }
+            if (Array.isArray(session.user.app_metadata?.providers)) {
+                return session.user.app_metadata.providers.map(p => (p || '').toLowerCase()).filter(Boolean);
+            }
+            if (Array.isArray(session.user.user_metadata?.providers)) {
+                return session.user.user_metadata.providers.map(p => (p || '').toLowerCase()).filter(Boolean);
+            }
+            const possible = session.user.app_metadata?.provider || session.user.user_metadata?.provider;
+            if (typeof possible === 'string') return [possible.toLowerCase()];
+            return [];
+        } catch (err) {
+            return [];
+        }
+    }, [session]);
+
+    const showChangePassword = providers.includes('email');
+
+    // Helper: resolve a stored avatar value (storage path or absolute URL) to a usable public URL.
+    const resolveAvatarUrl = (val) => {
+        if (!val) return DEFAULT_AVATAR;
+        try {
+            if (typeof val === 'string') {
+                // allow absolute http(s), blob (object URLs), data URIs, and app-relative public paths directly
+                if (
+                    val.startsWith('http') ||
+                    val.startsWith('blob:') ||
+                    val.startsWith('data:') ||
+                    val.startsWith('/') ||
+                    val.includes('/storage/v1/object/public/')
+                ) return val;
+                // otherwise treat as storage path and get public URL
+                const { data } = supabase.storage.from('avatars').getPublicUrl(val);
+                return data?.publicUrl || DEFAULT_AVATAR;
+            }
+            return DEFAULT_AVATAR;
+        } catch (err) {
+            return DEFAULT_AVATAR;
+        }
+    };
+
+    // Debug helper: log and check the resolved avatar URL so we can see 403/404/CORS issues
+    React.useEffect(() => {
+    const resolved = resolveAvatarUrl(profilePic);
+        try {
+            console.debug('[Avatar] profilePic:', profilePic);
+            console.debug('[Avatar] resolved URL:', resolved);
+            if (resolved && resolved !== DEFAULT_AVATAR && resolved.startsWith('http')) {
+                // do a lightweight check
+                fetch(resolved, { method: 'HEAD' })
+                    .then(res => {
+                        console.debug('[Avatar] HEAD status for avatar:', res.status, resolved);
+                    })
+                    .catch(err => {
+                        console.error('[Avatar] HEAD fetch error for avatar:', err, resolved);
+                    });
+            }
+        } catch (e) {
+            console.error('[Avatar] debug error', e);
+        }
+    }, [profilePic]);
+
+    // Only fetch profile photo when session.user.id changes
+    React.useEffect(() => {
+        let isMounted = true;
+        async function fetchProfilePhoto() {
+            try {
+                if (!session?.user?.id) {
+                    if (isMounted) {
+                        setProfilePhotoUrl(DEFAULT_AVATAR);
+                        try { if (typeof window !== 'undefined') localStorage.setItem('profilePhotoUrl', DEFAULT_AVATAR); } catch(e){}
+                    }
+                    return;
+                }
+                const { data, error } = await supabase
+                    .from('profiles')
+                    .select('avatar_url')
+                    .eq('user_id', session.user.id)
+                    .single();
+                if (!isMounted) return;
+                if (error || !data || !data.avatar_url) {
+                    setProfilePhotoUrl(DEFAULT_AVATAR);
+                    try { if (typeof window !== 'undefined') localStorage.setItem('profilePhotoUrl', DEFAULT_AVATAR); } catch(e){}
+                } else {
+                    let publicUrl = data.avatar_url;
+                    if (typeof publicUrl === 'string' && !publicUrl.startsWith('http') && !publicUrl.startsWith('data:') && !publicUrl.startsWith('blob:') && !publicUrl.startsWith('/') && !publicUrl.includes('/storage/v1/object/public/')) {
+                        try {
+                            const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(data.avatar_url);
+                            publicUrl = urlData?.publicUrl || DEFAULT_AVATAR;
+                        } catch (err) {
+                            console.error('[Avatar] getPublicUrl error', err);
+                            publicUrl = DEFAULT_AVATAR;
+                        }
+                    }
+                    setProfilePhotoUrl(publicUrl || DEFAULT_AVATAR);
+                    try { if (typeof window !== 'undefined') localStorage.setItem('profilePhotoUrl', publicUrl || DEFAULT_AVATAR); } catch(e){}
+                }
+            } catch (err) {
+                console.error('[Avatar] fetchProfilePhoto error', err);
+                if (isMounted) setProfilePhotoUrl(DEFAULT_AVATAR);
+            }
+        }
+        fetchProfilePhoto();
+        return () => { isMounted = false; };
+    }, [session?.user?.id]);
+
     const handleProfilePicChange = (e) => {
         const file = e.target.files[0];
         if (file) {
+            // create preview URL and update both local state and cached profilePhotoUrl
+            const previewUrl = URL.createObjectURL(file);
+            // revoke previous object URL if any
+            try {
+                if (selectedFile && profilePic && typeof profilePic === 'string' && profilePic.startsWith('blob:')) {
+                    URL.revokeObjectURL(profilePic);
+                }
+            } catch (e) {
+                // ignore
+            }
             setSelectedFile(file);
-            setProfilePic(URL.createObjectURL(file));
+            setProfilePic(previewUrl);
+            setProfilePhotoUrl(previewUrl);
+            try { if (typeof window !== 'undefined') localStorage.setItem('profilePhotoUrl', previewUrl); } catch(e){}
+        }
+    };
+
+    const handleRemoveProfilePicture = async () => {
+        const user = session?.user;
+        if (!user) return;
+
+        // Revoke any blob url used for preview
+        try {
+            if (profilePic && typeof profilePic === 'string' && profilePic.startsWith('blob:')) {
+                URL.revokeObjectURL(profilePic);
+            }
+        } catch (e) {
+            // ignore
+        }
+
+        // Optimistic UI update
+        setSelectedFile(null);
+        setProfilePic(DEFAULT_AVATAR);
+        setProfilePhotoUrl(DEFAULT_AVATAR);
+        try { if (typeof window !== 'undefined') localStorage.setItem('profilePhotoUrl', DEFAULT_AVATAR); } catch(e){}
+
+        // Remove avatar_url from profiles table
+        try {
+            const { error } = await supabase
+                .from('profiles')
+                .update({ avatar_url: null })
+                .eq('user_id', user.id);
+            if (error) {
+                console.error('Error removing avatar_url from profiles:', error);
+                alert('Could not remove profile picture: ' + (error.message || 'Unknown error'));
+                return;
+            }
+        } catch (err) {
+            console.error('Unexpected error removing profile picture:', err);
+            alert('Unexpected error removing profile picture');
+            return;
+        }
+
+        // Refresh profile and page so other components pick up change
+        await fetchUserAndProfile();
+        try { window.location.reload(); } catch(e) { /* ignore */ }
+    };
+
+    // Name validation: allow letters (including repeats), spaces, hyphen, apostrophe;
+    // disallow consecutive repeated special characters (space, hyphen, apostrophe)
+    const validateName = (name) => {
+        if (typeof name !== 'string' || name.trim().length === 0) return false;
+        const allowed = /^[A-Za-z'\- ]+$/;
+        if (!allowed.test(name)) return false;
+        // disallow consecutive repeated special chars: ' ', '-', '\''
+        for (let i = 1; i < name.length; i++) {
+            const prev = name[i - 1];
+            const cur = name[i];
+            if ((prev === ' ' || prev === '-' || prev === "'") && prev === cur) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    const handleFirstNameChange = (e) => {
+        const val = e.target.value;
+        setFirstName(val);
+        if (val === "") {
+            setFirstNameError("");
+            return;
+        }
+        if (!validateName(val)) {
+            setFirstNameError("Only letters and special characters is allowed. No consecutive repeated special characters.");
+        } else {
+            setFirstNameError("");
+        }
+    };
+
+    const handleLastNameChange = (e) => {
+        const val = e.target.value;
+        setLastName(val);
+        if (val === "") {
+            setLastNameError("");
+            return;
+        }
+        if (!validateName(val)) {
+            setLastNameError("Only letters and special characters is allowed. No consecutive repeated special characters.");
+        } else {
+            setLastNameError("");
         }
     };
 
@@ -207,12 +531,15 @@ const AccountPage = () => {
             }
         }
 
-        setSelectedFile(null);
-        setSuccessMsg("Profile updated successfully!");
-        setTimeout(() => setSuccessMsg(""), 3000);
-        fetchUserAndProfile();
+    setSelectedFile(null);
+    setSuccessMsg("Profile updated successfully!");
+    setTimeout(() => setSuccessMsg(""), 3000);
+    await fetchUserAndProfile();
+    // Refresh the page to ensure all components pick up the new avatar/profile data
+    try { window.location.reload(); } catch (e) { console.warn('Could not reload window', e); }
     };
 
+    
     const handleSavePasswordChanges = async () => {
         const user = session?.user;
         if (!user) return;
@@ -230,7 +557,7 @@ const AccountPage = () => {
         }
 
         if (newPassword !== repeatPassword) {
-            alert("New password and repeat password do not match.");
+            alert("Passwords do not match.");
             return;
         }
 
@@ -246,7 +573,7 @@ const AccountPage = () => {
         setCurrentPassword("");
         setNewPassword("");
         setRepeatPassword("");
-        setPasswordSuccessMsg("Password updated successfully!");
+        setPasswordSuccessMsg("Password updated successfully.");
         setTimeout(() => setPasswordSuccessMsg(""), 3000);
     };
 
@@ -264,9 +591,13 @@ const AccountPage = () => {
 
         setAddressErrorMsg("");
 
-        // Validate required fields
-        if (!addressForm.first_name || !addressForm.last_name || !addressForm.street_address) {
-            setAddressErrorMsg("Please fill in all required fields: First Name, Last Name, and Street Address.");
+        // Validate required fields: ensure all address fields are present
+        const requiredFields = [
+            'first_name', 'last_name', 'street_address', 'province', 'city', 'postal_code', 'phone_number', 'label'
+        ];
+        const missing = requiredFields.filter(f => !addressForm[f] || (typeof addressForm[f] === 'string' && addressForm[f].trim() === ''));
+        if (missing.length > 0) {
+            setAddressErrorMsg('Please fill in all required address fields.');
             return;
         }
 
@@ -333,6 +664,16 @@ const AccountPage = () => {
         setShowAddressEditor(true);
     };
 
+    // Keep active tab persisted so the selected nav stays grayed-out across reloads
+    const handleSetActiveTab = (tab) => {
+        setActiveTab(tab);
+        try {
+            localStorage.setItem('accountActiveTab', tab);
+        } catch (err) {
+            // ignore storage errors
+        }
+    };
+
     const handleDeleteAddress = async (address_id) => {
         if (!session?.user?.id) return;
 
@@ -376,6 +717,7 @@ const AccountPage = () => {
         fetchUserAndProfile();
     };
 
+    
     return (
         <div className="min-h-screen w-full bg-white phone:pt-[212px] tablet:pt-[215px] laptop:pt-[166px] relative z-0">
             <div className="flex flex-row justify-center gap-[100px] h-full p-4 px-[100px]">
@@ -387,22 +729,22 @@ const AccountPage = () => {
                         </h1>
                     </div>
                     <div className="flex flex-col border border-black rounded w-[300px] justify-center">
-                        <div className="border border-black rounded w-[300px] h-[244px]" style={{ lineHeight: "50px" }}>
+                        <div className="border border-black rounded w-[300px] h-[244px] p-2" style={{ lineHeight: "50px" }}>
                             <button
-                                className={`w-full border text-left text-[18px] font-dm-sans text-black font-semibold bg-transparent rounded-none outline-none p-0 px-3 hover:bg-[#c4c4c4] ${activeTab === "homebase" ? "bg-[#eaeaea]" : ""}`}
-                                onClick={() => setActiveTab("homebase")}
+                                className={`w-full border text-left text-[18px] font-dm-sans ${activeTab === "homebase" ? 'bg-[#ECECEC] text-black' : 'text-black'} focus:outline-none font-semibold bg-transparent rounded-none outline-none p-0 px-3 `}
+                                onClick={() => handleSetActiveTab("homebase")}
                             >Homebase</button>
                             <button
-                                className={`w-full border text-left text-[18px] font-dm-sans text-black font-semibold bg-transparent rounded-none outline-none p-0 px-3 hover:bg-[#c4c4c4] ${activeTab === "orders" ? "bg-[#eaeaea]" : ""}`}
-                                onClick={() => setActiveTab("orders")}
+                                className={`w-full border text-left text-[18px] font-dm-sans ${activeTab === "orders" ? 'bg-[#ECECEC] text-black' : 'text-black'} focus:outline-none font-semibold bg-transparent rounded-none outline-none p-0 px-3 `}
+                                onClick={() => handleSetActiveTab("orders")}
                             >Orders</button>
                             <button
-                                className={`w-full border text-left text-[18px] font-dm-sans text-black font-semibold bg-transparent rounded-none outline-none p-0 px-3 hover:bg-[#c4c4c4] ${activeTab === "profile" ? "bg-[#eaeaea]" : ""}`}
-                                onClick={() => setActiveTab("profile")}
+                                className={`w-full border text-left text-[18px] font-dm-sans ${activeTab === "profile" ? 'bg-[#ECECEC] text-black' : 'text-black'} focus:outline-none font-semibold bg-transparent rounded-none outline-none p-0 px-3 `}
+                                onClick={() => handleSetActiveTab("profile")}
                             >Profile</button>
-                            <hr className="my-2 border-black mb-4" />
+                            <hr className="my-2 border-black mb-2" />
                             <button
-                                className="w-full border text-left text-[18px] font-dm-sans text-black font-semibold bg-transparent rounded-none outline-none p-0 px-3 hover:bg-[#c4c4c4]"
+                                className="w-full border text-left text-[18px] font-dm-sans text-black font-semibold bg-transparent rounded-none outline-none p-0 px-3 "
                                 onClick={async () => {
                                     await signOut();
                                     navigate("/");
@@ -466,25 +808,65 @@ const AccountPage = () => {
                         </div>
                         <div className="mt-6">
                             <p className="text-[24px] text-black font-dm-sans">Personal Information</p>
-                            <p className="mt-10 font-dm-sans text-black">MY INFORMATION</p>
+                            <p className="mt-10 font-dm-sans text-black text-[16px]">MY INFORMATION</p>
                             <div className="flex flex-row gap-10 mt-8 items-start">
-                                <div className="relative flex flex-col items-center">
-                                    <img
-                                        src={profilePic || DEFAULT_AVATAR}
-                                        alt="Profile"
-                                        className="w-32 h-32 rounded-full object-cover bg-gray-300"
-                                    />
-                                    <label htmlFor="profilePicUpload" className="absolute bottom-2 left-20 cursor-pointer bg-white rounded-full p-1 shadow-md border border-gray-300">
-                                        <img src="/logo-icon/camera-icon.svg" alt="Upload" className="w-6 h-6" />
-                                        <input
-                                            id="profilePicUpload"
-                                            type="file"
-                                            accept="image/*"
-                                            className="hidden"
-                                            onChange={handleProfilePicChange}
+
+                                <div className="flex flex-col">
+                                    <div className="relative flex flex-row items-center">
+                                        <img
+                                            src={(selectedFile && profilePic) ? profilePic : (resolveAvatarUrl(profilePhotoUrl) || resolveAvatarUrl(profilePic) || DEFAULT_AVATAR)}
+                                            alt="Profile"
+                                            className="w-32 h-32 rounded-full object-cover bg-gray-300"
+                                            onError={(e) => {
+                                                try { console.error('[Avatar] <img> failed to load src=', e?.target?.src); } catch (er) {}
+                                                try { if (typeof window !== 'undefined') localStorage.setItem('profilePhotoUrl', DEFAULT_AVATAR); } catch (e) {}
+                                                setProfilePic(DEFAULT_AVATAR);
+                                                setProfilePhotoUrl(DEFAULT_AVATAR);
+                                            }}
                                         />
-                                    </label>
+                                        <label
+                                            htmlFor="profilePicUpload"
+                                            className="absolute bottom-2 left-20 cursor-pointer bg-white rounded-full p-1 shadow-md border border-gray-300"
+                                            aria-label="Upload profile picture"
+                                        >
+                                            <img src="/logo-icon/camera-icon.svg" alt="Upload" className="w-6 h-6" />
+                                            <input
+                                                id="profilePicUpload"
+                                                type="file"
+                                                accept="image/*"
+                                                className="hidden"
+                                                onChange={handleProfilePicChange}
+                                                aria-label="Upload profile picture input"
+                                            />
+                                        </label>
+
+                                        
+
+                                        
+                                    </div>
+
+                                    <div>
+                                    {/* Remove button: show only when avatar is not the default */}
+                                        {(profilePhotoUrl && profilePhotoUrl !== DEFAULT_AVATAR) && (
+                                            <div className="mt-4 flex justify-center">
+                                                <button
+                                                    type="button"
+                                                    aria-label="Remove profile picture"
+                                                    className="px-3 py-1 text-[12px] rounded-md border border-gray-200 text-red-600 bg-white hover:bg-red-50 focus:outline-none flex items-center gap-2"
+                                                    onClick={() => {
+                                                        if (typeof window !== 'undefined' && window.confirm && !window.confirm('Remove profile picture?')) return;
+                                                        handleRemoveProfilePicture();
+                                                    }}
+                                                >
+                                                    <img src="/logo-icon/trash.svg" alt="Trash" className="h-5 w-5" />
+                                                    <span>Remove</span>
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
+                                    
+                                
                                 <form className="flex-1 grid grid-cols-2 gap-6">
                                     <div className="flex flex-col col-span-1">
                                         <label className="text-black font-dm-sans mb-2">First Name</label>
@@ -492,9 +874,10 @@ const AccountPage = () => {
                                             type="text"
                                             className="border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white"
                                             value={firstName}
-                                            onChange={e => setFirstName(e.target.value)}
-                                            placeholder={session?.user?.user_metadata?.display_name?.split(' ')[0] || "User"}
+                                            onChange={handleFirstNameChange}
+                                            placeholder={session?.user?.user_metadata?.display_name?.split(' ')[0] || "First Name"}
                                         />
+                                        {firstNameError && <p className="text-red-600 font-dm-sans text-sm mt-1">{firstNameError}</p>}
                                     </div>
                                     <div className="flex flex-col col-span-1">
                                         <label className="text-black font-dm-sans mb-2">Last Name</label>
@@ -502,15 +885,16 @@ const AccountPage = () => {
                                             type="text"
                                             className="border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white"
                                             value={lastName}
-                                            onChange={e => setLastName(e.target.value)}
-                                            placeholder={session?.user?.user_metadata?.display_name?.split(' ')[2] || "User"}
+                                            onChange={handleLastNameChange}
+                                            placeholder={session?.user?.user_metadata?.display_name?.split(' ')[2] || "Last Name"}
                                         />
+                                        {lastNameError && <p className="text-red-600 font-dm-sans text-sm mt-1">{lastNameError}</p>}
                                     </div>
                                     <div className="flex flex-col col-span-2">
                                         <label className="text-black font-dm-sans mb-2">Email Address</label>
                                         <input
                                             type="email"
-                                            className="border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white"
+                                            className="border border-gray-400 rounded-md px-4 py-3 text-gray-400 focus:outline-none font-dm-sans bg-white"
                                             value={email}
                                             onChange={e => setEmail(e.target.value)}
                                             placeholder="user@gmail.com"
@@ -532,62 +916,69 @@ const AccountPage = () => {
                         <hr className="my-2 border-black mb-4 mt-5" />
 
                         {/* Change Password */}
-                        <div>
-                            <p className="mt-10 font-dm-sans text-black">CHANGE PASSWORD</p>
-                            <form className="mt-7 w-full">
-                                <p className="font-dm-sans">Current Password</p>
-                                <div className="relative">
-                                    <input
-                                        type="password"
-                                        className="w-[49%] border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white"
-                                        value={currentPassword}
-                                        onChange={e => setCurrentPassword(e.target.value)}
-                                        placeholder="Enter your current password"
-                                    />
-                                    {isCurrentPasswordIncorrect && (
-                                        <span className="ml-4 text-red-600">
-                                            Incorrect password!!
-                                        </span>
-                                    )}
+                        {showChangePassword ? (
+                            <div>
+                                <p className="mt-10 font-dm-sans text-black">CHANGE PASSWORD</p>
+                                <form className="mt-7 w-full">
+                                    <p className="font-dm-sans">Current Password</p>
+                                    <div className="relative">
+                                        <input
+                                            type="password"
+                                            className="w-[49%] border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white"
+                                            value={currentPassword}
+                                            onChange={e => setCurrentPassword(e.target.value)}
+                                            placeholder="Enter your current password"
+                                        />
+                                        {isCurrentPasswordIncorrect && (
+                                            <span className="ml-4 text-red-600">
+                                                Incorrect password!!
+                                            </span>
+                                        )}
+                                    </div>
+                                </form>
+                                <a href="/forgot-password">Forgot Password?</a>
+                                <form className="mt-2 w-full grid grid-cols-2 gap-4">
+                                    <div>
+                                        <p className="font-dm-sans">New Password</p>
+                                        <input
+                                            type="password"
+                                            className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white"
+                                            value={newPassword}
+                                            onChange={e => setNewPassword(e.target.value)}
+                                            placeholder="Enter your new password"
+                                        />
+                                    </div>
+                                    <div>
+                                        <p className="font-dm-sans">Repeat Password</p>
+                                        <input
+                                            type="password"
+                                            className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white"
+                                            value={repeatPassword}
+                                            onChange={e => setRepeatPassword(e.target.value)}
+                                            placeholder="Repeat password"
+                                        />
+                                    </div>
+                                </form>
+                                <div className="flex justify-end mt-4">
+                                    <button
+                                        type="button"
+                                        className="bg-[#3B5B92] text-white font-bold font-dm-sans px-6 py-2 rounded-md hover:bg-[#2a4370] focus:outline-none focus:ring-0"
+                                        onClick={() => {
+                                            if (!isCurrentPasswordIncorrect) {
+                                                handleSavePasswordChanges();
+                                            }
+                                        }}
+                                    >
+                                        {passwordSuccessMsg ? passwordSuccessMsg : "Save Changes"}
+                                    </button>
                                 </div>
-                            </form>
-                            <a href="/forgot-password">Forgot Password?</a>
-                            <form className="mt-2 w-full grid grid-cols-2 gap-4">
-                                <div>
-                                    <p className="font-dm-sans">New Password</p>
-                                    <input
-                                        type="password"
-                                        className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white"
-                                        value={newPassword}
-                                        onChange={e => setNewPassword(e.target.value)}
-                                        placeholder="Enter your new password"
-                                    />
-                                </div>
-                                <div>
-                                    <p className="font-dm-sans">Repeat Password</p>
-                                    <input
-                                        type="password"
-                                        className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white"
-                                        value={repeatPassword}
-                                        onChange={e => setRepeatPassword(e.target.value)}
-                                        placeholder="Repeat password"
-                                    />
-                                </div>
-                            </form>
-                            <div className="flex justify-end mt-4">
-                                <button
-                                    type="button"
-                                    className="bg-[#3B5B92] text-white font-bold font-dm-sans px-6 py-2 rounded-md hover:bg-[#2a4370] focus:outline-none focus:ring-0"
-                                    onClick={() => {
-                                        if (!isCurrentPasswordIncorrect) {
-                                            handleSavePasswordChanges();
-                                        }
-                                    }}
-                                >
-                                    {passwordSuccessMsg ? passwordSuccessMsg : "Save Changes"}
-                                </button>
                             </div>
-                        </div>
+                        ) : (
+                            <div className="mt-3 mb-3">
+                                <p className="text-black text-[16px] font-dm-sans">CHANGE PASSWORD</p>
+                                <p className="mt-6 text-gray-600 font-dm-sans">Password is managed by your external provider Google. To change it, use your provider account settings.</p>
+                            </div>
+                        )}
                         <hr className="my-2 border-black mb-4 mt-5" />
 
                         {/* Saved Addresses */}
@@ -820,6 +1211,7 @@ const AccountPage = () => {
                                                                 setShowCityDropdown(true);
                                                             }}
                                                             onBlur={() => setTimeout(() => setShowCityDropdown(false), 150)}
+                                                            required
                                                         />
                                                         <button
                                                             type="button"
@@ -877,6 +1269,7 @@ const AccountPage = () => {
                                                                 setShowBarangayDropdown(true);
                                                             }}
                                                             onBlur={() => setTimeout(() => setShowBarangayDropdown(false), 150)}
+                                                                required
                                                         />
                                                         <button
                                                             type="button"
@@ -935,6 +1328,7 @@ const AccountPage = () => {
                                                         });
                                                     }}
                                                     maxLength={4}
+                                                    required
                                                 />
                                             </div>
                                             {/* Phone Number & Label As side by side */}
@@ -959,6 +1353,7 @@ const AccountPage = () => {
                                                             });
                                                         }}
                                                         maxLength={11}
+                                                        required
                                                     />
                                                 </div>
                                                 <div className="flex flex-1 gap-4 items-end">

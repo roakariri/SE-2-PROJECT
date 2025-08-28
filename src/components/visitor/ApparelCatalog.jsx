@@ -63,9 +63,10 @@ const ApparelCatalog = () => {
   }, [session]);
 
   const fetchProducts = async () => {
+    // Fetch the route field from the database for each product
     const { data, error } = await supabase
       .from("products")
-      .select("*, product_types(id, name, category_id, product_categories(id, name))");
+      .select("*, route, product_types(id, name, category_id, product_categories(id, name))");
 
     if (error) {
       console.error("Error fetching products:", error);
@@ -170,7 +171,7 @@ const ApparelCatalog = () => {
   }, [filterDrawerOpen]);
 
   return (
-    <div className="w-full bg-cover bg-white phone:pt-[210px] tablet:pt-[220px] laptop:pt-[165px] landing-page-container z-0">
+    <div className="w-full bg-cover bg-white phone:pt-[210px] tablet:pt-[220px] laptop:pt-[161px] landing-page-container z-0">
       {/* Hero Banner */}
       <div className="flex laptop:h-[425px] phone:h-[210px] flex-col items-center justify-center z-5 bg-[url('/images/apparel-banner.png')] bg-cover bg-center">
         <p className="text-white"><a className="hover:underline hover:text-white text-white" href="/Homepage">Home</a> /</p>
@@ -389,7 +390,18 @@ const ApparelCatalog = () => {
                         alt={product.name}
                         className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-125 cursor-pointer"
                         onError={e => { e.target.src = "/apparel-images/caps.png"; }}
-                        onClick={() => session ? navigate('/product', { state: { product } }) : navigate('/signin')}
+                        onClick={() => {
+                          if (!session) {
+                            navigate('/signin');
+                          } else if (product.route) {
+                            navigate(product.route);
+                          } else {
+                            if (!session) { navigate('/signin'); return; }
+                            const route = product.route || product.routes;
+                            if (route) navigate(route);
+                            else navigate('/product', { state: { product } });
+                          }
+                        }}
                       />
                       <button
                         className="absolute bottom-3 right-5 bg-white p-1.5 rounded-full shadow-md"
@@ -424,7 +436,18 @@ const ApparelCatalog = () => {
                     </div>
                     <h3
                       className="font-semibold mt-2 text-black text-center tablet:text-center semibig:text-center laptop:text-center cursor-pointer"
-                      onClick={() => session ? navigate('/product', { state: { product } }) : navigate('/signin')}
+                      onClick={() => {
+                        if (!session) {
+                          navigate('/signin');
+                        } else if (product.route) {
+                          navigate(product.route);
+                        } else {
+                          if (!session) { navigate('/signin'); return; }
+                          const route = product.route || product.routes;
+                          if (route) navigate(route);
+                          else navigate('/product', { state: { product } });
+                        }
+                      }}
                     >
                       {product.name}
                     </h3>

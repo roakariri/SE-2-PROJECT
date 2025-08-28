@@ -1,10 +1,15 @@
 const ProjectsPage = () => {
 
 
-    return (
-        <div className="min-h-screen w-full bg-[#3B5B92] flex flex-col justify-center items-center bg-[url('/images/construction.png')] bg-cover bg-center phone:pt-[212px] tablet:pt-[215px] laptop:pt-[166px] relative z-0">
-            <p className="text-[50px] text-white font-dm-sans p-10 text-center font-bold">We’re currently working on something<span className="italic"> GOOD</span> and <span className="text-shadow-glow text-yellow-400 font-dm-sans">GREAT</span>✨.</p>
-            <p className="text-white font-dm-sans font-bold text-[18px]">My Projects Page</p>
+      return (
+        <div className="min-h-screen p-[100px] w-full flex flex-col bg-white phone:pt-[212px] tablet:pt-[215px] laptop:pt-[166px] relative z-0">
+            <div className="mt-10">
+                <p className="text-black font-bold text-[36px] font-dm-sans">My Projects</p>
+                <div className="flex flex-col items-center font-dm-sans justify-center mt-[100px]">
+                    <p className="text-[20px] font-bold text-black">No created projects yet.</p>
+                    <p className="text-black font-dm-sans">Choose a product and upload your design to create one.</p>
+                </div>
+            </div>
         </div>
 
 

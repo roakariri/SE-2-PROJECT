@@ -6,7 +6,6 @@ import "../../Signin.css";
 
 const Signin = () => {
 
-  // SVG icons for show/hide password
   const EyeIcon = (
     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
       <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12s3.75-7.5 9.75-7.5 9.75 7.5 9.75 7.5-3.75 7.5-9.75 7.5S2.25 12 2.25 12z" />
@@ -19,8 +18,7 @@ const Signin = () => {
     </svg>
   );
   const [showPassword, setShowPassword] = useState(false);
-  // ...existing code...
-  // ...existing code...
+  
   const handleForgotPasswordPage = (e) => {
     e.preventDefault();
     navigate("/forgot-password");
@@ -89,7 +87,6 @@ const Signin = () => {
     // If user not found in custom table, try to fetch from auth.users
     let provider = null;
     if (!userData || userError) {
-      // Fallback: check in auth.users
       const { data: authUser, error: authError } = await supabase
         .from('auth.users')
         .select('id, email, app_metadata')

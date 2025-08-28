@@ -5,13 +5,16 @@ import { supabase } from "../../supabaseClient";
 const FavoritesPage = () => {
     const [favorites, setFavorites] = React.useState([]);
     const [loading, setLoading] = React.useState(true);
+    const [session, setSession] = React.useState(null);
+    const [productCategories, setProductCategories] = React.useState([]);
     const navigate = useNavigate();
 
     React.useEffect(() => {
         const fetchFavorites = async () => {
             setLoading(true);
-            // Get current user
+            // Get current session and user
             const { data: { session } } = await supabase.auth.getSession();
+            setSession(session);
             const user = session?.user;
             if (!user) {
                 setFavorites([]);
@@ -77,7 +80,62 @@ const FavoritesPage = () => {
         };
 
         fetchFavorites();
+        // fetch categories for building routes
+        const fetchCategories = async () => {
+            const { data, error } = await supabase.from('product_categories').select('*');
+            if (error) {
+                console.error('Error fetching product_categories:', error);
+                return;
+            }
+            setProductCategories(data || []);
+        };
+        fetchCategories();
     }, []);
+
+    const resolveProductRoute = (product) => {
+        const candidate = product?.routes ?? product?.route ?? null;
+        if (!candidate) {
+            // build fallback from category and product name
+            const slugify = (str = '') => str.toString().toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+            const categoryId = product.product_types?.category_id || product.product_types?.product_categories?.id;
+            const catFromTable = productCategories.find(c => c.id === categoryId)?.name;
+            const categoryName = catFromTable || product.product_types?.product_categories?.name || product.product_types?.name || '';
+            const categorySlug = slugify(categoryName || 'product');
+            const productSlug = slugify(product.name || product.id);
+            return `/${categorySlug}/${productSlug}`;
+        }
+
+        const normalize = (r) => {
+            if (!r) return null;
+            if (typeof r === 'string') return r.trim();
+            if (Array.isArray(r)) {
+                for (const item of r) {
+                    if (typeof item === 'string') {
+                        return item.trim();
+                    }
+                }
+                return null;
+            }
+            if (typeof r === 'object') {
+                if (typeof r.path === 'string') return r.path.trim();
+                if (typeof r.url === 'string') return r.url.trim();
+            }
+            return null;
+        };
+
+        const raw = normalize(candidate);
+        if (!raw) return null;
+        if (raw.startsWith('/') || raw.includes('/')) return raw.startsWith('/') ? raw : `/${raw}`;
+
+        // treat relative slug as routes column => build /{category}/{raw}
+        const slugify = (str = '') => str.toString().toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+        const categoryId = product.product_types?.category_id || product.product_types?.product_categories?.id;
+        const catFromTable = productCategories.find(c => c.id === categoryId)?.name;
+        const categoryName = catFromTable || product.product_types?.product_categories?.name || product.product_types?.name || '';
+        const categorySlug = slugify(categoryName || 'product');
+        const productSlug = slugify(raw);
+        return `/${categorySlug}/${productSlug}`;
+    };
 
     return (
         <div className="min-h-screen p-[100px] w-full flex flex-col bg-white phone:pt-[212px] tablet:pt-[215px] laptop:pt-[166px] relative z-0">
@@ -109,7 +167,15 @@ const FavoritesPage = () => {
                                         alt={product.name}
                                         className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-125 cursor-pointer"
                                         onError={e => { e.target.src = "/logo-icon/logo.png"; }}
-                                        onClick={() => navigate('/product', { state: { product } })}
+                                                                                onClick={() => {
+                                                                                    if (!session) {
+                                                                                        navigate('/signin');
+                                                                                        return;
+                                                                                    }
+                                                                                    const route = product.route || product.routes;
+                                                                                    if (route) navigate(route);
+                                                                                    else navigate('/product', { state: { product } });
+                                                                                }}
                                     />
                                     {/* Heart icon: red by default, click to remove from favorites */}
                                     <button
@@ -138,7 +204,15 @@ const FavoritesPage = () => {
                                 </div>
                                 <h3
                                     className="font-semibold mt-2 text-black text-center tablet:text-center semibig:text-center laptop:text-center cursor-pointer hover:underline"
-                                    onClick={() => navigate('/product', { state: { product } })}
+                                                                        onClick={() => {
+                                                                            if (!session) {
+                                                                                navigate('/signin');
+                                                                                return;
+                                                                            }
+                                                                            const route = product.route || product.routes;
+                                                                            if (route) navigate(route);
+                                                                            else navigate('/product', { state: { product } });
+                                                                        }}
                                 >
                                     {product.name}
                                 </h3>
@@ -152,4 +226,4 @@ const FavoritesPage = () => {
     );
 }
 
-export default FavoritesPage;
+export default FavoritesPage;                                                                                                                                           
