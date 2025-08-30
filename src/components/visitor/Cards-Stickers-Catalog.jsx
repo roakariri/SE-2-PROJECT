@@ -398,7 +398,7 @@ const CardsStickersCatalog = () => {
                            className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-125 cursor-pointer"
                            onError={e => { e.target.src = "/logo-icon/logo.png"; }}
                            onClick={() => {
-                             if (!session) { navigate('/signin'); return; }
+                             // Allow unauthenticated users to view product pages
                              const route = product.route || product.routes;
                              if (route) navigate(route);
                              else navigate('/product', { state: { product } });
@@ -407,10 +407,10 @@ const CardsStickersCatalog = () => {
                          />
                          <button
                            className="absolute bottom-3 right-5 bg-white p-1.5 rounded-full shadow-md"
-                           onClick={async (e) => {
+                             onClick={async (e) => {
                              e.stopPropagation();
                              if (!session) {
-                               navigate('/signin');
+                               alert('Please sign in to add favorites.');
                                return;
                              }
                              const user = session.user;

@@ -36,6 +36,8 @@ const Hoodie = () => {
     const fileInputRef = useRef(null);
     const [uploadedPreviewUrls, setUploadedPreviewUrls] = useState([]);
     const [uploadError, setUploadError] = useState(null);
+    const [cartError, setCartError] = useState(null);
+    const [cartSuccess, setCartSuccess] = useState(null);
 
     const slug = location.pathname.split('/').filter(Boolean).pop();
 
@@ -355,6 +357,113 @@ const Hoodie = () => {
     };
 
     const totalPrice = (price || 0) + Object.values(selectedVariants).reduce((acc, val) => acc + (val?.price || 0), 0);
+
+    const unitPrice = (Number(price) || 0) + Object.values(selectedVariants).reduce((acc, val) => acc + (Number(val?.price) || 0), 0);
+
+    // Handle Add to Cart (copied/adapted)
+    const handleAddToCart = async () => {
+        if (!productId) {
+            setCartError("No product selected");
+            return;
+        }
+
+        const userId = session?.user?.id ?? await getCurrentUserId();
+        if (!userId) {
+            setCartError("Please sign in to add to cart");
+            navigate("/signin");
+            return;
+        }
+
+        setCartError(null);
+        setCartSuccess(null);
+
+        try {
+            const { data: existingCarts, error: checkError } = await supabase
+                .from("cart")
+                .select("cart_id, quantity, total_price")
+                .eq("user_id", userId)
+                .eq("product_id", productId);
+
+            if (checkError) throw checkError;
+
+            let cartId;
+            let cartMatched = false;
+
+            for (const cart of existingCarts || []) {
+                const { data: cartVariants, error: varError } = await supabase
+                    .from("cart_variants")
+                    .select("cartvariant_id, cart_id")
+                    .eq("cart_id", cart.cart_id)
+                    .eq("user_id", userId);
+
+                if (varError) throw varError;
+
+                const existingVarSet = new Set((cartVariants || []).map((v) => `${v.cartvariant_id}`));
+                const selectedVarSet = new Set(Object.values(selectedVariants || {}).map((val) => `${val?.variant_value_id ?? val?.id ?? val}`));
+
+                if (existingVarSet.size === selectedVarSet.size && [...existingVarSet].every((v) => selectedVarSet.has(v))) {
+                    cartMatched = true;
+                    const newQuantity = (Number(cart.quantity) || 0) + Number(quantity || 0);
+                    const newTotal = (Number(unitPrice) || 0) * newQuantity;
+                    const { error: updateError } = await supabase
+                        .from("cart")
+                        .update({ quantity: newQuantity, total_price: newTotal, base_price: Number(price) || 0 })
+                        .eq("cart_id", cart.cart_id)
+                        .eq("user_id", userId);
+                    if (updateError) throw updateError;
+                    cartId = cart.cart_id;
+                    break;
+                }
+            }
+
+            if (!cartMatched) {
+                const { data: cartData, error: cartError } = await supabase
+                    .from("cart")
+                    .insert([
+                        {
+                            user_id: userId,
+                            product_id: productId,
+                            quantity: quantity,
+                            base_price: Number(price) || 0,
+                            total_price: unitPrice * quantity,
+                        },
+                    ])
+                    .select("cart_id")
+                    .single();
+
+                if (cartError) throw cartError;
+                if (!cartData || !cartData.cart_id) throw new Error("Failed to retrieve cart_id after insertion");
+
+                cartId = cartData.cart_id;
+
+                const variantInserts = Object.entries(selectedVariants).map(([groupId, value]) => ({
+                    cart_id: cartId,
+                    user_id: userId,
+                    cartvariant_id: value?.variant_value_id ?? value?.id ?? value,
+                    price: Number(value?.price) || 0,
+                }));
+
+                if (variantInserts.length > 0) {
+                    const { error: variantsError } = await supabase.from("cart_variants").insert(variantInserts);
+                    if (variantsError) {
+                        await supabase.from("cart").delete().eq("cart_id", cartId).eq("user_id", userId);
+                        throw variantsError;
+                    }
+                }
+            }
+
+            setCartSuccess("Item added to cart!");
+            setQuantity(1);
+            setTimeout(() => setCartSuccess(null), 3000);
+        } catch (err) {
+            console.error("Error adding to cart - Details:", { message: err.message, code: err.code, details: err.details });
+            if (err.code === "23505") {
+                setCartError("This item with the same variants is already in your cart");
+            } else {
+                setCartError("Failed to add to cart: " + (err.message || "Unknown error"));
+            }
+        }
+    };
 
 
     // Upload handler for design files (wired to the Upload button)
@@ -750,7 +859,20 @@ const Hoodie = () => {
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">QUANTITY</div>
                             <div className="inline-flex items-center border border-blaack rounded">
                                 <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={decrementQuantity} aria-label="Decrease quantity" disabled={quantity <= 1}>-</button>
-                                <div className="px-4 text-black" aria-live="polite">{quantity}</div>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    value={quantity}
+                                    onChange={(e) => {
+                                        const v = Number(e.target.value);
+                                        setQuantity(isNaN(v) || v < 1 ? 1 : v);
+                                    }}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') e.currentTarget.blur();
+                                    }}
+                                    className="w-20 text-center px-2 text-black outline-none"
+                                    aria-label="Quantity input"
+                                />
                                 <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={incrementQuantity} aria-label="Increase quantity">+</button>
                             </div>
                         </div>
@@ -759,7 +881,8 @@ const Hoodie = () => {
 
                         {/* footer actions pinned at bottom */}
                         <div className="flex items-center gap-4 mt-4">
-                            <button className="bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold">ADD TO CART</button>
+                            <button onClick={handleAddToCart} className="bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold">{cartSuccess ? cartSuccess : 'ADD TO CART'}</button>
+                            {cartError && <div className="text-red-600 text-sm ml-2">{cartError}</div>}
                             <button
                                 className="bg-white p-1.5 rounded-full shadow-md"
                                 onClick={toggleFavorite}

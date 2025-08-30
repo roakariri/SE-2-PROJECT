@@ -180,26 +180,90 @@ const MockupToolPage = () => {
     };
 
     return (
-        <div className="w-full bg-cover bg-white phone:pt-[210px] tablet:pt-[220px] laptop:pt-[165px] landing-page-container z-0">
-            <div className="max-w-[900px] mx-auto py-8">
-                <div className="flex gap-3 items-center justify-center mb-4">
-                    <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileChange} className="hidden" id="fileInput" />
-                    <label htmlFor="fileInput" className="bg-[#27496d] text-white px-3 py-2 rounded cursor-pointer flex items-center gap-2">
-                        <img src="/logo-icon/upload.svg" alt="upload" className="h-4 w-4" />
-                        Upload Image
-                    </label>
-                    <input value={textValue} onChange={(e) => setTextValue(e.target.value)} placeholder="Add text" className="border px-2 py-1 rounded" />
-                    <button onClick={addText} className="border px-3 py-1 rounded bg-white">Add Text</button>
-                    <button onClick={deleteSelected} className="border px-3 py-1 rounded bg-white">Delete</button>
-                    <button onClick={bringForward} className="border px-3 py-1 rounded bg-white">Bring Forward</button>
-                    <button onClick={sendBackward} className="border px-3 py-1 rounded bg-white">Send Back</button>
-                    <button onClick={flipHorizontal} className="border px-3 py-1 rounded bg-white">Flip</button>
-                    <button onClick={resetCanvas} className="border px-3 py-1 rounded bg-white">Reset</button>
-                    <button onClick={downloadPNG} className="border px-3 py-1 rounded bg-white">Download PNG</button>
+        <div className="w-full min-h-screen bg-gray-100 phone:pt-[120px] tablet:pt-[120px] laptop:pt-[120px] landing-page-container z-0">
+            {/* top spacing / header placeholder */}
+            <div className="max-w-[1200px] mx-auto">
+                <div className="mt-6 mb-6">
+                    {/* Mockup Tool Title */}
+                    <div className="bg-white border rounded-t px-4 py-3 shadow-sm">
+                        <h2 className="text-lg font-semibold text-gray-800">MOCKUP TOOL</h2>
+                    </div>
                 </div>
 
-                <div className="bg-white border border-gray-200 p-4 flex justify-center">
-                    <canvas ref={canvasElRef} id="mockupCanvas" width={canvasSize.width} height={canvasSize.height} className="mx-auto" />
+                <div className="flex gap-6">
+                    {/* Left control card */}
+                    <aside className="w-[420px]">
+                        <div className="bg-white border rounded p-6 shadow-sm">
+                            <h3 className="text-2xl font-bold text-gray-800 mb-4">Design</h3>
+
+                            <div className="border-dashed border-2 border-gray-300 rounded p-6 mb-4 flex flex-col items-center justify-center">
+                                <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileChange} className="hidden" id="fileInput" />
+                                <label htmlFor="fileInput" className="inline-flex items-center gap-2 bg-[#27496d] text-white px-4 py-2 rounded cursor-pointer">
+                                    <img src="/logo-icon/upload.svg" alt="upload" className="h-4 w-4" />
+                                    UPLOAD FILE
+                                </label>
+                                <p className="text-xs text-gray-500 mt-3 text-center">Accepted File Types: JPEG, JPG, PNG, WEBP<br/>• Max size of 20 MB.</p>
+                            </div>
+
+                            <div>
+                                <div className="font-semibold text-gray-700 mb-2">Recent Uploads</div>
+                                <div className="flex gap-3">
+                                    {/* placeholder recent thumbnails - real thumbnails would be rendered from uploads */}
+                                    <div className="w-20 h-20 bg-gray-50 border rounded flex items-center justify-center">
+                                        <img src="/logo-icon/upload.svg" alt="recent" className="w-10 h-10 opacity-60" />
+                                    </div>
+                                    <div className="w-20 h-20 bg-gray-50 border rounded flex items-center justify-center">
+                                        <img src="/logo-icon/upload.svg" alt="recent" className="w-10 h-10 opacity-60" />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="mt-6">
+                                <div className="font-semibold text-gray-700 mb-2">Color</div>
+                                <div className="flex gap-2">
+                                    <button className="w-8 h-8 rounded bg-white border" />
+                                    <button className="w-8 h-8 rounded bg-black border" />
+                                    <button className="w-8 h-8 rounded bg-gray-300 border" />
+                                </div>
+                            </div>
+
+                        </div>
+                    </aside>
+
+                    {/* Center mockup canvas area */}
+                    <main className="flex-1 flex flex-col items-center">
+                        <div className="w-full bg-white border rounded p-6 shadow-sm flex items-center justify-center" style={{ height: 520 }}>
+                            <div className="relative">
+                                <canvas ref={canvasElRef} id="mockupCanvas" width={canvasSize.width} height={canvasSize.height} className="mx-auto bg-transparent" />
+                                {/* small zoom control on the right of canvas */}
+                                <button onClick={() => { /* optional zoom handler */ }} className="absolute right-4 bottom-4 bg-white border rounded p-2 shadow">🔍</button>
+                            </div>
+                        </div>
+                    </main>
+
+                    {/* Right vertical thumbnails */}
+                    <aside className="w-[80px] flex flex-col items-center gap-3">
+                        <div className="w-20 h-20 bg-white border rounded flex items-center justify-center">Front</div>
+                        <div className="w-20 h-20 bg-white border rounded flex items-center justify-center">Back</div>
+                        <div className="w-20 h-20 bg-white border rounded flex items-center justify-center">🔍</div>
+                    </aside>
+                </div>
+
+                {/* Footer sticky product bar */}
+                <div className="fixed left-0 right-0 bottom-0 bg-white border-t shadow-inner">
+                    <div className="max-w-[1200px] mx-auto flex items-center justify-between p-4">
+                        <div className="flex items-center gap-4">
+                            <img src="/apparel-images/rounded_t-shirt.png" alt="product" className="w-14 h-14 object-cover rounded" />
+                            <div>
+                                <div className="font-semibold text-gray-800">Custom Rounded T-shirt</div>
+                                <div className="text-sm text-gray-600">Printing: Front-sided | Size: M | Material: 100% Cotton <span className="text-blue-600 underline">Change Customization</span></div>
+                            </div>
+                        </div>
+
+                        <div className="flex items-center gap-4">
+                            <button className="px-4 py-2 bg-[#ef7d66] text-black font-semibold rounded">ADD TO CART</button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

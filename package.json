@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@dynamic-mockups/mockup-editor-sdk": "^1.1.41",
-    "@supabase/supabase-js": "^2.47.10",
+    "@supabase/supabase-js": "^2.56.0",
     "bcryptjs": "^3.0.2",
     "fabric": "^6.7.1",
     "gsap": "^3.13.0",

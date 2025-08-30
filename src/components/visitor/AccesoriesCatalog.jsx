@@ -406,16 +406,10 @@ const AccessoriesCatalog = () => {
                           className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-125 cursor-pointer"
                           onError={e => { e.target.src = "/apparel-images/caps.png"; }}
                           onClick={() => {
-                            if (!session) {
-                              navigate('/signin');
-                            } else if (product.route) {
-                              navigate(product.route);
-                            } else {
-                              if (!session) { navigate('/signin'); return; }
-                              const route = product.route || product.routes;
-                              if (route) navigate(route);
-                              else navigate('/product', { state: { product } });
-                            }
+                            // Allow unauthenticated users to view product pages.
+                            const route = product.route || product.routes;
+                            if (route) navigate(route);
+                            else navigate('/product', { state: { product } });
                           }}
                         />
                         <button
@@ -423,7 +417,8 @@ const AccessoriesCatalog = () => {
                           onClick={async (e) => {
                             e.stopPropagation();
                             if (!session) {
-                              navigate('/signin');
+                              // Not forcing signin — show a gentle message instead
+                              alert('Please sign in to add favorites.');
                               return;
                             }
                             if (isFavorite) {
@@ -452,16 +447,9 @@ const AccessoriesCatalog = () => {
                       <h3
                         className="font-semibold mt-2 text-black text-center tablet:text-center semibig:text-center laptop:text-center cursor-pointer"
                         onClick={() => {
-                          if (!session) {
-                            navigate('/signin');
-                          } else if (product.route) {
-                            navigate(product.route);
-                          } else {
-                            if (!session) { navigate('/signin'); return; }
-                            const route = product.route || product.routes;
-                            if (route) navigate(route);
-                            else navigate('/product', { state: { product } });
-                          }
+                          const route = product.route || product.routes;
+                          if (route) navigate(route);
+                          else navigate('/product', { state: { product } });
                         }}
                       >
                         {product.name}

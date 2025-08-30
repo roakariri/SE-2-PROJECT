@@ -391,12 +391,10 @@ const ApparelCatalog = () => {
                         className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-125 cursor-pointer"
                         onError={e => { e.target.src = "/apparel-images/caps.png"; }}
                         onClick={() => {
-                          if (!session) {
-                            navigate('/signin');
-                          } else if (product.route) {
+                          // Allow unauthenticated users to view product pages; only protected actions require sign-in
+                          if (product.route) {
                             navigate(product.route);
                           } else {
-                            if (!session) { navigate('/signin'); return; }
                             const route = product.route || product.routes;
                             if (route) navigate(route);
                             else navigate('/product', { state: { product } });
@@ -405,10 +403,11 @@ const ApparelCatalog = () => {
                       />
                       <button
                         className="absolute bottom-3 right-5 bg-white p-1.5 rounded-full shadow-md"
-                        onClick={async (e) => {
+                          onClick={async (e) => {
                           e.stopPropagation();
                           if (!session) {
-                            navigate('/signin');
+                            // Don't force navigation; show gentle prompt instead
+                            alert('Please sign in to add favorites');
                             return;
                           }
                           if (isFavorite) {

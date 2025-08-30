@@ -394,12 +394,10 @@ const SignagesPostersCatalog = () => {
                           className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-125 cursor-pointer"
                           onError={e => { e.target.src = "/apparel-images/caps.png"; }}
                           onClick={() => {
-                            if (!session) {
-                              navigate('/signin');
-                            } else if (product.route) {
+                            // Allow unauthenticated users to view product pages
+                            if (product.route) {
                               navigate(product.route);
                             } else {
-                              if (!session) { navigate('/signin'); return; }
                               const route = product.route || product.routes;
                               if (route) navigate(route);
                               else navigate('/product', { state: { product } });
@@ -409,31 +407,31 @@ const SignagesPostersCatalog = () => {
                         <button
                           className="absolute bottom-3 right-5 bg-white p-1.5 rounded-full shadow-md"
                           onClick={async (e) => {
-                            e.stopPropagation();
-                            if (!session) {
-                              navigate('/signin');
-                              return;
-                            }
-                            const user = session.user;
-                            if (!user) return;
-                            if (favoriteIds.includes(product.id)) {
-                              // Remove from favorites
-                              await supabase
-                                .from('favorites')
-                                .delete()
-                                .eq('user_id', user.id)
-                                .eq('product_id', product.id);
-                              setFavoriteIds(favoriteIds.filter(id => id !== product.id));
-                            } else {
-                              // Add to favorites
-                              await supabase
-                                .from('favorites')
-                                .insert([
-                                  { user_id: user.id, product_id: product.id }
-                                ]);
-                              setFavoriteIds([...favoriteIds, product.id]);
-                            }
-                          }}
+                              e.stopPropagation();
+                              if (!session) {
+                                alert('Please sign in to add favorites');
+                                return;
+                              }
+                              const user = session.user;
+                              if (!user) return;
+                              if (favoriteIds.includes(product.id)) {
+                                // Remove from favorites
+                                await supabase
+                                  .from('favorites')
+                                  .delete()
+                                  .eq('user_id', user.id)
+                                  .eq('product_id', product.id);
+                                setFavoriteIds(favoriteIds.filter(id => id !== product.id));
+                              } else {
+                                // Add to favorites
+                                await supabase
+                                  .from('favorites')
+                                  .insert([
+                                    { user_id: user.id, product_id: product.id }
+                                  ]);
+                                setFavoriteIds([...favoriteIds, product.id]);
+                              }
+                            }}
                           aria-label={favoriteIds.includes(product.id) ? "Remove from favorites" : "Add to favorites"}
                         >
                           <svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 ${favoriteIds.includes(product.id) ? 'text-red-600 fill-red-600' : 'text-white fill-white stroke-gray-700'}`} viewBox="0 0 24 24" stroke="currentColor">
@@ -444,12 +442,10 @@ const SignagesPostersCatalog = () => {
                         <h3
                             className="font-semibold mt-2 text-black text-center tablet:text-center semibig:text-center laptop:text-center cursor-pointer"
                             onClick={() => {
-                              if (!session) {
-                                navigate('/signin');
-                              } else if (product.route) {
+                              // Allow unauthenticated users to view product pages
+                              if (product.route) {
                                 navigate(product.route);
                               } else {
-                                if (!session) { navigate('/signin'); return; }
                                 const route = product.route || product.routes;
                                 if (route) navigate(route);
                                 else navigate('/product', { state: { product } });

@@ -29,6 +29,10 @@ const RTshirt = () => {
     const [quantity, setQuantity] = useState(1);
     const [variantGroups, setVariantGroups] = useState([]);
     const [selectedVariants, setSelectedVariants] = useState({});
+    const [cartError, setCartError] = useState(null);
+    const [cartSuccess, setCartSuccess] = useState(null);
+
+    // ...existing code...
 
     const slug = location.pathname.split('/').filter(Boolean).pop();
 
@@ -350,6 +354,124 @@ const RTshirt = () => {
     const unitPrice = (Number(price) || 0) + Object.values(selectedVariants).reduce((acc, val) => acc + (Number(val?.price) || 0), 0);
     const totalPrice = unitPrice * quantity;
 
+    // Handle Add to Cart (copied from Cap-Info)
+    const handleAddToCart = async () => {
+        if (!productId) {
+            setCartError("No product selected");
+            return;
+        }
+
+        const userId = session?.user?.id ?? await getCurrentUserId();
+        if (!userId) {
+            setCartError("Please sign in to add to cart");
+            navigate("/signin");
+            return;
+        }
+
+        setCartError(null);
+        setCartSuccess(null);
+
+        try {
+            // Get existing cart items for this user and product
+            const { data: existingCarts, error: checkError } = await supabase
+                .from("cart")
+                .select("cart_id, quantity, total_price")
+                .eq("user_id", userId)
+                .eq("product_id", productId);
+
+            if (checkError) throw checkError;
+
+            let cartId;
+            let cartMatched = false;
+
+            // Check if there's an existing cart with the same variants
+            for (const cart of existingCarts || []) {
+                const { data: cartVariants, error: varError } = await supabase
+                    .from("cart_variants")
+                    .select("cartvariant_id, cart_id")
+                    .eq("cart_id", cart.cart_id)
+                    .eq("user_id", userId);
+
+                if (varError) throw varError;
+
+                // Build a set of variant_value_ids stored in cart_variants
+                const existingVarSet = new Set((cartVariants || []).map((v) => `${v.cartvariant_id}`));
+
+                // Build a set of selected variant_value_ids from the UI
+                const selectedVarSet = new Set(Object.values(selectedVariants || {}).map((val) => `${val?.variant_value_id ?? val?.id ?? val}`));
+
+                // Compare sets (treat both empty as equal)
+                if (existingVarSet.size === selectedVarSet.size && [...existingVarSet].every((v) => selectedVarSet.has(v))) {
+                    // Match found: update quantity and total_price
+                    cartMatched = true;
+                    const newQuantity = (Number(cart.quantity) || 0) + Number(quantity || 0);
+                    const newTotal = (Number(unitPrice) || 0) * newQuantity;
+                    const { error: updateError } = await supabase
+                        .from("cart")
+                        .update({ quantity: newQuantity, total_price: newTotal, base_price: Number(price) || 0 })
+                        .eq("cart_id", cart.cart_id)
+                        .eq("user_id", userId);
+                    if (updateError) throw updateError;
+                    cartId = cart.cart_id;
+                    break;
+                }
+            }
+
+            if (!cartMatched) {
+                // Insert new cart entry first
+                const { data: cartData, error: cartError } = await supabase
+                    .from("cart")
+                    .insert([
+                        {
+                            user_id: userId,
+                            product_id: productId,
+                            quantity: quantity,
+                            base_price: Number(price) || 0,
+                            total_price: totalPrice,
+                        },
+                    ])
+                    .select("cart_id")
+                    .single();
+
+                if (cartError) throw cartError;
+
+                if (!cartData || !cartData.cart_id) {
+                    throw new Error("Failed to retrieve cart_id after insertion");
+                }
+
+                cartId = cartData.cart_id;
+
+                // Insert into cart_variants for each selected variant
+                const variantInserts = Object.entries(selectedVariants).map(([groupId, value]) => ({
+                    cart_id: cartId,
+                    user_id: userId,
+                    // Some product pages use product_variant_value_id as value.id; fall back to it when variant_value_id is missing
+                    cartvariant_id: value?.variant_value_id ?? value?.id ?? value,
+                    price: Number(value?.price) || 0,
+                }));
+
+                if (variantInserts.length > 0) {
+                    const { error: variantsError } = await supabase.from("cart_variants").insert(variantInserts);
+                    if (variantsError) {
+                        await supabase.from("cart").delete().eq("cart_id", cartId).eq("user_id", userId);
+                        throw variantsError;
+                    }
+                }
+            }
+
+            setCartSuccess("Item added to cart!");
+            setQuantity(1);
+            setTimeout(() => setCartSuccess(null), 3000);
+        } catch (err) {
+            console.error("Error adding to cart - Details:", { message: err.message, code: err.code, details: err.details, stack: err.stack });
+            if (err.code === "23505") {
+                setCartError("This item with the same variants is already in your cart");
+            } else {
+                setCartError("Failed to add to cart: " + (err.message || "Unknown error"));
+            }
+        }
+    };
+
 
 
     const printingGroup = variantGroups.find(g => g.name.toUpperCase() === 'PRINTING');
@@ -551,7 +673,8 @@ const RTshirt = () => {
 
                         {/* footer actions pinned at bottom */}
                         <div className="flex items-center gap-4 mt-4">
-                            <button className="bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold">ADD TO CART</button>
+                            <button onClick={handleAddToCart} className="bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold hover:bg-orange-600">{cartSuccess ? cartSuccess : 'ADD TO CART'}</button>
+                            {cartError && <div className="text-red-600 text-sm ml-2">{cartError}</div>}
                             <button
                                 className="bg-white p-1.5 rounded-full shadow-md"
                                 onClick={toggleFavorite}

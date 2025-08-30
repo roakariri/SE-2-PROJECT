@@ -75,3 +75,13 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+
+/* Remove native spinner controls for number inputs so custom +/- buttons are used */
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type=number] {
+  -moz-appearance: textfield; /* Firefox */
+}
