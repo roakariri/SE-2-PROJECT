@@ -517,16 +517,32 @@ const AcrylicKeychain = () => {
                     const newTotal = (Number(unitPriceForCart) || 0) * newQuantity;
                     const { error: updateError } = await supabase
                         .from("cart")
-                        .update({ quantity: newQuantity, total_price: newTotal, base_price: Number(price) || 0 })
+                        .update({ quantity: newQuantity, total_price: newTotal, base_price: Number(unitPriceForCart) || Number(price) || 0 })
                         .eq("cart_id", cart.cart_id)
                         .eq("user_id", userId);
                     if (updateError) throw updateError;
                     cartId = cart.cart_id;
+                    // Upsert dimensions for existing cart if customizable size is present
+                    try {
+                        if (sizeDimensions) {
+                            const { data: existingDims, error: fetchDimErr } = await supabase.from('cart_dimensions').select('*').eq('cart_id', cartId).limit(1);
+                            if (fetchDimErr) console.debug('[Cart] fetch existing dimensions error', fetchDimErr);
+                            if (existingDims && existingDims.length > 0) {
+                                const { error: updDimErr } = await supabase.from('cart_dimensions').update({ length: Number(length) || 0, width: Number(width) || 0, price: Number(calculateSizePrice()) || 0 }).eq('cart_id', cartId);
+                                if (updDimErr) console.debug('[Cart] failed updating cart_dimensions for existing cart', updDimErr);
+                            } else {
+                                const { error: insDimErr } = await supabase.from('cart_dimensions').insert([{ cart_id: cartId, dimension_id: null, length: Number(length) || 0, width: Number(width) || 0, price: Number(calculateSizePrice()) || 0, user_id: userId }]);
+                                if (insDimErr) console.debug('[Cart] failed inserting cart_dimensions for existing cart', insDimErr);
+                            }
+                        }
+                    } catch (dimEx) {
+                        console.debug('[Cart] error handling cart_dimensions for existing cart', dimEx);
+                    }
                     break;
                 }
             }
 
-                if (!cartMatched) {
+            if (!cartMatched) {
                 const { data: cartData, error: cartError } = await supabase
                     .from("cart")
                     .insert([
@@ -534,8 +550,8 @@ const AcrylicKeychain = () => {
                             user_id: userId,
                             product_id: productId,
                             quantity: quantity,
-                            base_price: Number(price) || 0,
-                                total_price: Number(unitPriceForCart * quantity) || 0,
+                            base_price: Number(unitPriceForCart) || Number(price) || 0,
+                            total_price: Number(unitPriceForCart * quantity) || 0,
                         },
                     ])
                     .select("cart_id")
@@ -559,6 +575,26 @@ const AcrylicKeychain = () => {
                         await supabase.from("cart").delete().eq("cart_id", cartId).eq("user_id", userId);
                         throw variantsError;
                     }
+                }
+                // Insert customizable size into cart_dimensions if applicable
+                try {
+                    if (sizeDimensions) {
+                        const { error: dimError } = await supabase.from('cart_dimensions').insert([{ 
+                            cart_id: cartId,
+                            dimension_id: null,
+                            length: Number(length) || 0,
+                            width: Number(width) || 0,
+                            price: Number(calculateSizePrice()) || 0,
+                            user_id: userId,
+                        }]);
+                        if (dimError) {
+                            await supabase.from('cart_variants').delete().eq('cart_id', cartId).eq('user_id', userId);
+                            await supabase.from('cart').delete().eq('cart_id', cartId).eq('user_id', userId);
+                            throw dimError;
+                        }
+                    }
+                } catch (dimErr) {
+                    throw dimErr;
                 }
             }
 
@@ -974,7 +1010,13 @@ const AcrylicKeychain = () => {
                         </div>
 
                         <div className="flex items-center gap-4">
-                            <button type="button" className="bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0">ADD TO CART</button>
+                            <button
+                                type="button"
+                                onClick={handleAddToCart}
+                                className="bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0"
+                            >
+                                {cartSuccess ? cartSuccess : 'ADD TO CART'}
+                            </button>
                             <button
                                 type="button"
                                 className="bg-white p-1.5 rounded-full shadow-md focus:outline-none focus:ring-0"
@@ -987,6 +1029,9 @@ const AcrylicKeychain = () => {
                                 </svg>
                             </button>
                         </div>
+                        {cartError && (
+                            <div className="text-red-600 text-sm mt-2">{cartError}</div>
+                        )}
                     </div>
                 </div>
             </div>

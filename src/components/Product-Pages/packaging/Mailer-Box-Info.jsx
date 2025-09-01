@@ -29,6 +29,8 @@ const MailerBox = () => {
     const [quantity, setQuantity] = useState(1);
     const [variantGroups, setVariantGroups] = useState([]);
     const [selectedVariants, setSelectedVariants] = useState({});
+    const [cartError, setCartError] = useState(null);
+    const [cartSuccess, setCartSuccess] = useState(null);
 
     const slug = location.pathname.split('/').filter(Boolean).pop();
 
@@ -245,6 +247,115 @@ const MailerBox = () => {
         }
     };
 
+    // Handle Add to Cart (copied/adapted from BasicTBag)
+    const handleAddToCart = async () => {
+        if (!productId) {
+            setCartError("No product selected");
+            return;
+        }
+
+        const userId = session?.user?.id ?? await getCurrentUserId();
+        if (!userId) {
+            setCartError("Please sign in to add to cart");
+            navigate("/signin");
+            return;
+        }
+
+        setCartError(null);
+        setCartSuccess(null);
+
+        try {
+            const { data: existingCarts, error: checkError } = await supabase
+                .from("cart")
+                .select("cart_id, quantity, total_price")
+                .eq("user_id", userId)
+                .eq("product_id", productId);
+
+            if (checkError) throw checkError;
+
+            let cartId;
+            let cartMatched = false;
+
+            for (const cart of existingCarts || []) {
+                const { data: cartVariants, error: varError } = await supabase
+                    .from("cart_variants")
+                    .select("cartvariant_id, cart_id")
+                    .eq("cart_id", cart.cart_id)
+                    .eq("user_id", userId);
+
+                if (varError) throw varError;
+
+                const existingVarSet = new Set((cartVariants || []).map((v) => `${v.cartvariant_id}`));
+                const selectedVarSet = new Set(Object.values(selectedVariants || {}).map((val) => `${val?.variant_value_id ?? val?.id ?? val}`));
+
+                if (existingVarSet.size === selectedVarSet.size && [...existingVarSet].every((v) => selectedVarSet.has(v))) {
+                    cartMatched = true;
+                    const newQuantity = (Number(cart.quantity) || 0) + Number(quantity || 0);
+                    const unitPrice = (Number(price) || 0) + Object.values(selectedVariants).reduce((acc, val) => acc + (Number(val?.price) || 0), 0);
+                    const newTotal = (Number(unitPrice) || 0) * newQuantity;
+                    const { error: updateError } = await supabase
+                        .from("cart")
+                        .update({ quantity: newQuantity, total_price: newTotal, base_price: Number(unitPrice) || Number(price) || 0 })
+                        .eq("cart_id", cart.cart_id)
+                        .eq("user_id", userId);
+                    if (updateError) throw updateError;
+                    cartId = cart.cart_id;
+                    break;
+                }
+            }
+
+            if (!cartMatched) {
+                const unitPrice = (Number(price) || 0) + Object.values(selectedVariants).reduce((acc, val) => acc + (Number(val?.price) || 0), 0);
+                const totalPrice = (Number(unitPrice) || 0) * Number(quantity || 0);
+
+                const { data: cartData, error: cartError } = await supabase
+                    .from("cart")
+                    .insert([
+                        {
+                            user_id: userId,
+                            product_id: productId,
+                            quantity: quantity,
+                            base_price: Number(unitPrice) || Number(price) || 0,
+                            total_price: totalPrice,
+                        },
+                    ])
+                    .select("cart_id")
+                    .single();
+
+                if (cartError) throw cartError;
+                if (!cartData || !cartData.cart_id) throw new Error("Failed to retrieve cart_id after insertion");
+
+                cartId = cartData.cart_id;
+
+                const variantInserts = Object.entries(selectedVariants).map(([groupId, value]) => ({
+                    cart_id: cartId,
+                    user_id: userId,
+                    cartvariant_id: value?.variant_value_id ?? value?.id ?? value,
+                    price: Number(value?.price) || 0,
+                }));
+
+                if (variantInserts.length > 0) {
+                    const { error: variantsError } = await supabase.from("cart_variants").insert(variantInserts);
+                    if (variantsError) {
+                        await supabase.from("cart").delete().eq("cart_id", cartId).eq("user_id", userId);
+                        throw variantsError;
+                    }
+                }
+            }
+
+            setCartSuccess("Item added to cart!");
+            setQuantity(1);
+            setTimeout(() => setCartSuccess(null), 3000);
+        } catch (err) {
+            console.error("Error adding to cart - Details:", { message: err.message, code: err.code, details: err.details });
+            if (err.code === "23505") {
+                setCartError("This item with the same variants is already in your cart");
+            } else {
+                setCartError("Failed to add to cart: " + (err.message || "Unknown error"));
+            }
+        }
+    };
+
     const checkFavoriteStatus = async () => {
         if (!productId) return false;
         try {
@@ -423,7 +534,7 @@ const MailerBox = () => {
     // Quantity group (QUANTITY / QTY / PACK / PACKS)
     const quantityGroup = variantGroups.find(g => {
         const n = String(g.name || '').toUpperCase();
-        return n === 'QUANTITY' || n === 'QTY' || n.includes('PACK') || n.includes('QUANT');
+        return n === 'PIECES' || n === 'QTY' || n.includes('PACK') || n.includes('QUANT');
     });
 
     
@@ -597,7 +708,8 @@ const MailerBox = () => {
 
                         {/* footer actions pinned at bottom */}
                         <div className="flex items-center gap-4 mt-4">
-                            <button className="bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold">ADD TO CART</button>
+                            <button type="button" onClick={handleAddToCart} className="bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0">{cartSuccess ? cartSuccess : 'ADD TO CART'}</button>
+                            {cartError && <div className="text-red-600 text-sm ml-2">{cartError}</div>}
                             <button
                                 className="bg-white p-1.5 rounded-full shadow-md"
                                 onClick={toggleFavorite}

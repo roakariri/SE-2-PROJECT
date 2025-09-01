@@ -143,20 +143,42 @@ const Signin = () => {
 
 
 
-      {/*signin Module*/}
-      <div className="fixed w-full header bg-white">
-        <div className="header">
-          <img src={"/logo-icon/logo.png"} className="header-logo cursor-pointer" alt="Logo" onClick={() => navigate("/")}/>
-        </div>
+      <div className="w-full h-15 bg-white border border-b border-b-[#171738]">
+                <div className="w-full p-4">
+                    <div className="w-full flex items-center justify-between">
+                        {/* Logo */}
+                        <div className="phone:w-full phone:h-10 tablet:h-15 laptop:h-20 bigscreen:h-20 flex justify-start items-center w-full px-4">
+                            <img
+                            src="/logo-icon/logo.png"
+                            className="object-contain w-[120px] h-[32px] phone:w-[100px] phone:h-[28px] tablet:w-[140px] tablet:h-[40px] laptop:w-[220px] laptop:h-[80px] bigscreen:w-[220px] bigscreen:h-[80px] cursor-pointer"
+                            alt="Logo"
+                            onClick={() => navigate("/HomePage")}
+                            />
+                        </div>
+
+                        {/* Right icon (home button) */}
+                        <div className="flex items-center pr-4">
+                            <button
+                                aria-label="Open home"
+                                onClick={() => navigate('/HomePage')}
+                                className="p-2 rounded-md  w-[40px] h-[40px] flex items-center justify-center focus:outline-none bg-white hover:bg-gray-200"
+                            >
+                                <img src="/logo-icon/home-icon.svg" alt="Home icon" className="w-[40px] h-[40px] object-contain bg-transparent" />
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center mt-[100px] my-6">
+
+      <div className="flex-1 flex flex-col items-center justify-center mt-[20px] my-6">
         <div className="bg-white laptop:w-[40%] phone:h-[100%] p-[50px] phone:w-[100%] flex flex-col  justify-center mt-9">
-          <h2 className="header-notice">Login</h2>
+          <h2 className="text-[30px] font-bold text-black font-dm-sans">Login</h2>
           
           <form onSubmit={handleSignIn}>
             <div className="flex flex-col py-4">
-              <p>Email address</p>
+              <p className="font-dm-sans">Email address</p>
               <input
                 onChange={(e) => setEmail(e.target.value)}
                 className="p-3 mt-2 text-black bg-white border border-gray-500 rounded"
@@ -167,7 +189,7 @@ const Signin = () => {
               />
             </div>
             <div className="flex flex-col py-4">
-              <p>Password</p>
+              <p className="font-dm-sans">Password</p>
               <div className="relative">
                 <input
                   onChange={(e) => setPassword(e.target.value)}
@@ -190,21 +212,21 @@ const Signin = () => {
               </div>
               <div className="pt-2 text-right ">
                 <p>
-                  <a href="/forgot-password" className="text-blue-600 underline text-sm ">Forgot your Password?</a>
+                  <a href="/forgot-password" className="text-blue-600 underline text-sm font-dm-sans">Forgot your Password?</a>
                 </p>
               </div>
             </div>
             
-            <button type="submit" className="w-full mt-4 submit-button">
+            <button type="submit" className="w-full mt-4 submit-button font-dm-sans">
               Login
             </button>
             
-            {error && <p className="text-red-600 text-center pt-4">{error}</p>}
+            {error && <p className="text-red-600 text-center pt-4 font-dm-sans">{error}</p>}
           </form>
 
           <div className="flex items-center mt-4">
             <hr className="flex-grow border-t border-gray-300" />
-            <span className="mx-4 text-gray-500 font-semibold">OR</span>
+            <span className="mx-4 text-gray-500 font-semibold font-dm-sans">OR</span>
             <hr className="flex-grow border-t border-gray-300" />
           </div>
 
@@ -213,16 +235,16 @@ const Signin = () => {
           <div className=" text-center">
             <button
               onClick={signUpWithGoogle}
-              className="w-full mt-4 google-btn flex items-center justify-center gap-2 py-2"
+              className="w-full mt-4 google-btn flex items-center justify-center gap-2 py-2 font-dm-sans"
             >
               <img src={"/logo-icon/google-logo.webp"} alt="Google" className="h-6 w-6 object-contain" />
-              <span>Continue with Google</span>
+              <span className="font-dm-sans">Continue with Google</span>
             </button>
             
           </div>
-          <p className="text-center mt-9 ">
-              Don't have an account yet? <Link to="/signup" className="underline">Sign up</Link>
-          </p>
+      <p className="text-center mt-9 font-dm-sans">
+        Don't have an account yet? <Link to="/signup" className="underline font-dm-sans">Sign up</Link>
+      </p>
         </div>
       </div>
 

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../../supabaseClient";
 
@@ -13,6 +13,17 @@ const ResetPassword = () => {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
+  // Helper: sign out then navigate (best-effort)
+  const signOutAndNavigate = async (path = '/') => {
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {
+      // ignore errors
+    }
+    navigate(path);
+  };
+
+ 
   // SVG icons for show/hide password
   const EyeIcon = (
     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
@@ -40,34 +51,87 @@ const ResetPassword = () => {
     }
     setLoading(true);
     try {
+      // Ensure there's a session. If not, try to set one from tokens present in the URL (hash or query)
+      const { data } = await supabase.auth.getSession();
+      let session = data ? data.session : null;
+      let createdSession = false;
+
+      if (!session) {
+        // Tokens from Supabase reset links are often in the URL hash, but check query too
+        const searchParams = new URLSearchParams(window.location.search);
+        const hashParams = new URLSearchParams(window.location.hash.replace('#', '?'));
+        const access_token = searchParams.get('access_token') || hashParams.get('access_token') || searchParams.get('accessToken') || hashParams.get('accessToken');
+        const refresh_token = searchParams.get('refresh_token') || hashParams.get('refresh_token') || searchParams.get('refreshToken') || hashParams.get('refreshToken');
+
+        if (access_token) {
+          const { error: setSessionError } = await supabase.auth.setSession({ access_token, refresh_token });
+          if (setSessionError) {
+            setError('Unable to set session from reset link. Please request a new password reset email.');
+            setLoading(false);
+            return;
+          }
+          createdSession = true;
+          const { data: newData } = await supabase.auth.getSession();
+          session = newData ? newData.session : null;
+        } else {
+          setError('No active session or reset token found. Please click the password reset link sent to your email.');
+          setLoading(false);
+          return;
+        }
+      }
+
+      // At this point we should have a session and can update the user password
       const { error } = await supabase.auth.updateUser({ password: newPassword });
       if (error) {
         setError(error.message);
       } else {
-        setSuccess("Password updated successfully! You can now log in.");
-        await supabase.auth.signOut(); // <-- Add this line
-        setTimeout(() => navigate("/reset-successful"), 2000);
+        setSuccess('Password updated successfully! You can now log in.');
+        // sign out to clear the temporary session (only if there was one)
+        await supabase.auth.signOut();
+        setTimeout(() => navigate('/reset-successful'), 2000);
       }
     } catch (err) {
-      setError("Unexpected error. Please try again.");
+      setError('Unexpected error. Please try again.');
     }
     setLoading(false);
   };
 
   return (
     <div className="min-h-screen flex flex-col">
-      <div className="w-full header bg-white">
-        <div className="header">
-          <img src={"/logo-icon/logo.png"} className="header-logo cursor-pointer" alt="Logo" onClick={() => navigate("/")}/>
-        </div>
+      <div className="w-full h-15 bg-white border border-b border-b-[#171738]">
+                <div className="w-full p-4">
+                    <div className="w-full flex items-center justify-between">
+                        {/* Logo */}
+                        <div className="phone:w-full phone:h-10 tablet:h-15 laptop:h-20 bigscreen:h-20 flex justify-start items-center w-full px-4">
+                            <img
+                            src="/logo-icon/logo.png"
+                            className="object-contain w-[120px] h-[32px] phone:w-[100px] phone:h-[28px] tablet:w-[140px] tablet:h-[40px] laptop:w-[220px] laptop:h-[80px] bigscreen:w-[220px] bigscreen:h-[80px] cursor-pointer"
+                            alt="Logo"
+                            onClick={() => signOutAndNavigate("/")}
+                            />
+                        </div>
+
+                        {/* Right icon (home button) */}
+                        <div className="flex items-center pr-4">
+              <button
+                aria-label="Open home"
+                onClick={() => signOutAndNavigate('/')}
+                className="p-2 rounded-md  w-[40px] h-[40px] flex items-center justify-center focus:outline-none bg-white hover:bg-gray-200"
+              >
+                                <img src="/logo-icon/home-icon.svg" alt="Home icon" className="w-[40px] h-[40px] object-contain bg-transparent" />
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
       </div>
       
       <div className="flex-1 flex flex-col items-center justify-center mt-0">
         <div className="container flex flex-col  justify-center">
-            <h2 className="header-notice mb-4">Create a New Password</h2>
+            <h2 className="text-[30px] font-bold text-black mb-4 font-dm-sans">Create a New Password</h2>
             <form onSubmit={handleReset}>
             <div className="flex flex-col py-2">
-              <p>New Password</p>
+              <p className="font-dm-sans">New Password <span className="text-gray-400 text-[12px] italic font-dm-sans">(At least 6 characters.)</span></p>
               <div className="relative">
                 <input
                   type={showNewPassword ? "text" : "password"}
@@ -75,7 +139,7 @@ const ResetPassword = () => {
                   name="newPassword"
                   className="p-3 mt-2 text-black bg-white border border-gray-500 rounded w-full pr-10"
                   value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
+                  onChange={(e) => { setNewPassword(e.target.value); if (error) setError(null); if (success) setSuccess(null); }}
                   placeholder="Enter new password"
                   required
                 />
@@ -92,7 +156,7 @@ const ResetPassword = () => {
               </div>
             </div>
             <div className="flex flex-col py-2">
-              <p>Confirm New Password</p>
+              <p className="font-dm-sans">Confirm New Password</p>
               <div className="relative">
                 <input
                   type={showConfirmNewPassword ? "text" : "password"}
@@ -100,7 +164,7 @@ const ResetPassword = () => {
                   name="confirmNewPassword"
                   className="p-3 mt-2 text-black bg-white border border-gray-500 rounded w-full pr-10"
                   value={confirmNewPassword}
-                  onChange={(e) => setConfirmNewPassword(e.target.value)}
+                  onChange={(e) => { setConfirmNewPassword(e.target.value); if (error) setError(null); if (success) setSuccess(null); }}
                   placeholder="Confirm new password"
                   required
                 />
@@ -115,12 +179,13 @@ const ResetPassword = () => {
                   {showConfirmNewPassword ? EyeOffIcon : EyeIcon}
                 </button>
               </div>
+              {error && <p className="text-red-600 text-sm mt-1 font-dm-sans">{error}</p>}
             </div>
-            <button type="submit" className="w-full mt-4 submit-button">
-                {loading ? "Resetting..." : "Reset Password"}
-            </button>
-            {error && <p className="text-red-600 text-center pt-4">{error}</p>}
-            {success && <p className="text-green-600 text-center pt-4">{success}</p>}
+      {/* disable submit until passwords match and meet length */}
+      <button type="submit" className="w-full mt-4 submit-button font-dm-sans" disabled={loading}>
+        {loading ? "Resetting..." : "Reset Password"}
+      </button>
+      {success && <p className="text-green-600 text-center pt-4 font-dm-sans">{success}</p>}
             </form>
         </div>
       </div>

@@ -428,9 +428,9 @@ const ShakerKeychain = () => {
                     cartMatched = true;
                     const newQuantity = (Number(cart.quantity) || 0) + Number(quantity || 0);
                     const newTotal = (Number(unitPriceForCart) || 0) * newQuantity;
-                    const { error: updateError } = await supabase
-                        .from("cart")
-                        .update({ quantity: newQuantity, total_price: newTotal, base_price: Number(price) || 0 })
+                        const { error: updateError } = await supabase
+                            .from("cart")
+                            .update({ quantity: newQuantity, total_price: newTotal, base_price: Number(unitPriceForCart) || Number(price) || 0 })
                         .eq("cart_id", cart.cart_id)
                         .eq("user_id", userId);
                     if (updateError) throw updateError;
@@ -464,9 +464,9 @@ const ShakerKeychain = () => {
                             user_id: userId,
                             product_id: productId,
                             quantity: quantity,
-                            base_price: Number(price) || 0,
+                            base_price: Number(unitPriceForCart) || Number(price) || 0,
                             // total_price must include size adjustments when applicable (unitPriceForCart already accounts for size + variants)
-                            total_price: Number(unitPriceForCart * quantity) || 0,
+                                total_price: Number(unitPriceForCart * quantity) || 0,
                         },
                     ])
                     .select("cart_id")

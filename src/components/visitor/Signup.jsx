@@ -8,6 +8,8 @@ import { supabase } from "../../supabaseClient";
 const Signup = () => {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
+  const [firstNameError, setFirstNameError] = useState("");
+  const [lastNameError, setLastNameError] = useState("");
   const loaderRef = React.useRef();
   const signUpWithGoogle = async () => {
       await supabase.auth.signInWithOAuth({
@@ -18,8 +20,10 @@ const Signup = () => {
       });
     };
   const [email, setEmail] = useState("");
+  const [emailError, setEmailError] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState("");
@@ -46,12 +50,46 @@ const Signup = () => {
   setError("");
   setConfirmationMessage("");
 
+  // Validate first and last name: alphabets only, minimum 2 chars each
+  setFirstNameError("");
+  setLastNameError("");
+  const nameRegex = /^[A-Za-z]{2,}$/;
+  let nameValid = true;
+  if (!nameRegex.test(String(firstName || "").trim())) {
+    setFirstNameError("First name must be letters only and at least 2 characters.");
+    nameValid = false;
+  }
+    const lastTrim = String(lastName || "").trim();
+    if (lastTrim !== "") {
+      if (!nameRegex.test(lastTrim)) {
+        setLastNameError("Last name must be letters only and at least 2 characters.");
+        nameValid = false;
+      }
+    }
+  if (!nameValid) return;
+
+  // Validate email local-part length: min 6, max 30 characters before '@'
+  setEmailError("");
+  const trimmedEmail = String(email || "").trim();
+  const atIndex = trimmedEmail.indexOf("@");
+  if (atIndex <= 0) {
+    setEmailError("Invalid email format.");
+    return;
+  }
+  const localPart = trimmedEmail.slice(0, atIndex);
+  if (localPart.length < 6 || localPart.length > 30) {
+    setEmailError("Email must have 6 to 30 characters before the @ symbol.");
+    return;
+  }
+
+  // Password validation: show below confirm password field
+  setPasswordError("");
   if (password !== confirmPassword) {
-    setError("Passwords do not match.");
+    setPasswordError("Passwords do not match.");
     return;
   }
   if (password.length < 6) {
-    setError("Password must be at least 6 characters long.");
+    setPasswordError("Password must be at least 6 characters long.");
     return;
   }
   setLoading(true);
@@ -126,25 +164,45 @@ const Signup = () => {
     <div className="min-h-screen flex flex-col">
       
 
+      <div className="w-full h-15 bg-white border border-b border-b-[#171738]">
+                <div className="w-full p-4">
+                    <div className="w-full flex items-center justify-between">
+                        {/* Logo */}
+                        <div className="phone:w-full phone:h-10 tablet:h-15 laptop:h-20 bigscreen:h-20 flex justify-start items-center w-full px-4">
+                            <img
+                            src="/logo-icon/logo.png"
+                            className="object-contain w-[120px] h-[32px] phone:w-[100px] phone:h-[28px] tablet:w-[140px] tablet:h-[40px] laptop:w-[220px] laptop:h-[80px] bigscreen:w-[220px] bigscreen:h-[80px] cursor-pointer"
+                            alt="Logo"
+                            onClick={() => navigate("/HomePage")}
+                            />
+                        </div>
 
+                        {/* Right icon (home button) */}
+                        <div className="flex items-center pr-4">
+                            <button
+                                aria-label="Open home"
+                                onClick={() => navigate('/HomePage')}
+                                className="p-2 rounded-md  w-[40px] h-[40px] flex items-center justify-center focus:outline-none bg-white hover:bg-gray-200"
+                            >
+                                <img src="/logo-icon/home-icon.svg" alt="Home icon" className="w-[40px] h-[40px] object-contain bg-transparent" />
+                            </button>
+                        </div>
+                    </div>
+                </div>
 
-      <div className="fixed w-full header bg-white">
-        <div className="header ">
-          <img src={"/logo-icon/logo.png"} className="header-logo cursor-pointer" alt="Logo" onClick={() => navigate("/")}/>
-        </div>
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center mt-[120px] my-6">
+      <div className="flex-1 flex flex-col items-center justify-center mt-[20px] my-6">
         <div className="container flex flex-col justify-center mt-9">
           <form onSubmit={handleSignUp}>
-            <h2 className="header-notice">Sign Up</h2>
+            <p className="text-[30px] font-bold text-black font-dm-sans mb-5">Sign Up</p>
             
             {/* First Name and Last Name */}
             <div className="flex flex-row gap-4 py-2">
               <div className="flex flex-col w-1/2">
-                <p>First Name</p>
+                <p className="font-dm-sans">First Name</p>
                 <input
-                  onChange={(e) => setFirstName(e.target.value)}
+                  onChange={(e) => { setFirstName(e.target.value); if (firstNameError) setFirstNameError(""); }}
                   className="p-3 mt-2 text-black bg-white border border-gray-500 rounded"
                   type="text"
                   name="firstName"
@@ -153,41 +211,43 @@ const Signup = () => {
                   value={firstName}
                   required
                 />
+                {firstNameError && <p className="text-red-600 text-sm mt-1 font-dm-sans">{firstNameError}</p>}
               </div>
               <div className="flex flex-col w-1/2">
-                <p>Last Name</p>
+                <p className="font-dm-sans">Last Name (optional)</p>
                 <input
-                  onChange={(e) => setLastName(e.target.value)}
-                  className="p-3 mt-2 text-black bg-white border border-gray-500 rounded"
+                  onChange={(e) => { setLastName(e.target.value); if (lastNameError) setLastNameError(""); }}
+                  className="p-3 mt-2 text-black bg-white border border-gray-500 rounded font-dm-sans"
                   type="text"
                   name="lastName"
                   id="lastName"
-                  placeholder="Last Name"
+                  placeholder="Last Name (optional)"
                   value={lastName}
-                  required
                 />
+                {lastNameError && <p className="text-red-600 text-sm mt-1 font-dm-sans">{lastNameError}</p>}
               </div>
             </div>
 
             {/* Email input */}
             <div className="flex flex-col py-4">
-              <p>Email address</p>
+              <p className="font-dm-sans">Email address</p>
               <input
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => { setEmail(e.target.value); if (emailError) setEmailError(""); }}
                 className="p-3 mt-2 text-black bg-white border border-gray-500 rounded"
                 type="email"
                 name="email"
                 id="email"
-                placeholder="Email"
+                placeholder="Email (min. of 6 to 30 characters before @ symbol)"
               />
+              {emailError && <p className="text-red-600 text-sm mt-1 font-dm-sans">{emailError}</p>}
             </div>
 
             {/* Create Password */}
             <div className="flex flex-col">
-              <p>Create Password</p>
+              <p className="font-dm-sans">Create Password <span className="text-gray-400 text-[12px] italic font-dm-sans">(At least 6 characters.)</span></p>
               <div className="relative">
                 <input
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => { setPassword(e.target.value); if (passwordError) setPasswordError(""); }}
                   className="p-3 mt-2 text-black bg-white border border-gray-500 rounded w-full pr-10 focus:border-transparent"
                   type={showPassword ? "text" : "password"}
                   name="password"
@@ -212,10 +272,10 @@ const Signup = () => {
             
             {/* CONFIRM Create Pasword */}
             <div className="flex flex-col py-5">
-              <p>Confirm Password</p>
+              <p className="font-dm-sans">Confirm Password</p>
               <div className="relative">
                 <input
-                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  onChange={(e) => { setConfirmPassword(e.target.value); if (passwordError) setPasswordError(""); }}
                   className="p-3 mt-2 text-black bg-white border border-gray-500 rounded w-full pr-10 focus:border-transparent"
                   type={showConfirmPassword ? "text" : "password"}
                   name="confirmPassword"
@@ -234,33 +294,34 @@ const Signup = () => {
                   {showConfirmPassword ? EyeOffIcon : EyeIcon}
                 </button>
               </div>
+              {passwordError && <p className="text-red-600 text-sm mt-1 font-dm-sans">{passwordError}</p>}
             </div>
-            <button type="submit" disabled={loading} className="w-full mt-4 submit-button">
+            <button type="submit" disabled={loading} className="w-full mt-4 submit-button font-dm-sans">
               Sign Up
             </button>
             {error && (
-              <p className="text-red-600 text-center pt-4">{error}</p>
+              <p className="text-red-600 text-center pt-4 font-dm-sans">{error}</p>
             )}
             {!error && confirmationMessage && (
-              <div className="text-green-600 text-center pt-4 text-lg font-semibold">{confirmationMessage}</div>
+              <div className="text-green-600 text-center pt-4 text-lg font-semibold font-dm-sans">{confirmationMessage}</div>
             )}
           </form>
           <div className="flex items-center mt-4">
             <hr className="flex-grow border-t border-gray-300" />
-            <span className="mx-4 text-gray-500 font-semibold">OR</span>
+            <span className="mx-4 text-gray-500 font-semibold font-dm-sans">OR</span>
             <hr className="flex-grow border-t border-gray-300" />
           </div>
           <div className=" text-center">
             <button
               onClick={signUpWithGoogle}
-              className="w-full mt-4 google-btn flex items-center justify-center gap-2 py-2"
+              className="w-full mt-4 google-btn flex items-center justify-center gap-2 py-2 font-dm-sans"
             >
               <img src={"/logo-icon/google-logo.webp"} alt="Google" className="h-6 w-6 object-contain" />
-              <span>Continue with Google</span>
+              <span className="font-dm-sans">Continue with Google</span>
             </button>
           </div>
-          <p className="text-center mt-9">
-            Already have an account? <Link to="/signin" className="underline">Login</Link>
+          <p className="text-center mt-9 font-dm-sans">
+            Already have an account? <Link to="/signin" className="underline font-dm-sans">Login</Link>
           </p>
         </div>
       </div>

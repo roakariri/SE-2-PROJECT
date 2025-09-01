@@ -179,7 +179,10 @@ const CartPage = () => {
           console.log(`Processed variants for cart_id ${it.cart_id}:`, JSON.stringify(variants, null, 2)); // Debug: Processed variants
           // Attach any cart_dimensions rows to the item as `dimensions` for easier consumption in the UI
           const dimensions = it.cart_dimensions || [];
-          return { ...it, product: prod, variants, dimensions };
+          // preserve the original total price as loaded from the server so
+          // manual edits that set quantity to 1 can restore the original total
+          const original_total_price = Number(it.total_price) || null;
+          return { ...it, product: prod, variants, dimensions, original_total_price };
         })
       );
 
@@ -242,15 +245,19 @@ const CartPage = () => {
     const prev = carts.find((x) => x.cart_id === id);
     const currentQty = Number(prev?.quantity) || 1;
     const newQty = Math.min(100, Math.max(1, currentQty + delta));
-    const unitPrice = Number(prev?.base_price) || ((Number(prev?.total_price) || 0) / (Number(prev?.quantity) || 1));
-    const newTotal = unitPrice * newQty;
+    const prevQty = Number(prev?.quantity) || 1;
+    // Prefer base_price (unit price) first, fallback to total_price/quantity when base_price is missing or invalid
+    let unitPrice = Number(prev?.base_price);
+    if (!unitPrice || isNaN(unitPrice)) unitPrice = (Number(prev?.total_price) || 0) / (prevQty || 1);
+  const newTotal = (newQty === 1) ? (Number(prev?.base_price) || (prev?.original_total_price != null ? Number(prev.original_total_price) : unitPrice * newQty)) : unitPrice * newQty;
 
-    setCarts((p) => p.map((x) => (x.cart_id === id ? { ...x, quantity: newQty, total_price: newTotal } : x)));
+  setCarts((p) => p.map((x) => (x.cart_id === id ? { ...x, quantity: newQty, total_price: newTotal } : x)));
 
     try {
+  const updatePayload = { quantity: newQty, total_price: newTotal };
       const { error } = await supabase
         .from("cart")
-        .update({ quantity: newQty, total_price: newTotal })
+        .update(updatePayload)
         .eq("cart_id", id);
       if (error) {
         setCarts((p) => p.map((x) => (x.cart_id === id ? { ...x, quantity: prev?.quantity, total_price: prev?.total_price } : x)));
@@ -270,25 +277,33 @@ const CartPage = () => {
   const updateQuantityAbsolute = async (cartId, rawValue) => {
     const prev = carts.find((x) => x.cart_id === cartId);
     const prevQty = Number(prev?.quantity) || 1;
-    const parsed = Math.min(100, Math.max(1, Math.floor(Number(rawValue) || 1)));
+  const raw = Math.floor(Number(rawValue) || 1);
+  const parsed = raw > 100 ? 1 : Math.min(100, Math.max(1, raw));
     if (parsed === prevQty) {
-      const unitPrice = Number(prev?.base_price) || ((Number(prev?.total_price) || 0) / (prevQty || 1));
-      const normalizedTotal = unitPrice * parsed;
-      setCarts((p) => p.map((x) => (x.cart_id === cartId ? { ...x, quantity: parsed, total_price: normalizedTotal } : x)));
+    let unitPrice = Number(prev?.base_price);
+    if (!unitPrice || isNaN(unitPrice)) unitPrice = (Number(prev?.total_price) || 0) / (prevQty || 1);
+  const normalizedTotal = (parsed === 1)
+    ? (Number(prev?.base_price) || (prev?.original_total_price != null ? Number(prev.original_total_price) : unitPrice * parsed))
+    : unitPrice * parsed;
+  setCarts((p) => p.map((x) => (x.cart_id === cartId ? { ...x, quantity: parsed, total_price: normalizedTotal } : x)));
       return;
     }
 
     setActionLoadingIds((p) => ({ ...p, [cartId]: true }));
 
-    const unitPrice = Number(prev?.base_price) || ((Number(prev?.total_price) || 0) / (prevQty || 1));
-    const newTotal = unitPrice * parsed;
+  let unitPrice = Number(prev?.base_price);
+  if (!unitPrice || isNaN(unitPrice)) unitPrice = (Number(prev?.total_price) || 0) / (prevQty || 1);
+  const newTotal = (parsed === 1)
+    ? (Number(prev?.base_price) || (prev?.original_total_price != null ? Number(prev.original_total_price) : unitPrice * parsed))
+    : unitPrice * parsed;
 
-    setCarts((p) => p.map((x) => (x.cart_id === cartId ? { ...x, quantity: parsed, total_price: newTotal } : x)));
+  setCarts((p) => p.map((x) => (x.cart_id === cartId ? { ...x, quantity: parsed, total_price: newTotal } : x)));
 
     try {
+  const updatePayload = { quantity: parsed, total_price: newTotal };
       const { error } = await supabase
         .from("cart")
-        .update({ quantity: parsed, total_price: newTotal })
+        .update(updatePayload)
         .eq("cart_id", cartId);
       if (error) {
         setCarts((p) => p.map((x) => (x.cart_id === cartId ? { ...x, quantity: prev?.quantity, total_price: prev?.total_price } : x)));
@@ -364,7 +379,7 @@ const CartPage = () => {
                         onChange={toggleSelectAll}
                         className="w-4 h-4 bg-white border rounded checked:bg-black checked:border-black focus:ring-0"
                       />
-                      <span className="text-sm">Select All</span>
+                      <span className="text-sm text-black">Select All</span>
                     </label>
                     <button
                       className="bg-white text-sm text-black border px-2 py-1 rounded disabled:opacity-50"
@@ -405,12 +420,12 @@ const CartPage = () => {
                             className="w-20 h-20 object-cover rounded"
                           />
                           <div>
-                            <p className="font-semibold text-black">{c.product?.name || `Product ${c.product_id}`}</p>
-                            <p className="text-sm text-gray-600">Project Name: None</p>
+                            <p className="font-semibold text-black font-dm-sans">{c.product?.name || `Product ${c.product_id}`}</p>
+                            <p className="text-sm text-gray-600 font-dm-sans">Project Name: None</p>
                             {c.dimensions && c.dimensions.length > 0 && (
-                              <p className="text-sm text-gray-600">Size: {`${c.dimensions[0].length || 0} x ${c.dimensions[0].width || 0}`} inches</p>
+                              <p className="text-sm text-gray-600 font-dm-sans">Size: {`${c.dimensions[0].length || 0} x ${c.dimensions[0].width || 0}`} inches</p>
                             )}
-                            <p className="text-sm text-gray-600">
+                            <p className="text-sm text-gray-600 font-dm-sans">
                              
                             </p>
                             {c.variants?.length > 0 && (
@@ -418,11 +433,9 @@ const CartPage = () => {
                                 {c.variants
                               
                                   .map((v, i) => (
-                                    <p key={i} className="text-sm text-gray-600">
+                                    <p key={i} className="text-sm text-gray-600 font-dm-sans">
                                       {v.group}: {v.value}
-                                      {v.price > 0 && (
-                                        <span className="ml-2 text-gray-500">(+₱{v.price})</span>
-                                      )}
+                                      
                                     </p>
                                   ))}
                               </div>
@@ -434,10 +447,15 @@ const CartPage = () => {
                             )}
                           </div>
                         </div>
+                        
 
+                        {/*base price*/}
                         <div className="col-span-2 text-center">
-                          <p className="font-semibold">₱{(Number(c.base_price) || 0).toFixed(2)}</p>
+                          <p className="font-semibold font-dm-sans text-gray-500">₱{(Number(c.base_price) || 0).toFixed(2)}</p>
                         </div>
+
+
+                        {/*quantity */}
 
                         <div className="col-span-2 text-center">
                           <div className="inline-flex items-center border rounded">
@@ -457,18 +475,38 @@ const CartPage = () => {
                                 className="w-16 text-center px-2 py-1 outline-none"
                                 onChange={(e) => {
                                   const v = e.target.value;
+                                  // Track whether we need to persist a forced reset to 1
+                                  let shouldPersistResetToOne = false;
                                   setCarts((prev) =>
                                     prev.map((x) => {
                                       if (x.cart_id !== c.cart_id) return x;
                                       const prevQty = Number(x.quantity) || 1;
-                                      const unitPrice = (Number(x.total_price) || Number(x.base_price) || 0) / (prevQty || 1);
+                                      let unitPrice = (Number(x.total_price) || 0) / (prevQty || 1);
+                                      if (!unitPrice || isNaN(unitPrice)) unitPrice = Number(x.base_price) || 0;
                                       const parsed = Number(v);
                                       if (!isNaN(parsed)) {
                                         if (parsed > 100) {
-                                          setInputErrors((p) => ({ ...p, [c.cart_id]: 'Maximum quantity is 100' }));
-                                          return { ...x, quantity: v, total_price: null };
+                                          // Immediately reset to quantity=1 when user types >100
+                                          const restoredTotal = (Number(x.base_price) || (x.original_total_price != null ? Number(x.original_total_price) : 0));
+                                          setInputErrors((p) => {
+                                            const copy = { ...p };
+                                            delete copy[c.cart_id];
+                                            return copy;
+                                          });
+                                          shouldPersistResetToOne = true;
+                                          return { ...x, quantity: 1, total_price: restoredTotal };
                                         }
                                         const bounded = Math.max(1, Math.floor(parsed));
+                                        // when quantity is 1 prefer base_price, then original_total_price as fallback
+                                        if (bounded === 1) {
+                                          const restored = Number(x.base_price) || (x.original_total_price != null ? Number(x.original_total_price) : unitPrice);
+                                          setInputErrors((p) => {
+                                            const copy = { ...p };
+                                            delete copy[c.cart_id];
+                                            return copy;
+                                          });
+                                          return { ...x, quantity: v, total_price: restored };
+                                        }
                                         const newTotal = unitPrice * bounded;
                                         setInputErrors((p) => {
                                           const copy = { ...p };
@@ -480,6 +518,10 @@ const CartPage = () => {
                                       return { ...x, quantity: v };
                                     })
                                   );
+                                  if (shouldPersistResetToOne) {
+                                    // Persist the forced reset to 1 to the database
+                                    updateQuantityAbsolute(c.cart_id, '1');
+                                  }
                                 }}
                                 onBlur={(e) => {
                                   updateQuantityAbsolute(c.cart_id, e.target.value);
@@ -506,8 +548,10 @@ const CartPage = () => {
                             </button>
                           </div>
                         </div>
+                        
 
-                        <div className="col-span-2 text-right font-semibold">
+                        {/*total price*/}
+                        <div className="col-span-2 text-right font dm-sans text-black font-semibold">
                           {inputErrors[c.cart_id] ? "" : `₱${(Number(c.total_price) || 0).toFixed(2)}`}
                         </div>
 
@@ -536,10 +580,10 @@ const CartPage = () => {
 
             <aside className="w-full laptop:w-[340px]">
               <div className="border rounded p-6 bg-white">
-                <h3 className="font-semibold text-lg text-gray-800 mb-4">Order Summary</h3>
+                <h3 className="font-semibold text-lg text-gray-800 mb-4 font-dm-sans">Order Summary</h3>
                 <div className="flex justify-between text-gray-600 mb-2">
                   <div>Subtotal</div>
-                  <div className="font-semibold">₱{subtotal.toFixed(2)}</div>
+                  <div className="font-semibold font-dm-sans">₱{subtotal.toFixed(2)}</div>
                 </div>
                 <div className="flex justify-between text-gray-600 mb-2">
                   <div>Shipping</div>
@@ -550,8 +594,8 @@ const CartPage = () => {
                   <div>TBD</div>
                 </div>
                 <div className="border-t pt-4 flex justify-between items-center mb-4">
-                  <div className="font-semibold text-lg">Total</div>
-                  <div className="font-bold text-xl">₱{subtotal.toFixed(2)}</div>
+                  <div className="font-semibold text-lg font-dm-sans text-black">Total</div>
+                  <div className="font-bold text-xl font-dm-sans text-black">₱{subtotal.toFixed(2)}</div>
                 </div>
                 <button className="w-full bg-[#2B4269] text-white font-dm-sans font-semibold py-3 rounded border disabled:opacity-50">
                   Proceed to Checkout

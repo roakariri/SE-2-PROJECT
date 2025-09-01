@@ -408,7 +408,7 @@ const RTshirt = () => {
                     const newTotal = (Number(unitPrice) || 0) * newQuantity;
                     const { error: updateError } = await supabase
                         .from("cart")
-                        .update({ quantity: newQuantity, total_price: newTotal, base_price: Number(price) || 0 })
+                        .update({ quantity: newQuantity, total_price: newTotal, base_price: Number(unitPrice) || Number(price) || 0 })
                         .eq("cart_id", cart.cart_id)
                         .eq("user_id", userId);
                     if (updateError) throw updateError;
@@ -426,7 +426,7 @@ const RTshirt = () => {
                             user_id: userId,
                             product_id: productId,
                             quantity: quantity,
-                            base_price: Number(price) || 0,
+                            base_price: Number(unitPrice) || Number(price) || 0,
                             total_price: totalPrice,
                         },
                     ])
