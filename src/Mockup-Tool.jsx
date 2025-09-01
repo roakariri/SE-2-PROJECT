@@ -8,9 +8,9 @@ function MockupToolWrapper() {
   const { session } = UserAuth();
   return (
     <div className="font-dm-sans">
-      {session ? <Navigation /> : <Header />}
+
       <MockupToolPage />
-      <Footer />
+
     </div>
   );
 }

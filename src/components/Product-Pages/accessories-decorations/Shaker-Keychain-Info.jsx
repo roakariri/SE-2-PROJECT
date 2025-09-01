@@ -374,6 +374,160 @@ const ShakerKeychain = () => {
         return () => { isMounted = false; };
     }, [productId]);
 
+    // Cart UI state and Add-to-Cart logic (copied from BasicTBag-Info)
+    const [cartError, setCartError] = useState(null);
+    const [cartSuccess, setCartSuccess] = useState(null);
+
+    const computedUnitPrice = (Number(price) || 0) + Object.values(selectedVariants).reduce((acc, val) => acc + (Number(val?.price) || 0), 0);
+
+    const handleAddToCart = async () => {
+        if (!productId) {
+            setCartError("No product selected");
+            return;
+        }
+
+        const userId = session?.user?.id ?? await getCurrentUserId();
+        if (!userId) {
+            setCartError("Please sign in to add to cart");
+            navigate("/signin");
+            return;
+        }
+
+        setCartError(null);
+        setCartSuccess(null);
+
+        try {
+            const { data: existingCarts, error: checkError } = await supabase
+                .from("cart")
+                .select("cart_id, quantity, total_price")
+                .eq("user_id", userId)
+                .eq("product_id", productId);
+
+            if (checkError) throw checkError;
+
+            let cartId;
+            let cartMatched = false;
+
+            // compute current per-unit price including size adjustments (if any) and selected variant prices
+            const variantPriceForCart = Object.values(selectedVariants || {}).reduce((acc, val) => acc + (Number(val?.price) || 0), 0);
+            const unitPriceForCart = (sizeDimensions ? Number(calculateSizePrice()) : Number(price) || 0) + variantPriceForCart;
+
+            for (const cart of existingCarts || []) {
+                const { data: cartVariants, error: varError } = await supabase
+                    .from("cart_variants")
+                    .select("cartvariant_id, cart_id")
+                    .eq("cart_id", cart.cart_id)
+                    .eq("user_id", userId);
+
+                if (varError) throw varError;
+
+                const existingVarSet = new Set((cartVariants || []).map((v) => `${v.cartvariant_id}`));
+                const selectedVarSet = new Set(Object.values(selectedVariants || {}).map((val) => `${val?.variant_value_id ?? val?.id ?? val}`));
+
+                if (existingVarSet.size === selectedVarSet.size && [...existingVarSet].every((v) => selectedVarSet.has(v))) {
+                    cartMatched = true;
+                    const newQuantity = (Number(cart.quantity) || 0) + Number(quantity || 0);
+                    const newTotal = (Number(unitPriceForCart) || 0) * newQuantity;
+                    const { error: updateError } = await supabase
+                        .from("cart")
+                        .update({ quantity: newQuantity, total_price: newTotal, base_price: Number(price) || 0 })
+                        .eq("cart_id", cart.cart_id)
+                        .eq("user_id", userId);
+                    if (updateError) throw updateError;
+                    cartId = cart.cart_id;
+                    // Upsert dimensions for existing cart if customizable size is present
+                    try {
+                        if (sizeDimensions) {
+                            // Try to update an existing dimensions row first
+                            const { data: existingDims, error: fetchDimErr } = await supabase.from('cart_dimensions').select('*').eq('cart_id', cartId).limit(1);
+                            if (fetchDimErr) console.debug('[Cart] fetch existing dimensions error', fetchDimErr);
+                            if (existingDims && existingDims.length > 0) {
+                                const { error: updDimErr } = await supabase.from('cart_dimensions').update({ length: Number(length) || 0, width: Number(width) || 0, price: Number(calculateSizePrice()) || 0 }).eq('cart_id', cartId);
+                                if (updDimErr) console.debug('[Cart] failed updating cart_dimensions for existing cart', updDimErr);
+                            } else {
+                                const { error: insDimErr } = await supabase.from('cart_dimensions').insert([{ cart_id: cartId, dimension_id: null, length: Number(length) || 0, width: Number(width) || 0, price: Number(calculateSizePrice()) || 0, user_id: userId }]);
+                                if (insDimErr) console.debug('[Cart] failed inserting cart_dimensions for existing cart', insDimErr);
+                            }
+                        }
+                    } catch (dimEx) {
+                        console.debug('[Cart] error handling cart_dimensions for existing cart', dimEx);
+                    }
+                    break;
+                }
+            }
+
+            if (!cartMatched) {
+                const { data: cartData, error: cartError } = await supabase
+                    .from("cart")
+                    .insert([
+                        {
+                            user_id: userId,
+                            product_id: productId,
+                            quantity: quantity,
+                            base_price: Number(price) || 0,
+                            // total_price must include size adjustments when applicable (unitPriceForCart already accounts for size + variants)
+                            total_price: Number(unitPriceForCart * quantity) || 0,
+                        },
+                    ])
+                    .select("cart_id")
+                    .single();
+
+                if (cartError) throw cartError;
+                if (!cartData || !cartData.cart_id) throw new Error("Failed to retrieve cart_id after insertion");
+
+                cartId = cartData.cart_id;
+
+                const variantInserts = Object.entries(selectedVariants).map(([groupId, value]) => ({
+                    cart_id: cartId,
+                    user_id: userId,
+                    cartvariant_id: value?.variant_value_id ?? value?.id ?? value,
+                    price: Number(value?.price) || 0,
+                }));
+
+                if (variantInserts.length > 0) {
+                    const { error: variantsError } = await supabase.from("cart_variants").insert(variantInserts);
+                    if (variantsError) {
+                        await supabase.from("cart").delete().eq("cart_id", cartId).eq("user_id", userId);
+                        throw variantsError;
+                    }
+                }
+                // Insert customizable size into cart_dimensions if applicable
+                try {
+                    if (sizeDimensions) {
+                        const { error: dimError } = await supabase.from('cart_dimensions').insert([{ 
+                            cart_id: cartId,
+                            // dimension_id can be null if not mapped to a predefined dimension
+                            dimension_id: null,
+                            length: Number(length) || 0,
+                            width: Number(width) || 0,
+                            price: Number(calculateSizePrice()) || 0,
+                            user_id: userId,
+                        }]);
+                        if (dimError) {
+                            // cleanup before throwing
+                            await supabase.from('cart_variants').delete().eq('cart_id', cartId).eq('user_id', userId);
+                            await supabase.from('cart').delete().eq('cart_id', cartId).eq('user_id', userId);
+                            throw dimError;
+                        }
+                    }
+                } catch (dimErr) {
+                    throw dimErr;
+                }
+            }
+
+            setCartSuccess("Item added to cart!");
+            setQuantity(1);
+            setTimeout(() => setCartSuccess(null), 3000);
+        } catch (err) {
+            console.error("Error adding to cart - Details:", { message: err.message, code: err.code, details: err.details });
+            if (err.code === "23505") {
+                setCartError("This item with the same variants is already in your cart");
+            } else {
+                setCartError("Failed to add to cart: " + (err.message || "Unknown error"));
+            }
+        }
+    };
+
     const toggleDetails = () => setDetailsOpen((s) => !s);
     const incrementQuantity = () => setQuantity((q) => q + 1);
     const decrementQuantity = () => setQuantity((q) => Math.max(1, q - 1));
@@ -881,7 +1035,7 @@ const ShakerKeychain = () => {
                         </div>
 
                         <div className="flex items-center gap-4">
-                            <button type="button" className="bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0">ADD TO CART</button>
+                            <button type="button" onClick={handleAddToCart} className="bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0">{cartSuccess ? cartSuccess : 'ADD TO CART'}</button>
                             <button
                                 type="button"
                                 className="bg-white p-1.5 rounded-full shadow-md focus:outline-none focus:ring-0"

@@ -349,7 +349,8 @@ const Sweatshirt = () => {
         setSelectedVariants(prev => ({ ...prev, [groupId]: value }));
     };
 
-    const totalPrice = (price || 0) + Object.values(selectedVariants).reduce((acc, val) => acc + (val?.price || 0), 0);
+    // Calculate total price as unit price (base + variants) multiplied by quantity
+    const totalPrice = ((Number(price) || 0) + Object.values(selectedVariants).reduce((acc, val) => acc + (Number(val?.price) || 0), 0)) * quantity;
 
     const unitPrice = (Number(price) || 0) + Object.values(selectedVariants).reduce((acc, val) => acc + (Number(val?.price) || 0), 0);
 
@@ -375,6 +376,14 @@ const Sweatshirt = () => {
                 .select("cart_id, quantity, total_price")
                 .eq("user_id", userId)
                 .eq("product_id", productId);
+
+            console.debug('[Sweatshirt-Info] Adding to cart debug:', {
+                productId,
+                userId,
+                quantity,
+                selectedVariants,
+                existingCartsSample: (existingCarts || []).map(c => ({ cart_id: c.cart_id, quantity: c.quantity }))
+            });
 
             if (checkError) throw checkError;
 
@@ -500,7 +509,7 @@ const Sweatshirt = () => {
                     </div>
 
                     {/* Right: Details */}
-                    <div className="border border-black rounded-md p-6 w-full tablet:w-[601px] h-full flex flex-col">
+                    <div className="border border-black rounded-md p-6 w-full tablet:w-[601px] h-[732px] flex flex-col overflow-y-auto pr-2">
                         <h1 className="text-[36px] font-bold text-[#111233] mt-4  mb-2">{loading ? "" : productName}</h1>
                         {/*stars*/}
                         <div className="flex flex-row gap-2">
@@ -532,7 +541,7 @@ const Sweatshirt = () => {
                         <hr className="mb-6" />
 
                         {/* scrollable content area */}
-                        <div className="flex-1 overflow-auto pr-2">
+                        <div className="flex-1 ">
                         <div className="mb-6">
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">PRINTING</div>
                             {printingGroup && (
