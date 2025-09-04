@@ -381,13 +381,17 @@ const Acrylicstand = () => {
     const computedUnitPrice = (Number(price) || 0) + Object.values(selectedVariants).reduce((acc, val) => acc + (Number(val?.price) || 0), 0);
 
     const handleAddToCart = async () => {
+        console.debug('[AcrylicStand] handleAddToCart invoked', { productId, sessionAvailable: !!session, quantity, selectedVariants, sizeDimensions });
+
         if (!productId) {
+            console.debug('[AcrylicStand] no productId, aborting add to cart');
             setCartError("No product selected");
             return;
         }
 
         const userId = session?.user?.id ?? await getCurrentUserId();
         if (!userId) {
+            console.debug('[AcrylicStand] user not signed in, redirecting to signin');
             setCartError("Please sign in to add to cart");
             navigate("/signin");
             return;
@@ -408,6 +412,7 @@ const Acrylicstand = () => {
             let cartId;
             let cartMatched = false;
 
+            // compute current per-unit price including size adjustments (if any) and selected variant prices
             const variantPriceForCart = Object.values(selectedVariants || {}).reduce((acc, val) => acc + (Number(val?.price) || 0), 0);
             const unitPriceForCart = (sizeDimensions ? Number(calculateSizePrice()) : Number(price) || 0) + variantPriceForCart;
 
@@ -421,12 +426,18 @@ const Acrylicstand = () => {
                 if (varError) throw varError;
 
                 const existingVarSet = new Set((cartVariants || []).map((v) => `${v.cartvariant_id}`));
-                const selectedVarSet = new Set(Object.values(selectedVariants || {}).map((val) => `${val?.variant_value_id ?? val?.id ?? val}`));
+                // Build selectedVarSet but ignore synthetic/non-numeric ids (e.g., 'custom_size')
+                const selectedVarIds = Object.values(selectedVariants || {}).map((val) => (val?.variant_value_id ?? val?.id ?? val));
+                const selectedVarSet = new Set(selectedVarIds.reduce((acc, id) => {
+                    const n = Number(id);
+                    if (!isNaN(n) && Number.isFinite(n)) acc.push(String(n));
+                    return acc;
+                }, []));
 
                 if (existingVarSet.size === selectedVarSet.size && [...existingVarSet].every((v) => selectedVarSet.has(v))) {
                     cartMatched = true;
                     const newQuantity = (Number(cart.quantity) || 0) + Number(quantity || 0);
-                        const newTotal = (Number(unitPriceForCart) || 0) * newQuantity;
+                    const newTotal = (Number(unitPriceForCart) || 0) * newQuantity;
                     const { error: updateError } = await supabase
                         .from("cart")
                         .update({ quantity: newQuantity, total_price: newTotal, base_price: Number(unitPriceForCart) || Number(price) || 0 })
@@ -434,11 +445,28 @@ const Acrylicstand = () => {
                         .eq("user_id", userId);
                     if (updateError) throw updateError;
                     cartId = cart.cart_id;
+                    // Upsert dimensions for existing cart if customizable size is present
+                    try {
+                        if (sizeDimensions) {
+                            // Try to update an existing dimensions row first
+                            const { data: existingDims, error: fetchDimErr } = await supabase.from('cart_dimensions').select('*').eq('cart_id', cartId).limit(1);
+                            if (fetchDimErr) console.debug('[Cart] fetch existing dimensions error', fetchDimErr);
+                            if (existingDims && existingDims.length > 0) {
+                                const { error: updDimErr } = await supabase.from('cart_dimensions').update({ length: Number(length) || 0, width: Number(width) || 0, price: Number(calculateSizePrice()) || 0 }).eq('cart_id', cartId);
+                                if (updDimErr) console.debug('[Cart] failed updating cart_dimensions for existing cart', updDimErr);
+                            } else {
+                                const { error: insDimErr } = await supabase.from('cart_dimensions').insert([{ cart_id: cartId, dimension_id: null, length: Number(length) || 0, width: Number(width) || 0, price: Number(calculateSizePrice()) || 0, user_id: userId }]);
+                                if (insDimErr) console.debug('[Cart] failed inserting cart_dimensions for existing cart', insDimErr);
+                            }
+                        }
+                    } catch (dimEx) {
+                        console.debug('[Cart] error handling cart_dimensions for existing cart', dimEx);
+                    }
                     break;
                 }
             }
 
-                if (!cartMatched) {
+            if (!cartMatched) {
                 const { data: cartData, error: cartError } = await supabase
                     .from("cart")
                     .insert([
@@ -447,6 +475,7 @@ const Acrylicstand = () => {
                             product_id: productId,
                             quantity: quantity,
                             base_price: Number(unitPriceForCart) || Number(price) || 0,
+                            // total_price must include size adjustments when applicable (unitPriceForCart already accounts for size + variants)
                                 total_price: Number(unitPriceForCart * quantity) || 0,
                         },
                     ])
@@ -458,22 +487,57 @@ const Acrylicstand = () => {
 
                 cartId = cartData.cart_id;
 
-                const variantInserts = Object.entries(selectedVariants).map(([groupId, value]) => ({
-                    cart_id: cartId,
-                    user_id: userId,
-                    cartvariant_id: value?.variant_value_id ?? value?.id ?? value,
-                    price: Number(value?.price) || 0,
-                }));
+                // Only insert variants that have numeric IDs (skip synthetic custom_size/custom_base_size)
+                const variantInserts = Object.entries(selectedVariants).map(([groupId, value]) => {
+                    const rawId = value?.variant_value_id ?? value?.id ?? value;
+                    const numericId = Number(rawId);
+                    return {
+                        cart_id: cartId,
+                        user_id: userId,
+                        cartvariant_id: numericId,
+                        price: Number(value?.price) || 0,
+                        _raw_id: rawId,
+                    };
+                }).filter(item => !isNaN(item.cartvariant_id) && Number.isFinite(item.cartvariant_id)).map(({_raw_id, ...keep}) => keep);
+                // Log any skipped synthetic variants for debugging
+                const skipped = Object.entries(selectedVariants || {}).map(([g, v]) => v?.variant_value_id ?? v?.id ?? v).filter(id => isNaN(Number(id)));
+                if (skipped.length > 0) console.debug('[AcrylicStand] skipped synthetic variant ids when inserting cart_variants', { skipped });
 
                 if (variantInserts.length > 0) {
+                    console.debug('[AcrylicStand] inserting cart_variants', { cartId, variantInserts });
                     const { error: variantsError } = await supabase.from("cart_variants").insert(variantInserts);
                     if (variantsError) {
+                        console.error('[AcrylicStand] cart_variants insert error', variantsError);
                         await supabase.from("cart").delete().eq("cart_id", cartId).eq("user_id", userId);
                         throw variantsError;
                     }
+                    console.debug('[AcrylicStand] cart_variants inserted successfully');
+                }
+                // Insert customizable size into cart_dimensions if applicable
+                try {
+                    if (sizeDimensions) {
+                        const { error: dimError } = await supabase.from('cart_dimensions').insert([{ 
+                            cart_id: cartId,
+                            // dimension_id can be null if not mapped to a predefined dimension
+                            dimension_id: null,
+                            length: Number(length) || 0,
+                            width: Number(width) || 0,
+                            price: Number(calculateSizePrice()) || 0,
+                            user_id: userId,
+                        }]);
+                        if (dimError) {
+                            // cleanup before throwing
+                            await supabase.from('cart_variants').delete().eq('cart_id', cartId).eq('user_id', userId);
+                            await supabase.from('cart').delete().eq('cart_id', cartId).eq('user_id', userId);
+                            throw dimError;
+                        }
+                    }
+                } catch (dimErr) {
+                    throw dimErr;
                 }
             }
 
+            console.debug('[AcrylicStand] addToCart succeeded, cartId:', cartId);
             setCartSuccess("Item added to cart!");
             setQuantity(1);
             setTimeout(() => setCartSuccess(null), 3000);
@@ -544,39 +608,75 @@ const Acrylicstand = () => {
     }, [variantGroups]);
     // Size state (will be fetched from DB if available)
     const [sizeDimensions, setSizeDimensions] = useState(null);
+    const [baseSizeDimensions, setBaseSizeDimensions] = useState(null);
     const [length, setLength] = useState(0);
     const [width, setWidth] = useState(0);
+    const [baseLength, setBaseLength] = useState(0);
+    const [baseWidth, setBaseWidth] = useState(0);
     const incrementLength = () => {
-        if (!sizeDimensions) return;
-        const inc = sizeDimensions.length_increment || 0.1;
-        setLength(l => Math.min((sizeDimensions.max_length || l), Number((l + inc).toFixed(2))));
+        const inc = sizeDimensions?.length_increment ?? 0.1;
+        const max = sizeDimensions?.max_length ?? Infinity;
+        setLength(l => Math.min(max, Number((l + inc).toFixed(2))));
     };
     const decrementLength = () => {
-        if (!sizeDimensions) return;
-        const inc = sizeDimensions.length_increment || 0.1;
-        setLength(l => Math.max((sizeDimensions.min_length || l), Number((l - inc).toFixed(2))));
+        const inc = sizeDimensions?.length_increment ?? 0.1;
+        const min = sizeDimensions?.min_length ?? 0;
+        setLength(l => Math.max(min, Number((l - inc).toFixed(2))));
     };
     const incrementWidth = () => {
-        if (!sizeDimensions) return;
-        const inc = sizeDimensions.width_increment || 0.1;
-        setWidth(w => Math.min((sizeDimensions.max_width || w), Number((w + inc).toFixed(2))));
+        const inc = sizeDimensions?.width_increment ?? 0.1;
+        const max = sizeDimensions?.max_width ?? Infinity;
+        setWidth(w => Math.min(max, Number((w + inc).toFixed(2))));
     };
     const decrementWidth = () => {
-        if (!sizeDimensions) return;
-        const inc = sizeDimensions.width_increment || 0.1;
-        setWidth(w => Math.max((sizeDimensions.min_width || w), Number((w - inc).toFixed(2))));
+        const inc = sizeDimensions?.width_increment ?? 0.1;
+        const min = sizeDimensions?.min_width ?? 0;
+        setWidth(w => Math.max(min, Number((w - inc).toFixed(2))));
+    };
+
+    // Base size logic uses a separate baseSizeDimensions object when available
+    // Increments for base length/width should prefer the length_increment/width_increment columns
+    const incrementBaseLength = () => {
+        // prefer explicit length_increment on the base row, else fall back to main size increment
+        const inc = baseSizeDimensions?.length_increment ?? sizeDimensions?.length_increment ?? 0.1;
+        const max = baseSizeDimensions?.max_base_length ?? sizeDimensions?.max_length ?? Infinity;
+        setBaseLength(b => Math.min(max, Number((b + inc).toFixed(2))));
+    };
+    const decrementBaseLength = () => {
+        const inc = baseSizeDimensions?.length_increment ?? sizeDimensions?.length_increment ?? 0.1;
+        const min = baseSizeDimensions?.min_base_length ?? sizeDimensions?.min_length ?? 0;
+        setBaseLength(b => Math.max(min, Number((b - inc).toFixed(2))));
+    };
+    const incrementBaseWidth = () => {
+        const inc = baseSizeDimensions?.width_increment ?? sizeDimensions?.width_increment ?? 0.1;
+        const max = baseSizeDimensions?.max_base_width ?? sizeDimensions?.max_width ?? Infinity;
+        setBaseWidth(b => Math.min(max, Number((b + inc).toFixed(2))));
+    };
+    const decrementBaseWidth = () => {
+        const inc = baseSizeDimensions?.width_increment ?? sizeDimensions?.width_increment ?? 0.1;
+        const min = baseSizeDimensions?.min_base_width ?? sizeDimensions?.min_width ?? 0;
+        setBaseWidth(b => Math.max(min, Number((b - inc).toFixed(2))));
     };
     const formatSize = (v) => (v == null ? 0 : v.toString());
     
     const calculateSizePrice = () => {
-        if (!sizeDimensions) return price || 0;
-        const basePrice = price || 0;
-        const lengthInc = sizeDimensions.length_increment || 0.1;
-        const widthInc = sizeDimensions.width_increment || 0.1;
-        const lengthIncrements = Math.max(0, Math.floor(((length || 0) - (sizeDimensions.min_length || 0)) / lengthInc));
-        const widthIncrements = Math.max(0, Math.floor(((width || 0) - (sizeDimensions.min_width || 0)) / widthInc));
-        const pricePerIncrement = 0.5; // placeholder until DB provides a rate
-        return basePrice + (lengthIncrements + widthIncrements) * pricePerIncrement;
+    const basePrice = price || 0;
+    const lengthInc = sizeDimensions?.length_increment ?? 0.1;
+    const widthInc = sizeDimensions?.width_increment ?? 0.1;
+    const minLength = sizeDimensions?.min_length ?? 0;
+    const minWidth = sizeDimensions?.min_width ?? 0;
+
+    const baseLengthInc = baseSizeDimensions?.length_increment ?? sizeDimensions?.length_increment ?? lengthInc ?? 0.1;
+    const baseWidthInc = baseSizeDimensions?.width_increment ?? sizeDimensions?.width_increment ?? widthInc ?? 0.1;
+    const minBaseLength = baseSizeDimensions?.min_base_length ?? sizeDimensions?.min_length ?? 0;
+    const minBaseWidth = baseSizeDimensions?.min_base_width ?? sizeDimensions?.min_width ?? 0;
+
+    const lengthIncrements = Math.max(0, Math.floor(((length || 0) - minLength) / lengthInc));
+    const widthIncrements = Math.max(0, Math.floor(((width || 0) - minWidth) / widthInc));
+    const baseLengthIncrements = Math.max(0, Math.floor(((baseLength || 0) - minBaseLength) / baseLengthInc));
+    const baseWidthIncrements = Math.max(0, Math.floor(((baseWidth || 0) - minBaseWidth) / baseWidthInc));
+    const pricePerIncrement = 0.5; // placeholder until DB provides a rate
+    return basePrice + (lengthIncrements + widthIncrements + baseLengthIncrements + baseWidthIncrements) * pricePerIncrement;
     };
 
     useEffect(() => {
@@ -584,7 +684,8 @@ const Acrylicstand = () => {
         const variantPrice = Object.values(selectedVariants).reduce((acc, val) => acc + (val?.price || 0), 0);
         const total = (base + variantPrice) * (quantity || 1);
         setTotalPrice(total);
-    }, [quantity, selectedVariants, length, width, sizeDimensions, price]);
+    }, [quantity, selectedVariants, length, width, baseLength, baseWidth, sizeDimensions, baseSizeDimensions, price]);
+    
 
     // If there's no sizeGroup in the DB, sync custom numeric size into selectedVariants so cart receives it
     useEffect(() => {
@@ -592,7 +693,12 @@ const Acrylicstand = () => {
         // Only add when sizeDimensions available (i.e., customization allowed)
         if (!sizeDimensions) return;
         const formatted = `${length || 0}x${width || 0}`;
-        setSelectedVariants(prev => ({ ...prev, custom_size: { id: 'custom_size', name: 'Custom Size', value: formatted, price: 0 } }));
+        const baseFormatted = `${baseLength || 0}x${baseWidth || 0}`;
+        setSelectedVariants(prev => ({ 
+            ...prev, 
+            custom_size: { id: 'custom_size', name: 'Custom Size', value: formatted, price: 0 },
+            custom_base_size: { id: 'custom_base_size', name: 'Custom Base Size', value: baseFormatted, price: 0 }
+        }));
     }, [length, width, sizeDimensions]);
     // Accessories state and fallback
     const [accessoriesRowState, setAccessoriesRowState] = useState(null);
@@ -706,6 +812,7 @@ const Acrylicstand = () => {
         const fetchSizeDimensions = async () => {
             if (!productId) return;
             try {
+                // fetch standee/default rows for main dimensions (query only common columns first)
                 const { data, error } = await supabase
                     .from('size_dimension_customizable')
                     .select('product_id, target, min_length, max_length, length_increment, min_width, max_width, width_increment')
@@ -715,11 +822,39 @@ const Acrylicstand = () => {
                 if (error) {
                     console.error('Error fetching size dimensions:', error);
                 } else if (data && data.length > 0) {
-                    // Prefer a 'default' target if present, otherwise pick the first matching row
-                    const preferred = data.find(d => String(d.target || '').toLowerCase() === 'default') || data[0];
+                    const preferred = data.find(d => String(d.target || '').toLowerCase() === 'standee') || data.find(d => String(d.target || '').toLowerCase() === 'default') || data[0];
                     setSizeDimensions(preferred);
                     setLength(preferred.min_length || 0);
                     setWidth(preferred.min_width || 0);
+                }
+
+                // fetch base-specific row independently (request common columns — some schemas store base values on the same columns)
+                const { data: baseData, error: baseError } = await supabase
+                    .from('size_dimension_customizable')
+                    .select('min_length, max_length, length_increment, min_width, max_width, width_increment, target')
+                    .eq('product_id', productId)
+                    .eq('target', 'base');
+
+                if (!isMounted) return;
+                if (baseError) {
+                    console.error('Error fetching base dimensions:', baseError);
+                } else if (Array.isArray(baseData) && baseData.length > 0) {
+                    const b = baseData[0];
+                    // map base row common columns into baseSizeDimensions so other logic can read length_increment/width_increment
+                    const mapped = {
+                        // prefer explicit length_increment/width_increment on base row
+                        length_increment: b.length_increment,
+                        width_increment: b.width_increment,
+                        // map min_length/min_width to base min equivalents
+                        min_base_length: b.min_length,
+                        max_base_length: b.max_length,
+                        min_base_width: b.min_width,
+                        max_base_width: b.max_width,
+                        target: b.target
+                    };
+                    setBaseSizeDimensions(mapped);
+                    setBaseLength(mapped.min_base_length ?? (sizeDimensions?.min_length ?? 0));
+                    setBaseWidth(mapped.min_base_width ?? (sizeDimensions?.min_width ?? 0));
                 }
             } catch (err) {
                 if (!isMounted) return;
@@ -895,7 +1030,7 @@ const Acrylicstand = () => {
                                 {/* BASE / BACKING options (render under TECHNIQUE when available) */}
                                 {baseGroup && (
                                     <div className="mt-3">
-                                        <div className="text-[16px] font-semibold text-gray-700 mb-2">BASE</div>
+                                        <div className="text-[16px] font-semibold text-gray-700 mb-2">NUMBER OF STANDEE (FOR 1 BASE)</div>
                                         <div className="flex gap-3">
                                             {baseGroup.values.map(val => {
                                                 const isSelected = selectedVariants[baseGroup.id]?.id === val.id;
@@ -932,7 +1067,7 @@ const Acrylicstand = () => {
                                 {(sizeGroup || sizeDimensions) && (
                                     <div className="mt-3">
                                         <div className="text-[16px] font-semibold text-gray-700 mb-2">SIZE (CUSTOMIZABLE)</div>
-                                        <div className="flex flex-col gap-2">
+                                        <div className="flex flex-wrap gap-2">
                                             {/* Preset buttons (if any) */}
                                             <div className="flex gap-2 flex-wrap">
                                                 {(sizeGroup?.values || []).map(val => {
@@ -972,75 +1107,44 @@ const Acrylicstand = () => {
                                                 })}
                                             </div>
 
-                                            {/* Numeric custom size controls */}
-                                            <div className="flex flex-col gap-6 items-start">
-                                                <div className="flex flex-row items-center gap-3">
-                                                    <label className="text-sm text-gray-700 mb-1">Height (cm)</label>
-                                                    <div className="inline-flex items-center border border-black rounded overflow-hidden">
-                                                        <button
-                                                            type="button"
-                                                            className="px-3 py-1 bg-white text-black hover:bg-gray-100"
-                                                            onClick={decrementLength}
-                                                            aria-label="Decrease height"
-                                                        >
-                                                            -
-                                                        </button>
-                                                        <div className="px-4 py-1 bg-white text-black min-w-[48px] h-8 flex items-center justify-center text-sm">{formatSize(length)}</div>
-                                                        <button
-                                                            type="button"
-                                                            className="px-3 py-1 bg-white text-black hover:bg-gray-100"
-                                                            onClick={incrementLength}
-                                                            aria-label="Increase height"
-                                                        >
-                                                            +
-                                                        </button>
+                                            {/* Numeric custom size controls: two rows with two controls each */}
+                                            <div className="w-full">
+                                                <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+                                                    <div className="flex-1">
+                                                        <label className="text-sm text-gray-700">Height (cm)</label>
+                                                    </div>
+                                                    <div className="inline-flex items-center border rounded-md overflow-hidden">
+                                                        <button type="button" onClick={decrementWidth} className="px-3 py-1 bg-white text-black  focus:outline-none">-</button>
+                                                        <div className="px-4 py-1 bg-white text-black min-w-[48px] text-center">{formatSize(width)}</div>
+                                                        <button type="button" onClick={incrementWidth} className="px-3 py-1 bg-white text-black  focus:outline-none">+</button>
+                                                    </div>
+                                                    <div className="flex-1 text-right">
+                                                        <label className="text-sm text-gray-700">Width (cm)</label>
+                                                    </div>
+                                                    <div className="inline-flex items-center border rounded-md overflow-hidden">
+                                                        <button type="button" onClick={decrementBaseLength} className="px-3 py-1 bg-white text-black  focus:outline-none">-</button>
+                                                        <div className="px-4 py-1 bg-white text-black min-w-[48px] text-center">{formatSize(baseLength)}</div>
+                                                        <button type="button" onClick={incrementBaseLength} className="px-3 py-1 bg-white text-black  focus:outline-none">+</button>
                                                     </div>
                                                 </div>
 
-                                                <div className="flex flex-row items-center gap-3">
-                                                    <label className="text-sm text-gray-700 mb-1">Width (cm)</label>
-                                                    <div className="inline-flex items-center border border-black rounded overflow-hidden">
-                                                        <button
-                                                            type="button"
-                                                            className="px-3 py-1 bg-white text-black hover:bg-gray-100"
-                                                            onClick={decrementWidth}
-                                                            aria-label="Decrease width"
-                                                        >
-                                                            -
-                                                        </button>
-                                                        <div className="px-4 py-1 bg-white text-black min-w-[48px] h-8 flex items-center justify-center text-sm">{formatSize(width)}</div>
-                                                        <button
-                                                            type="button"
-                                                            className="px-3 py-1 bg-white text-black hover:bg-gray-100"
-                                                            onClick={incrementWidth}
-                                                            aria-label="Increase width"
-                                                        >
-                                                            +
-                                                        </button>
+                                                <div className="flex items-center justify-between gap-4">
+                                                    <div className="flex-1">
+                                                        <label className="text-sm text-gray-700">Base Length (cm)</label>
                                                     </div>
-                                                </div>
-
-                                                <div className="flex flex-row items-center gap-3">
-                                                    <label className="text-sm text-gray-700 mb-1">Width (cm)</label>
-                                                    <div className="inline-flex items-center border border-black rounded overflow-hidden">
-                                                        <button
-                                                            type="button"
-                                                            className="px-3 py-1 bg-white text-black hover:bg-gray-100"
-                                                            onClick={decrementWidth}
-                                                            aria-label="Decrease width"
-                                                        >
-                                                            -
-                                                        </button>
-                                                        <div className="px-4 py-1 bg-white text-black min-w-[48px] h-8 flex items-center justify-center text-sm">{formatSize(width)}</div>
-                                                        <button
-                                                            type="button"
-                                                            className="px-3 py-1 bg-white text-black hover:bg-gray-100"
-                                                            onClick={incrementWidth}
-                                                            aria-label="Increase width"
-                                                        >
-                                                            +
-                                                        </button>
+                                                    <div className="inline-flex items-center border rounded-md overflow-hidden">
+                                                        <button type="button" onClick={decrementLength} className="px-3 py-1 bg-white text-black  focus:outline-none">-</button>
+                                                        <div className="px-4 py-1 bg-white text-black min-w-[48px] text-center">{formatSize(length)}</div>
+                                                        <button type="button" onClick={incrementLength} className="px-3 py-1 bg-white text-black  focus:outline-none">+</button>
                                                     </div>
+                                                    <div className="flex-1 text-right">
+                                                        <label className="text-sm text-gray-700">Base Width (cm)</label>
+                                                    </div>
+                                                    <div className="inline-flex items-center border rounded-md overflow-hidden">
+                                                <button type="button" onClick={decrementBaseWidth} className="px-3 py-1 bg-white text-black  focus:outline-none">-</button>
+                                                <div className="px-4 py-1 bg-white text-black min-w-[48px] text-center">{formatSize(baseWidth)}</div>
+                                                <button type="button" onClick={incrementBaseWidth} className="px-3 py-1 bg-white text-black  focus:outline-none">+</button>
+                                            </div>
                                                 </div>
                                             </div>
                                         

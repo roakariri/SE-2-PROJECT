@@ -4,7 +4,8 @@ import { supabase } from "../../../supabaseClient";
 import { UserAuth } from "../../../context/AuthContext";
 import UploadDesign from '../../UploadDesign';
 
-const Mug = () => {
+
+const ButtonPin = () => {
     // Optional: Scroll to top on mount
     useEffect(() => {
         window.scrollTo({ top: 0, left: 0, behavior: "auto" });
@@ -29,14 +30,6 @@ const Mug = () => {
     const [quantity, setQuantity] = useState(1);
     const [variantGroups, setVariantGroups] = useState([]);
     const [selectedVariants, setSelectedVariants] = useState({});
-    const [printingRow, setPrintingRow] = useState(null);
-    const [colorRow, setColorRow] = useState(null);
-    const [sizeRow, setSizeRow] = useState(null);
-    const [accessoriesRow, setAccessoriesRow] = useState(null);
-    const [accessoryImages, setAccessoryImages] = useState({});
-    const [sizeDimensions, setSizeDimensions] = useState(null);
-    const [length, setLength] = useState(0.6);
-    const [width, setWidth] = useState(0.6);
 
     const slug = location.pathname.split('/').filter(Boolean).pop();
 
@@ -72,25 +65,6 @@ const Mug = () => {
                     setProductId(data.id ?? null);
                     setProductName(data.name || "");
                     setPrice(data.starting_price ?? null);
-                    // Debug: show fetched product and starting_price
-                    try { console.debug('[Mug-Info] fetched product for slug:', slug, { id: data.id, name: data.name, starting_price: data.starting_price }); } catch(e) { /* noop */ }
-                    // Fallback: if starting_price missing, attempt to fetch the known 'mug' product row explicitly
-                    if ((data.starting_price === null || data.starting_price === undefined) && slug !== 'mug') {
-                        try {
-                            const { data: fallbackRow, error: fbErr } = await supabase
-                                .from('products')
-                                .select('id, starting_price')
-                                .eq('route', 'mug')
-                                .single();
-                            if (!fbErr && fallbackRow) {
-                                console.debug('[Mug-Info] fallback fetched mug starting_price:', fallbackRow.starting_price);
-                                setPrice(fallbackRow.starting_price ?? null);
-                                if (!productId) setProductId(fallbackRow.id ?? productId);
-                            }
-                        } catch (fbErr) {
-                            console.debug('[Mug-Info] fallback fetch error:', fbErr);
-                        }
-                    }
                     setImageKey(data.image_url || "");
                 }
             } catch (err) {
@@ -167,7 +141,7 @@ const Mug = () => {
                             groupEntry.values.push({
                                 id: pvv.product_variant_value_id,
                                 name: vv.value_name || '',
-                                value: vv.value_name || '',
+                                value: vv.value_name || '', // Using value_name as value
                                 price: pvv.price ?? 0,
                                 is_default: pvv.is_default ?? false
                             });
@@ -188,139 +162,63 @@ const Mug = () => {
         return () => { isMounted = false; };
     }, [productId]);
 
-    // Set initial selected variants to only those explicitly marked as defaults
+    // Set initial selected variants to defaults
     useEffect(() => {
         const initial = {};
         for (let group of variantGroups) {
-            const def = group.values.find(v => v.is_default);
+            const def = group.values.find(v => v.is_default) || group.values[0];
             if (def) initial[group.id] = def;
         }
         setSelectedVariants(initial);
     }, [variantGroups]);
 
-    // derive accessories row (e.g., Hook Clasp / ACCESSORY / CLAMP) from variantGroups
-    useEffect(() => {
-        if (!variantGroups || variantGroups.length === 0) {
-            setAccessoriesRow(null);
-            return;
-        }
-        const normalize = (n) => String(n || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-
-        let found = variantGroups.find(g => normalize(g.name || '') === 'ACCESSORIES') || null;
-        if (!found) {
-            found = variantGroups.find(g => {
-                const name = normalize(g.name || '');
-                return name.includes('HOOK') || name.includes('CLASP') || name.includes('CLAMP') || name.includes('ACCESSORY');
-            }) || null;
-        }
-        setAccessoriesRow(found);
-    }, [variantGroups]);
-
-    // Resolve accessory images to public URLs (try storage 'clamp' or 'accessories-images', then fallbacks)
+    // Resolve imageKey to a public URL (robust: accepts full urls, leading slashes, and tries common buckets)
     useEffect(() => {
         let isMounted = true;
-        const fetchImages = async () => {
-            if (!accessoriesRow || !accessoriesRow.values || accessoriesRow.values.length === 0) return;
-            const cache = {};
-            const tryBuckets = ['accessoriesdecorations-images', 'accessories-images', 'images', 'logo-icon'];
-            for (const val of accessoriesRow.values) {
-                const keyCandidates = [];
-                // try to infer a key from the value name
-                if (val.value) keyCandidates.push(String(val.value).trim());
-                if (val.name) keyCandidates.push(String(val.name).trim());
-                // also try some normalized variants
-                keyCandidates.push(`${val.name || val.value}`.toLowerCase().replace(/\s+/g, '-'));
-                let resolved = null;
-                for (const key of keyCandidates) {
-                    if (!key) continue;
-                    for (const bucket of tryBuckets) {
-                        try {
-                            const { data } = supabase.storage.from(bucket).getPublicUrl(key);
-                            const url = data?.publicUrl;
-                            if (!url) continue;
-                            try {
-                                const head = await fetch(url, { method: 'HEAD' });
-                                if (head.ok) { resolved = url; break; }
-                            } catch (e) {
-                                // continue to next
-                            }
-                        } catch (e) {
-                            // ignore
-                        }
-                        if (resolved) break;
-                    }
-                    if (resolved) break;
-                }
-
-                // fallback to a predictable local path under /clamp/
-                if (!resolved) {
-                    const candidatePaths = [
-                        `/clamp/${(val.name || val.value || '').toString().toLowerCase().replace(/\s+/g, '-')}.png`,
-                        `/accessoriesdecorations-images/${(val.name || val.value || '').toString().toLowerCase().replace(/\s+/g, '-')}.png`,
-                        `/logo-icon/logo.png`
-                    ];
-                    for (const p of candidatePaths) {
-                        try {
-                            const r = await fetch(p, { method: 'HEAD' });
-                            if (r.ok) { resolved = p; break; }
-                        } catch (e) {
-                            // ignore
-                        }
-                    }
-                }
-
-                cache[val.id] = resolved || '/logo-icon/logo.png';
+        const resolveImage = async () => {
+            if (!imageKey) {
+                if (isMounted) setImageSrc('/logo-icon/logo.png');
+                return;
             }
-            if (isMounted) setAccessoryImages(cache);
-        };
-        fetchImages();
-        return () => { isMounted = false; };
-    }, [accessoriesRow]);
 
-    // Resolve imageKey to a public URL
-    useEffect(() => {
-        if (!imageKey) {
-            setImageSrc('/logo-icon/logo.png');
-            return;
-        }
-        let isMounted = true;
-        const resolve = async () => {
+            // If already a full URL or a path starting with '/', use it directly
             try {
-                const buckets = ['accessoriesdecorations-images', 'accessories-images', 'apparel-images', 'images', 'logo-icon'];
-                for (const bucket of buckets) {
+                if (/^https?:\/\//i.test(imageKey) || imageKey.startsWith('/')) {
+                    if (isMounted) setImageSrc(imageKey);
+                    console.debug('[ShakerKeychain] using provided imageKey as src', { imageKey });
+                    return;
+                }
+
+                const cleanKey = String(imageKey).replace(/^\/+/, ''); // remove leading slash(es)
+
+                // Try buckets in the same order used elsewhere for accessories -> apparel fallback
+                const bucketsToTry = ['accessoriesdecorations-images', 'apparel-images', '3d-prints-images', 'product-images', 'images', 'public'];
+                for (const bucket of bucketsToTry) {
                     try {
-                        const { data } = supabase.storage.from(bucket).getPublicUrl(imageKey || '');
-                        const url = data?.publicUrl;
+                        const { data, error } = supabase.storage.from(bucket).getPublicUrl(cleanKey);
+                        console.debug('[ShakerKeychain] getPublicUrl attempt', { bucket, cleanKey, data, error });
+                        if (error) continue; // try next bucket
+                        const url = data?.publicUrl || data?.publicURL || null;
                         // Supabase returns a publicUrl that ends with '/' when the object isn't found.
                         if (url && !url.endsWith('/')) {
                             if (isMounted) setImageSrc(url);
                             return;
                         }
                     } catch (err) {
-                        console.debug('[AcrylicKeychain] getPublicUrl failed for bucket', bucket, err);
+                        console.warn('[ShakerKeychain] bucket attempt failed', { bucket, err });
+                        // continue trying other buckets
                     }
                 }
 
-                const fallbacks = ['/accessories-images/acrylic-keychains.png', '/apparel-images/caps.png', '/logo-icon/logo.png'];
-                for (const f of fallbacks) {
-                    try {
-                        const r = await fetch(f, { method: 'HEAD' });
-                        if (r.ok) {
-                            if (isMounted) setImageSrc(f);
-                            return;
-                        }
-                    } catch (err) {
-                        // ignore and try next
-                    }
-                }
-
-                if (isMounted) setImageSrc('/logo-icon/logo.png');
+                // Last-resort fallback to local public asset
+                if (isMounted) setImageSrc('/apparel-images/caps.png');
+                console.warn('[ShakerKeychain] could not resolve imageKey to a public URL, using fallback', { imageKey });
             } catch (err) {
                 console.error('Error resolving image public URL:', err);
-                if (isMounted) setImageSrc('/logo-icon/logo.png');
+                if (isMounted) setImageSrc('/apparel-images/caps.png');
             }
         };
-        resolve();
+        resolveImage();
         return () => { isMounted = false; };
     }, [imageKey]);
 
@@ -550,7 +448,7 @@ const Mug = () => {
                             product_id: productId,
                             quantity: quantity,
                             base_price: Number(unitPriceForCart) || Number(price) || 0,
-                                total_price: Number(unitPriceForCart * quantity) || 0,
+                            total_price: Number(unitPriceForCart * quantity) || 0,
                         },
                     ])
                     .select("cart_id")
@@ -590,12 +488,225 @@ const Mug = () => {
         }
     };
 
+    const toggleDetails = () => setDetailsOpen((s) => !s);
+    const incrementQuantity = () => setQuantity((q) => q + 1);
+    const decrementQuantity = () => setQuantity((q) => Math.max(1, q - 1));
+
+    const selectVariant = (groupId, value) => {
+        setSelectedVariants(prev => ({ ...prev, [groupId]: value }));
+    };
+
+    // totalPrice is derived state: base price + selected variant prices + size adjustments, multiplied by quantity
+    const [totalPrice, setTotalPrice] = useState(0);
+
+    const printingGroup = variantGroups.find(g => g.name.toUpperCase() === 'PRINTING');
+    const colorGroup = variantGroups.find(g => g.name.toUpperCase() === 'COLOR');
+    // helper normalizer for robust group matching
+    const normalize = (n) => String(n || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    // Broaden size group detection to include names like "SIZE (CUSTOMIZABLE)", "CUSTOM SIZE", "DIMENSION"
+    const sizeGroup = variantGroups.find(g => {
+        const n = normalize(g.name || '');
+        return n.includes('SIZE') || n.includes('CUSTOM') || n.includes('DIMENSION') || n.includes('SIZECUSTOM') || n.includes('CUSTOMIZABLE');
+    });
+    const materialGroup = variantGroups.find(g => ['MATERIAL', 'MATERIALS'].includes(String(g.name).toUpperCase()));
+    // Backwards-compatible alias: some components use printingRow variable name
+    const printingRow = printingGroup;
+    // Backwards-compatible alias: many templates reference techniqueGroup
+    const techniqueGroup = variantGroups.find(g => ['TECHNIQUE', 'TECHNIQUES'].includes(String(g.name).toUpperCase()));
+    // Derive trim group (TRIM / TRIM COLOR / EDGE / BORDER)
+    const trimGroup = variantGroups.find(g => {
+        const n = String(g.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+        return n === 'TRIM' || n.includes('TRIM') || n.includes('EDGE') || n.includes('BORDER');
+    });
+    // Base group (BASE / BASE TYPE / BACKING)
+    const baseGroup = variantGroups.find(g => {
+        const n = String(g.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+        return n === 'BASE' || n.includes('BASE') || n.includes('BACKING') || n.includes('BASETYPE');
+    });
+    // Color row: prefer a robust derived state (handles COLOR/COLOUR/plurals)
+    const [colorRowState, setColorRowState] = useState(null);
+    const colorRow = colorRowState || colorGroup;
+
+    useEffect(() => {
+        if (!variantGroups || variantGroups.length === 0) {
+            setColorRowState(null);
+            return;
+        }
+        const normalize = (n) => String(n || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+        let found = variantGroups.find(g => normalize(g.name || '') === 'COLOR') || null;
+        if (!found) {
+            found = variantGroups.find(g => {
+                const name = normalize(g.name || '');
+                return name === 'COLOUR' || name === 'COLORS' || name === 'COLOURS' || name.includes('COLOR') || name.includes('COLOUR');
+            }) || null;
+        }
+        setColorRowState(found);
+    }, [variantGroups]);
+    // Size state (will be fetched from DB if available)
+    const [sizeDimensions, setSizeDimensions] = useState(null);
+    const [length, setLength] = useState(0);
+    const [width, setWidth] = useState(0);
+    const incrementLength = () => {
+        if (!sizeDimensions) return;
+        const inc = sizeDimensions.length_increment || 0.1;
+        setLength(l => Math.min((sizeDimensions.max_length || l), Number((l + inc).toFixed(2))));
+    };
+    const decrementLength = () => {
+        if (!sizeDimensions) return;
+        const inc = sizeDimensions.length_increment || 0.1;
+        setLength(l => Math.max((sizeDimensions.min_length || l), Number((l - inc).toFixed(2))));
+    };
+    const incrementWidth = () => {
+        if (!sizeDimensions) return;
+        const inc = sizeDimensions.width_increment || 0.1;
+        setWidth(w => Math.min((sizeDimensions.max_width || w), Number((w + inc).toFixed(2))));
+    };
+    const decrementWidth = () => {
+        if (!sizeDimensions) return;
+        const inc = sizeDimensions.width_increment || 0.1;
+        setWidth(w => Math.max((sizeDimensions.min_width || w), Number((w - inc).toFixed(2))));
+    };
+    const formatSize = (v) => (v == null ? 0 : v.toString());
+    
+    const calculateSizePrice = () => {
+        if (!sizeDimensions) return price || 0;
+        const basePrice = price || 0;
+        const lengthInc = sizeDimensions.length_increment || 0.1;
+        const widthInc = sizeDimensions.width_increment || 0.1;
+        const lengthIncrements = Math.max(0, Math.floor(((length || 0) - (sizeDimensions.min_length || 0)) / lengthInc));
+        const widthIncrements = Math.max(0, Math.floor(((width || 0) - (sizeDimensions.min_width || 0)) / widthInc));
+        const pricePerIncrement = 0.5; // placeholder until DB provides a rate
+        return basePrice + (lengthIncrements + widthIncrements) * pricePerIncrement;
+    };
+
+    useEffect(() => {
+        const base = calculateSizePrice();
+        const variantPrice = Object.values(selectedVariants).reduce((acc, val) => acc + (val?.price || 0), 0);
+        const total = (base + variantPrice) * (quantity || 1);
+        setTotalPrice(total);
+    }, [quantity, selectedVariants, length, width, sizeDimensions, price]);
+
+    // If there's no sizeGroup in the DB, sync custom numeric size into selectedVariants so cart receives it
+    useEffect(() => {
+        if (sizeGroup) return; // DB group exists — selectedVariants handled elsewhere
+        // Only add when sizeDimensions available (i.e., customization allowed)
+        if (!sizeDimensions) return;
+        const formatted = `${length || 0}x${width || 0}`;
+        setSelectedVariants(prev => ({ ...prev, custom_size: { id: 'custom_size', name: 'Custom Size', value: formatted, price: 0 } }));
+    }, [length, width, sizeDimensions]);
+    // Accessories state and fallback
+    const [accessoriesRowState, setAccessoriesRowState] = useState(null);
+    const [accessoryImagesState, setAccessoryImagesState] = useState({});
+    // Backwards-compatible: expose variables used in JSX
+    const accessoriesRow = accessoriesRowState;
+    const accessoryImages = accessoryImagesState;
+    // Pieces / quantity state (for acrylic pieces quantity)
+    const [piecesRowState, setPiecesRowState] = useState(null);
+    const piecesRow = piecesRowState;
+    // Backwards-compatible alias: some templates reference colorRow (handled via colorRowState above)
+
+    // derive accessories row (e.g., Hook Clasp / ACCESSORY / CLAMP) from variantGroups
+    useEffect(() => {
+        if (!variantGroups || variantGroups.length === 0) {
+            setAccessoriesRowState(null);
+            return;
+        }
+        const normalize = (n) => String(n || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+        let found = variantGroups.find(g => normalize(g.name || '') === 'ACCESSORIES') || null;
+        if (!found) {
+            found = variantGroups.find(g => {
+                const name = normalize(g.name || '');
+                return name.includes('HOOK') || name.includes('CLASP') || name.includes('CLAMP') || name.includes('ACCESSORY');
+            }) || null;
+        }
+        setAccessoriesRowState(found);
+    }, [variantGroups]);
+
+    // derive pieces/quantity row (PIECES / QUANTITY / QTY) from variantGroups
+    useEffect(() => {
+        if (!variantGroups || variantGroups.length === 0) {
+            setPiecesRowState(null);
+            return;
+        }
+        const normalize = (n) => String(n || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+        let found = variantGroups.find(g => normalize(g.name || '') === 'PIECES') || null;
+        if (!found) {
+            found = variantGroups.find(g => {
+                const name = normalize(g.name || '');
+                return name.includes('PIECE') || name.includes('QUANTITY') || name === 'QTY' || name.includes('QTY');
+            }) || null;
+        }
+        setPiecesRowState(found);
+    }, [variantGroups]);
+
+    // Resolve accessory images to public URLs (try storage buckets then fallbacks)
+    useEffect(() => {
+        let isMounted = true;
+        const fetchImages = async () => {
+            if (!accessoriesRowState || !accessoriesRowState.values || accessoriesRowState.values.length === 0) return;
+            const cache = {};
+            const tryBuckets = ['clamp', 'accessoriesdecorations-images', 'accessories-images', 'images', 'logo-icon'];
+            for (const val of accessoriesRowState.values) {
+                const keyCandidates = [];
+                if (val.value) keyCandidates.push(String(val.value).trim());
+                if (val.name) keyCandidates.push(String(val.name).trim());
+                keyCandidates.push(`${val.name || val.value}`.toLowerCase().replace(/\s+/g, '-'));
+                let resolved = null;
+                for (const key of keyCandidates) {
+                    if (!key) continue;
+                    for (const bucket of tryBuckets) {
+                        try {
+                            const { data } = supabase.storage.from(bucket).getPublicUrl(key);
+                            const url = data?.publicUrl;
+                            if (!url) continue;
+                            try {
+                                const head = await fetch(url, { method: 'HEAD' });
+                                if (head.ok) { resolved = url; break; }
+                            } catch (e) {
+                                // continue to next
+                            }
+                        } catch (e) {
+                            // ignore
+                        }
+                        if (resolved) break;
+                    }
+                    if (resolved) break;
+                }
+
+                // fallback to predictable public paths
+                if (!resolved) {
+                    const candidatePaths = [
+                        `/accessories-images/${(val.name || val.value || '').toString().toLowerCase().replace(/\s+/g, '-')}.png`,
+                        `/accessoriesdecorations-images/${(val.name || val.value || '').toString().toLowerCase().replace(/\s+/g, '-')}.png`,
+                        `/logo-icon/logo.png`
+                    ];
+                    for (const p of candidatePaths) {
+                        try {
+                            const r = await fetch(p, { method: 'HEAD' });
+                            if (r.ok) { resolved = p; break; }
+                        } catch (e) {
+                            // ignore
+                        }
+                    }
+                }
+
+                cache[val.id] = resolved || '/logo-icon/logo.png';
+            }
+            if (isMounted) setAccessoryImagesState(cache);
+        };
+        fetchImages();
+        return () => { isMounted = false; };
+    }, [accessoriesRowState]);
+
+    // Fetch sizeDimensions similar to Acrylic-Keychain pattern
     useEffect(() => {
         let isMounted = true;
         const fetchSizeDimensions = async () => {
             if (!productId) return;
             try {
-                // Fetch all matching rows for the product (avoid .single() which causes 406 when multiple/no rows)
                 const { data, error } = await supabase
                     .from('size_dimension_customizable')
                     .select('product_id, target, min_length, max_length, length_increment, min_width, max_width, width_increment')
@@ -604,19 +715,13 @@ const Mug = () => {
                 if (!isMounted) return;
                 if (error) {
                     console.error('Error fetching size dimensions:', error);
-                    return;
+                } else if (data && data.length > 0) {
+                    // Prefer a 'default' target if present, otherwise pick the first matching row
+                    const preferred = data.find(d => String(d.target || '').toLowerCase() === 'default') || data[0];
+                    setSizeDimensions(preferred);
+                    setLength(preferred.min_length || 0);
+                    setWidth(preferred.min_width || 0);
                 }
-
-                if (!Array.isArray(data) || data.length === 0) {
-                    // no rows available
-                    return;
-                }
-
-                // Prefer target === 'default' when available, otherwise pick the first row
-                const preferred = data.find(d => String(d.target || '').toLowerCase() === 'default') || data[0];
-                setSizeDimensions(preferred);
-                setLength(preferred.min_length);
-                setWidth(preferred.min_width);
             } catch (err) {
                 if (!isMounted) return;
                 console.error('Unexpected error fetching size dimensions:', err);
@@ -626,156 +731,8 @@ const Mug = () => {
         return () => { isMounted = false; };
     }, [productId]);
 
-    const toggleDetails = () => setDetailsOpen((s) => !s);
-    const incrementQuantity = () => setQuantity((q) => q + 1);
-    const decrementQuantity = () => setQuantity((q) => Math.max(1, q - 1));
-
-    const selectVariant = (groupId, value) => {
-        setSelectedVariants(prev => ({ ...prev, [groupId]: value }));
-    };
-
-    const updateLength = (e) => {
-        const value = parseFloat(e.target.value) || 0;
-        if (sizeDimensions) {
-            const min = sizeDimensions.min_length;
-            const max = sizeDimensions.max_length;
-            const increment = sizeDimensions.length_increment;
-            const adjusted = Math.round((value - min) / increment) * increment + min;
-            setLength(Number(adjusted.toFixed(adjusted % 1 === 0 ? 0 : 1))); // Remove trailing zeros, keep 1 decimal if needed
-        }
-    };
-
-    const updateWidth = (e) => {
-        const value = parseFloat(e.target.value) || 0;
-        if (sizeDimensions) {
-            const min = sizeDimensions.min_width;
-            const max = sizeDimensions.max_width;
-            const increment = sizeDimensions.width_increment;
-            const adjusted = Math.round((value - min) / increment) * increment + min;
-            setWidth(Number(adjusted.toFixed(adjusted % 1 === 0 ? 0 : 1))); // Remove trailing zeros, keep 1 decimal if needed
-        }
-    };
-
-    // compact step helpers for size controls
-    const formatSize = (v) => {
-        if (v == null) return '';
-        return (Math.round(v) === v) ? String(v) : String(Number(v.toFixed(1)));
-    };
-
-    const incrementLength = () => {
-        if (!sizeDimensions) return;
-        const inc = sizeDimensions.length_increment || 0.1;
-        setLength(prev => {
-            const next = Number((prev + inc).toFixed(3));
-            return Math.min(sizeDimensions.max_length, next);
-        });
-    };
-    const decrementLength = () => {
-        if (!sizeDimensions) return;
-        const inc = sizeDimensions.length_increment || 0.1;
-        setLength(prev => {
-            const next = Number((prev - inc).toFixed(3));
-            return Math.max(sizeDimensions.min_length, next);
-        });
-    };
-
-    const incrementWidth = () => {
-        if (!sizeDimensions) return;
-        const inc = sizeDimensions.width_increment || 0.1;
-        setWidth(prev => {
-            const next = Number((prev + inc).toFixed(3));
-            return Math.min(sizeDimensions.max_width, next);
-        });
-    };
-    const decrementWidth = () => {
-        if (!sizeDimensions) return;
-        const inc = sizeDimensions.width_increment || 0.1;
-        setWidth(prev => {
-            const next = Number((prev - inc).toFixed(3));
-            return Math.max(sizeDimensions.min_width, next);
-        });
-    };
-
-    const calculateSizePrice = () => {
-        if (!sizeDimensions) return 0;
-        const basePrice = price || 0;
-        const lengthIncrements = Math.max(0, Math.floor((length - sizeDimensions.min_length) / sizeDimensions.length_increment));
-        const widthIncrements = Math.max(0, Math.floor((width - sizeDimensions.min_width) / sizeDimensions.width_increment));
-        // Assuming a fixed price per increment (e.g., $0.50 per increment, adjust as per your DB)
-        const pricePerIncrement = 0.50; // This should ideally come from size_dimension_customizable if available
-        return basePrice + (lengthIncrements + widthIncrements) * pricePerIncrement;
-    };
-
-    // Recalculate totalPrice when quantity or selectedVariants change
-    const [totalPrice, setTotalPrice] = useState(0);
-    useEffect(() => {
-        const basePrice = calculateSizePrice();
-        const variantPrice = Object.values(selectedVariants).reduce((acc, val) => acc + (val?.price || 0), 0);
-        const totalItemPrice = (basePrice + variantPrice) * quantity;
-        setTotalPrice(totalItemPrice);
-    }, [quantity, selectedVariants, calculateSizePrice]);
-
-    const techniqueGroup = variantGroups.find(g => String(g.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '') === 'TECHNIQUE');
-
-    // Derive printing row from the fetched variantGroups
-    useEffect(() => {
-        if (!variantGroups || variantGroups.length === 0) {
-            setPrintingRow(null);
-            return;
-        }
-    const normalize = (n) => String(n || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-
-        let found = variantGroups.find(g => normalize(g.name || '') === 'PRINTING') || null;
-
-        if (!found) {
-            found = variantGroups.find(g => {
-                const name = normalize(g.name || '');
-                return name === 'TECHNIQUE' || name === 'PRINTMETHOD' || name.includes('PRINT');
-            }) || null;
-        }
-
-        setPrintingRow(found);
-    }, [variantGroups]);
-
-    // derive color row (COLOR / COLOUR / COLORS) from variantGroups
-    useEffect(() => {
-        if (!variantGroups || variantGroups.length === 0) {
-            setColorRow(null);
-            return;
-        }
-        const normalize = (n) => String(n || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-
-        // Prefer exact COLOR match, then accept COLOUR or plurals
-        let found = variantGroups.find(g => normalize(g.name || '') === 'COLOR') || null;
-        if (!found) {
-            found = variantGroups.find(g => {
-                const name = normalize(g.name || '');
-                return name === 'COLOUR' || name === 'COLORS' || name === 'COLOURS' || name.includes('COLOR') || name.includes('COLOUR');
-            }) || null;
-        }
-        setColorRow(found);
-    }, [variantGroups]);
-
-    // derive size row (SIZE / DIMENSION / CUSTOM / CUSTOMIZABLE) from variantGroups
-    useEffect(() => {
-        if (!variantGroups || variantGroups.length === 0) {
-            setSizeRow(null);
-            return;
-        }
-        const normalize = (n) => String(n || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-
-        let found = variantGroups.find(g => normalize(g.name || '') === 'SIZE') || null;
-        if (!found) {
-            found = variantGroups.find(g => {
-                const name = normalize(g.name || '');
-                return name.includes('SIZE') || name.includes('DIMENSION') || name.includes('CUSTOM') || name.includes('CUSTOMIZABLE');
-            }) || null;
-        }
-        setSizeRow(found);
-    }, [variantGroups]);
-
     return (
-        <div className="w-full bg-cover bg-white font-dm-sans phone:pt-[210px] tablet:pt-[220px] laptop:pt-[161px] phone:pb-40 tablet:pb-32 laptop:pb-24 z-0">
+        <div className="font-dm-sans w-full bg-cover bg-white phone:pt-[210px] tablet:pt-[220px] laptop:pt-[161px] phone:pb-40 tablet:pb-32 laptop:pb-24 z-0">
             <div className="max-w-[1201px] mx-auto mt-8 flex flex-col">
                 <div className="phone:p-2 tablet:p-2">
                     <p className="pt-5 font-dm-sans">
@@ -788,7 +745,22 @@ const Mug = () => {
                     <div className="bg-white w-full tablet:w-[573px] h-auto">
                         <div className="rounded-md p-6 h-full flex flex-col">
                             <div className="relative w-full h-64 tablet:h-[480px] flex-1 flex items-center justify-center bg-[#f7f7f7]">
-                                <img src={imageSrc || "/apparel-images/caps.png"} alt="" className="w-full max-h-64 tablet:max-h-[420px] object-contain" />
+                                <img
+                                    src={imageSrc || "/apparel-images/caps.png"}
+                                    alt=""
+                                    className="w-full max-h-64 tablet:max-h-[420px] object-contain"
+                                    onError={(e) => {
+                                        console.debug('[ShakerKeychain] main image failed to load, src=', e.target.src);
+                                        // try resolving fallback from supabase buckets directly
+                                        try {
+                                            const { data } = supabase.storage.from('apparel-images').getPublicUrl('caps.png');
+                                            if (data?.publicUrl && !data.publicUrl.endsWith('/')) e.target.src = data.publicUrl;
+                                            else e.target.src = '/apparel-images/caps.png';
+                                        } catch (err) {
+                                            e.target.src = '/apparel-images/caps.png';
+                                        }
+                                    }}
+                                />
                                 <button
                                     type="button"
                                     aria-label="Previous image"
@@ -809,13 +781,13 @@ const Mug = () => {
                                 <div className="h-20 w-full border rounded p-2 bg-[#f7f7f7]" aria-hidden />
                                 <div className="h-20 w-full border rounded p-2 bg-[#f7f7f7]" aria-hidden />
                                 <div className="h-20 w-full border rounded p-2 bg-[#f7f7f7]" aria-hidden />
-                                <div className="h-20 w-full border rounded p-2 bg-[#f7f7f7]" aria-hidden />
+                                <div className="h-20 w-full border rounded p-2 bg-gray-50" aria-hidden />
                             </div>
                         </div>
                     </div>
 
                     {/* Right: Details */}
-                    <div className="border border-black rounded-md p-6 w-full tablet:w-[601px] h-[732px] flex flex-col overflow-y-auto pr-2">
+                     <div className="border border-black rounded-md p-6 w-full tablet:w-[601px] h-[732px] flex flex-col overflow-y-auto pr-2">
                         <h1 className="text-[36px] font-bold text-[#111233] mt-4 mb-2">{loading ? "" : productName}</h1>
 
                         {/* Stars */}
@@ -847,10 +819,8 @@ const Mug = () => {
                         </div>
                         <hr className="mb-6" />
 
-                      
                         
-
-                        {/* COLOR (from variant groups) */}
+                           {/* COLOR (from variant groups) */}
                         <div className="mb-6">
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">COLOR</div>
                             {colorRow ? (
@@ -875,48 +845,65 @@ const Mug = () => {
                             )}
                         </div>
 
-                       
+                           <div className="mb-6">
+                                {/* SIZE / CUSTOM SIZE (render under BASE when available) */}
+                                {(sizeGroup || sizeDimensions) && (
+                                    <div className="mt-3">
+                                        <div className="text-[16px] font-semibold text-gray-700 mb-2">SIZE</div>
+                                        <div className="flex flex-col gap-2">
+                                            {/* Preset buttons (if any) */}
+                                            <div className="flex gap-2 flex-wrap">
+                                                {(sizeGroup?.values || []).map(val => {
+                                                    const label = String(val.name || val.value || '').trim();
+                                                    const isSelected = selectedVariants[sizeGroup.id]?.id === val.id;
+                                                    const handlePreset = () => {
+                                                        // try to parse formats like "150x130", "6 x 4", "150mm x 130mm"
+                                                        const s = String(val.value || val.name || '').replace(/\s+/g, '');
+                                                        const m = s.match(/(\d+(?:\.\d+)?)[xX](\d+(?:\.\d+)?)/);
+                                                        if (m) {
+                                                            const L = Number(m[1]);
+                                                            const W = Number(m[2]);
+                                                            setLength(L);
+                                                            setWidth(W);
+                                                            // also select the variant so it appears in selectedVariants
+                                                            if (sizeGroup) selectVariant(sizeGroup.id, val);
+                                                            else {
+                                                                // no sizeGroup in DB -> persist as synthetic custom_size
+                                                                setSelectedVariants(prev => ({ ...prev, custom_size: { id: 'custom_size', name: label, value: `${L}x${W}`, price: 0 } }));
+                                                            }
+                                                        } else {
+                                                            // fallback: just select variant or store synthetic value
+                                                            if (sizeGroup) selectVariant(sizeGroup.id, val);
+                                                            else setSelectedVariants(prev => ({ ...prev, custom_size: { id: 'custom_size', name: label, value: label, price: 0 } }));
+                                                        }
+                                                    };
+                                                    return (
+                                                        <button
+                                                            type="button"
+                                                            key={val.id}
+                                                            onClick={handlePreset}
+                                                            className={`px-3 py-1 rounded ${isSelected ? 'bg-gray-200 text-gray-700 font-semibold border border-[#111233]' : 'bg-white text-[#111233] border border-[#111233]'} focus:outline-none focus:ring-0`}
+                                                        >
+                                                            {label}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
 
-                       
+                                            
+                                        
+                                        </div>
+                                    </div>
+                                )}
 
-                        {/* SIZE from variant group (if available) */}
-                        <div className="mb-6">
-                            <div className="text-[16px] font-semibold text-gray-700 mb-2">SIZE</div>
-                            {sizeRow ? (
-                                <div className="flex items-center gap-3 flex-wrap">
-                                    {sizeRow.values.map(val => {
-                                        const isSelected = selectedVariants[sizeRow.id]?.id === val.id;
-                                        const numericLabel = (() => {
-                                            const raw = String(val.value || val.name || '');
-                                            const m = raw.match(/(\d+(?:\.\d+)?)/);
-                                            if (m) {
-                                                // append oz for numeric size labels
-                                                return `${m[0]} oz`;
-                                            }
-                                            return raw || '';
-                                        })();
-                                        if ((sizeRow.input_type || '').toLowerCase() === 'color') {
-                                            // improbable but be safe
-                                            return (
-                                                <div key={val.id} className="w-8 h-8 rounded-md" style={{ backgroundColor: val.value }} onClick={() => selectVariant(sizeRow.id, val)} />
-                                            );
-                                        }
-                                        return (
-                                            <button
-                                                type="button"
-                                                key={val.id}
-                                                className={`px-3 py-1 rounded ${isSelected ? 'bg-gray-200 text-gray-700 font-semibold border border-[#111233]' : 'bg-white text-[#111233] border border-[#111233]'} focus:outline-none focus:ring-0`}
-                                                onClick={() => selectVariant(sizeRow.id, val)}
-                                            >
-                                                {numericLabel}
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            ) : (
-                                <div className="text-sm text-gray-500">No size options</div>
-                            )}
-                        </div>
+                           </div>
+                           
+                            
+                           
+                            
+               
+                        
+                        
 
                         <div className="mb-6">
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">UPLOAD DESIGN</div>
@@ -977,8 +964,8 @@ const Mug = () => {
                         <ul className="text-sm text-gray-700 space-y-2 text-black text-[16px] font-dm-sans">
                             <li><p className="mb-2 text-[16px] font-normal text-black font-dm-sans">Product Name:  {productName || 'Custom Rounded T-shirt'}</p></li>
                             <li><p className="m-0 font-normal text-black text-[16px] font-dm-sans">Printing Color: CMYK</p></li>
-                            <li><p className="m-0 font-normal text-black text-[16px] font-dm-sans">Material: Ceramic, Glass</p></li>
-                            <li><p className="m-0 font-normal text-black text-[16px] font-dm-sans">Size: 11 oz</p></li>
+                            <li><p className="m-0 font-normal text-black text-[16px] font-dm-sans">Material: Tinplate Steel</p></li>
+                            <li><p className="m-0 font-normal text-black text-[16px] font-dm-sans">Size: 1.25 inches, 1.5 inches, 1.75 inches, 2.25 inches</p></li>
                             
                         </ul>
                     </div>
@@ -1016,4 +1003,5 @@ const Mug = () => {
     );
 };
 
-export default Mug;
+
+export default ButtonPin;

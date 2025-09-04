@@ -5,7 +5,7 @@ import { UserAuth } from "../../../context/AuthContext";
 import UploadDesign from '../../UploadDesign';
 
 
-const Cap= () => {
+const ProductInfo = () => {
     // Optional: Scroll to top on mount
     useEffect(() => {
         window.scrollTo({ top: 0, left: 0, behavior: "auto" });
@@ -173,33 +173,6 @@ const Cap= () => {
         }
         setSelectedVariants(initial);
     }, [variantGroups]);
-
-    // Prefill selections when navigated from Cart edit
-    useEffect(() => {
-        try {
-            const navState = location?.state || {};
-            if (!navState?.fromCart || !navState?.cartRow) return;
-            const cart = navState.cartRow;
-            if (!variantGroups || variantGroups.length === 0) return;
-
-            const mapped = {};
-            for (const group of variantGroups) {
-                const cartVariant = (cart.variants || []).find(v => String(v.group).toLowerCase() === String(group.name).toLowerCase());
-                if (cartVariant) {
-                    const match = group.values.find(val => String(val.name || val.value).toLowerCase() === String(cartVariant.value).toLowerCase());
-                    if (match) mapped[group.id] = match;
-                    else mapped[group.id] = { id: `cart_prefill_${group.id}`, name: cartVariant.value, value: cartVariant.value, price: cartVariant.price || 0 };
-                } else {
-                    const def = group.values.find(v => v.is_default) || group.values[0];
-                    if (def) mapped[group.id] = def;
-                }
-            }
-            setSelectedVariants(mapped);
-            if (cart.quantity) setQuantity(Number(cart.quantity) || 1);
-        } catch (e) {
-            console.warn('Failed to prefill Cap from cart state', e);
-        }
-    }, [location, variantGroups]);
 
     // Resolve imageKey to a public URL (robust: accepts full urls, leading slashes, and tries common buckets)
     useEffect(() => {
@@ -515,33 +488,26 @@ const Cap= () => {
     // Cart UI state and Add-to-Cart logic (copied from BasicTBag-Info)
     const [cartError, setCartError] = useState(null);
     const [cartSuccess, setCartSuccess] = useState(null);
-    const [isAdding, setIsAdding] = useState(false);
 
     const computedUnitPrice = (Number(price) || 0) + Object.values(selectedVariants).reduce((acc, val) => acc + (Number(val?.price) || 0), 0);
 
     const handleAddToCart = async () => {
-        if (isAdding) return;
-
         if (!productId) {
             setCartError("No product selected");
             return;
         }
 
-        setIsAdding(true);
+        const userId = session?.user?.id ?? await getCurrentUserId();
+        if (!userId) {
+            setCartError("Please sign in to add to cart");
+            navigate("/signin");
+            return;
+        }
+
+        setCartError(null);
+        setCartSuccess(null);
 
         try {
-            const userId = session?.user?.id ?? await getCurrentUserId();
-            if (!userId) {
-                setCartError("Please sign in to add to cart");
-                setIsAdding(false);
-                navigate("/signin");
-                return;
-            }
-
-            setCartError(null);
-            setCartSuccess(null);
-
-            
             const { data: existingCarts, error: checkError } = await supabase
                 .from("cart")
                 .select("cart_id, quantity, total_price")
@@ -574,14 +540,7 @@ const Cap= () => {
                     const newTotal = (Number(unitPriceForCart) || 0) * newQuantity;
                     const { error: updateError } = await supabase
                         .from("cart")
-                        .update({
-                            quantity: newQuantity,
-                            total_price: newTotal,
-                            base_price: Number(unitPriceForCart) || Number(price) || 0,
-                            // store current route and slug so Cart can navigate back to the product page
-                            route: location?.pathname || `/${slug}`,
-                            slug: slug || null,
-                        })
+                        .update({ quantity: newQuantity, total_price: newTotal, base_price: Number(unitPriceForCart) || Number(price) || 0 })
                         .eq("cart_id", cart.cart_id)
                         .eq("user_id", userId);
                     if (updateError) throw updateError;
@@ -600,9 +559,6 @@ const Cap= () => {
                             quantity: quantity,
                             base_price: Number(unitPriceForCart) || Number(price) || 0,
                             total_price: Number(unitPriceForCart * quantity) || 0,
-                            // include the product route and slug on the cart row
-                            route: location?.pathname || `/${slug}`,
-                            slug: slug || null,
                         },
                     ])
                     .select("cart_id")
@@ -627,18 +583,6 @@ const Cap= () => {
                         throw variantsError;
                     }
                 }
-
-                // If there are uploaded file metas, attach them to the cart row by updating uploaded_files.cart_id
-                try {
-                    if (uploadedFileMetas && uploadedFileMetas.length > 0) {
-                        const ids = uploadedFileMetas.map(m => m.id).filter(Boolean);
-                        if (ids.length > 0) {
-                            await supabase.from('uploaded_files').update({ cart_id: cartId }).in('id', ids);
-                        }
-                    }
-                } catch (e) {
-                    console.warn('Failed to attach uploaded_files to cart row:', e);
-                }
             }
 
             setCartSuccess("Item added to cart!");
@@ -651,8 +595,6 @@ const Cap= () => {
             } else {
                 setCartError("Failed to add to cart: " + (err.message || "Unknown error"));
             }
-        } finally {
-            setIsAdding(false);
         }
     };
 
@@ -661,6 +603,7 @@ const Cap= () => {
     const decrementQuantity = () => setQuantity((q) => Math.max(1, q - 1));
 
     const selectVariant = (groupId, value) => {
+        console.debug('[ProductInfo] selectVariant called', { groupId, value });
         setSelectedVariants(prev => ({ ...prev, [groupId]: value }));
     };
 
@@ -676,15 +619,35 @@ const Cap= () => {
         const n = normalize(g.name || '');
         return n.includes('SIZE') || n.includes('CUSTOM') || n.includes('DIMENSION') || n.includes('SIZECUSTOM') || n.includes('CUSTOMIZABLE');
     });
+    // Quantity group (PIECES / QUANTITY / QTY)
+    const quantityGroup = variantGroups.find(g => {
+        const n = normalize(g.name || '');
+        return n === 'PIECES' || n.includes('PIECE') || n.includes('QUANTITY') || n === 'QTY' || n.includes('QTY');
+    });
     const materialGroup = variantGroups.find(g => ['MATERIAL', 'MATERIALS'].includes(String(g.name).toUpperCase()));
     // Backwards-compatible alias: some components use printingRow variable name
     const printingRow = printingGroup;
     // Backwards-compatible alias: many templates reference techniqueGroup
     const techniqueGroup = variantGroups.find(g => ['TECHNIQUE', 'TECHNIQUES'].includes(String(g.name).toUpperCase()));
+    // Derive strap row (STRAP / STRAPS / LANYARD)
+    const strapRow = variantGroups.find(g => {
+        const n = String(g.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+        return n === 'STRAP' || n.includes('STRAP') || n.includes('LANYARD');
+    });
     // Derive trim group (TRIM / TRIM COLOR / EDGE / BORDER)
     const trimGroup = variantGroups.find(g => {
         const n = String(g.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
         return n === 'TRIM' || n.includes('TRIM') || n.includes('EDGE') || n.includes('BORDER');
+    });
+    // Derive type row (TYPE / VARIANT TYPE / KIND)
+    const typeRow = variantGroups.find(g => {
+        const n = String(g.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+        return n === 'TYPE' || n.includes('TYPE') || n.includes('KIND') || n.includes('VARIANT');
+    });
+    // Derive cut group (CUT / CUT STYLE / CUTTING)
+    const cutGroup = variantGroups.find(g => {
+        const n = String(g.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+        return n === 'CUT' || n.includes('CUT') || n.includes('CUTSTYLE') || n.includes('CUTTING');
     });
     // Base group (BASE / BASE TYPE / BACKING)
     const baseGroup = variantGroups.find(g => {
@@ -694,6 +657,23 @@ const Cap= () => {
     // Color row: prefer a robust derived state (handles COLOR/COLOUR/plurals)
     const [colorRowState, setColorRowState] = useState(null);
     const colorRow = colorRowState || colorGroup;
+
+    // Debug logging for variant groups to aid troubleshooting (non-invasive)
+    useEffect(() => {
+        if (techniqueGroup) console.debug('[ProductInfo] techniqueGroup loaded', { id: techniqueGroup.id, name: techniqueGroup.name, values: techniqueGroup.values });
+    }, [techniqueGroup]);
+
+    useEffect(() => {
+        if (printingGroup) console.debug('[ProductInfo] printingGroup loaded', { id: printingGroup.id, name: printingGroup.name, values: printingGroup.values });
+    }, [printingGroup]);
+
+    useEffect(() => {
+        if (colorGroup) console.debug('[ProductInfo] colorGroup loaded', { id: colorGroup.id, name: colorGroup.name, values: colorGroup.values });
+    }, [colorGroup]);
+
+    useEffect(() => {
+        if (sizeGroup) console.debug('[ProductInfo] sizeGroup loaded', { id: sizeGroup.id, name: sizeGroup.name, values: sizeGroup.values });
+    }, [sizeGroup]);
 
     useEffect(() => {
         if (!variantGroups || variantGroups.length === 0) {
@@ -1016,9 +996,9 @@ const Cap= () => {
                         <hr className="mb-6" />
 
                         
-                        <div className="mb-6">
-                            <div className="text-[16px] font-semibold text-gray-700 mb-2">TECHNIQUE</div>
-                            {techniqueGroup && (
+                        {techniqueGroup && (
+                            <div className="mb-6">
+                                <div className="text-[16px] font-semibold text-gray-700 mb-2">TECHNIQUE</div>
                                 <div className="flex flex-wrap gap-3">
                                     {techniqueGroup.values.map(val => {
                                         const isSelected = selectedVariants[techniqueGroup.id]?.id === val.id;
@@ -1047,13 +1027,46 @@ const Cap= () => {
                                         }
                                     })}
                                 </div>
-                            )}
-
                             </div>
+                        )}
+                            
+                        {printingGroup && (
+                            <div className="mb-6">
+                                <div className="text-[16px] font-semibold text-gray-700 mb-2">PRINTING</div>
+                                <div className="flex gap-3">
+                                    {printingGroup.values.map(val => {
+                                        const isSelected = selectedVariants[printingGroup.id]?.id === val.id;
+                                        if (printingGroup.input_type === 'color') {
+                                            return (
+                                                <div
+                                                    key={val.id}
+                                                    className={`w-8 h-8 rounded-full cursor-pointer ${isSelected ? 'ring-2 ring-blue-500' : 'ring-1 ring-gray-300'}`}
+                                                    style={{ backgroundColor: val.value }}
+                                                    onClick={() => selectVariant(printingGroup.id, val)}
+                                                    title={`${val.name} ${val.price > 0 ? `(+₱${val.price.toFixed(2)})` : ''}`}
+                                                />
+                                            );
+                                        } else {
+                                            return (
+                                                <button
+                                                    type="button"
+                                                    key={val.id}
+                                                    className={`px-4 py-2 rounded ${isSelected ? 'bg-gray-200 text-gray-500 font-bold border border-gray-500' : 'bg-white text-[#111233] border border-[#111233]'} focus:outline-none focus:ring-0`}
+                                                    onClick={() => selectVariant(printingGroup.id, val)}
+                                                >
+                                                    {val.name} 
+                                                </button>
+                                            );
+                                        }
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
                            {/* COLOR (from variant groups) */}
-                         <div className="mb-6">
-                            <div className="text-[16px] font-semibold text-gray-700 mb-2">COLOR</div>
-                            {colorGroup && (
+                        {colorGroup && (
+                            <div className="mb-6">
+                                <div className="text-[16px] font-semibold text-gray-700 mb-2">COLOR</div>
                                 <div className="flex items-center gap-3">
                                     {colorGroup.values.map(val => {
                                         const isSelected = selectedVariants[colorGroup.id]?.id === val.id;
@@ -1069,10 +1082,194 @@ const Cap= () => {
                                         );
                                     })}
                                 </div>
-                            )}
-                        </div>
+                            </div>
+                        )}
 
-                           <div className="mb-6">
+                        {/* SIZE selection */}
+                        {sizeGroup && (
+                            <div className="mb-6">
+                                <div className="text-[16px]font-semibold text-gray-700 mb-2">SIZE</div>
+                                <div className="flex gap-3">
+                                    {sizeGroup.values.map(val => {
+                                        const isSelected = selectedVariants[sizeGroup.id]?.id === val.id;
+                                        return (
+                                            <button
+                                                type="button"
+                                                key={val.id}
+                                                className={`px-3 py-2 rounded ${isSelected ? 'bg-gray-200 text-gray-500 font-bold border border-gray-500' : 'bg-white text-[#111233] border border-[#111233]'} focus:outline-none focus:ring-0`}
+                                                onClick={() => selectVariant(sizeGroup.id, val)}
+                                            >
+                                                {val.name}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                           
+                           {/* MATERIAL selection */}
+                        {materialGroup && (
+                            <div className="mb-6">
+                                <div className="text-[16px] font-semibold text-gray-700 mb-2">MATERIAL</div>
+                                <div className="flex gap-3">
+                                    {materialGroup.values.map(val => {
+                                        const isSelected = selectedVariants[materialGroup.id]?.id === val.id;
+                                        return (
+                                            <button
+                                                type="button"
+                                                key={val.id}
+                                                className={`px-3 py-2 rounded ${isSelected ? 'bg-gray-200 text-gray-500 font-bold border border-gray-500' : 'bg-white text-[#111233] border border-[#111233]'} focus:outline-none focus:ring-0`}
+                                                onClick={() => selectVariant(materialGroup.id, val)}
+                                            >
+                                                {val.name} 
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+
+                        {strapRow && (
+                            <div className="mb-6">
+                                <div className="text-[16px] font-semibold text-gray-700 mb-2">STRAP</div>
+                                {/* use same container layout as COLOR for consistent spacing */}
+                                <div className="flex items-center gap-3">
+                                    {strapRow.values.map(val => {
+                                        const isSelected = selectedVariants[strapRow.id]?.id === val.id;
+                                        const isHexColor = String(val.value || '').startsWith('#') && String(val.value || '').length === 7;
+                                        if ((strapRow.input_type || '').toLowerCase() === 'color' || isHexColor) {
+                                            const bg = String(val.value || '#000');
+                                            return (
+                                                <div
+                                                    key={val.id}
+                                                    className={`w-8 h-8 rounded cursor-pointer ${isSelected ? 'ring-2 ring-blue-500' : 'ring-1 ring-gray-300'}`}
+                                                    style={{ backgroundColor: bg }}
+                                                    onClick={() => selectVariant(strapRow.id, val)}
+                                                    title={`${val.name} ${val.price > 0 ? `(+₱${val.price.toFixed(2)})` : ''}`}
+                                                />
+                                            );
+                                        }
+                                        // non-color straps rendered as small pills but keep same horizontal layout
+                                        return (
+                                            <button
+                                                type="button"
+                                                key={val.id}
+                                                className={`px-3 py-1 rounded ${isSelected ? 'bg-gray-200 text-gray-500 font-bold border border-gray-500' : 'bg-white text-[#111233] border border-[#111233]'}`}
+                                                onClick={() => selectVariant(strapRow.id, val)}
+                                            >
+                                                {val.name}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        {typeRow && (
+                            <div className="mb-6">
+                                <div className="text-[16px] font-semibold text-gray-700 mb-2">TYPE</div>
+                                <div className="flex gap-3">
+                                    {typeRow.values.map(val => {
+                                        const isSelected = selectedVariants[typeRow.id]?.id === val.id;
+                                        if ((typeRow.input_type || '').toLowerCase() === 'color') {
+                                            const bg = String(val.value || '#000');
+                                            return (
+                                                <div
+                                                    key={val.id}
+                                                    className={`w-8 h-8 rounded-full cursor-pointer ${isSelected ? 'ring-2 ring-blue-500' : 'ring-1 ring-gray-300'}`}
+                                                    style={{ backgroundColor: bg }}
+                                                    onClick={() => selectVariant(typeRow.id, val)}
+                                                    title={`${val.name} ${val.price > 0 ? `(+₱${val.price.toFixed(2)})` : ''}`}
+                                                />
+                                            );
+                                        }
+                                        return (
+                                            <button
+                                                type="button"
+                                                key={val.id}
+                                                className={`px-4 py-2 rounded ${isSelected ? 'bg-gray-200 text-gray-500 font-bold border border-gray-500' : 'bg-white text-[#111233] border border-[#111233]'} focus:outline-none focus:ring-0`}
+                                                onClick={() => selectVariant(typeRow.id, val)}
+                                            >
+                                                {val.name} 
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        {accessoriesRow && (
+                            <div className="mb-6">
+                                <div className="text-[16px] font-semibold text-gray-700 mb-2">ACCESSORIES</div>
+                                <div className="flex items-center gap-3">
+                                    {accessoriesRow.values.map(val => {
+                                        const isSelected = selectedVariants[accessoriesRow.id]?.id === val.id;
+                                        const src = accessoryImages[val.id] || '/logo-icon/logo.png';
+                                        return (
+                                            <button
+                                                key={val.id}
+                                                type="button"
+                                                onClick={() => selectVariant(accessoriesRow.id, val)}
+                                                className={`p-0 rounded-md border focus:outline-none focus:ring-0 ${isSelected ? 'bg-gray-200 border-gray-300' : 'bg-white border-gray-300'}`}
+                                                title={val.name}
+                                            >
+                                                {src ? (
+                                                    <img src={src} alt={val.name} className={`h-21 w-[101px] rounded border border-gray object-contain p-0 ${isSelected ? 'grayscale opacity-60' : ''}`} />
+                                                ) : (
+                                                    <div className="h-20 w-20 flex items-center justify-center text-xs text-gray-600">{val.name}</div>
+                                                )}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        {quantityGroup && (
+                            <div className="mb-6">
+                                <div className="text-[16px] font-semibold text-gray-700 mb-2">QUANTITY (THE PURCHASE UNIT IS 50 PIECES)</div>
+                                <div className="flex flex-wrap gap-3">
+                                    {quantityGroup.values.map(val => {
+                                        const isSelected = selectedVariants[quantityGroup.id]?.id === val.id;
+                                        return (
+                                            <button
+                                                type="button"
+                                                key={val.id}
+                                                className={`px-4 py-2 rounded ${isSelected ? 'bg-gray-200 text-gray-700 font-semibold border border-gray-300' : 'bg-white text-[#111233] border border-[#111233]'}`}
+                                                onClick={() => selectVariant(quantityGroup.id, val)}
+                                            >
+                                                {val.name}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        {cutGroup && (
+                            <div className="mb-6">
+                                <div className="text-[16px] font-semibold text-gray-700 mb-2">CUT STYLE</div>
+                                <div className="flex flex-wrap gap-3">
+                                    {cutGroup.values.map(val => {
+                                        const isSelected = selectedVariants[cutGroup.id]?.id === val.id;
+                                        return (
+                                            <button
+                                                type="button"
+                                                key={val.id}
+                                                className={`px-4 py-2 rounded focus:outline-none ${isSelected ? 'bg-gray-200 text-gray-500 font-bold border border-gray-500' : 'bg-white text-[#111233] border border-[#111233]'}`}
+                                                onClick={() => selectVariant(cutGroup.id, val)}
+                                            >
+                                                {val.name}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="mb-6">
                                 {/* SIZE / CUSTOM SIZE (render under BASE when available) */}
                                 {(sizeGroup || sizeDimensions) && (
                                     <div className="mt-3">
@@ -1124,6 +1321,32 @@ const Cap= () => {
                                 )}
 
                            </div>
+
+                        {sizeDimensions && (
+                            <div className="mb-6">
+                                <div className="text-[16px] font-semibold text-gray-700 mb-2">SIZE (CUSTOMIZABLE)</div>
+                                <div className="flex items-center gap-6">
+                                    <div className="flex items-center gap-3">
+                                        <label className="block text-sm text-gray-700 mr-2">Length (inches):</label>
+                                        <div className="inline-flex items-center border rounded-md overflow-hidden">
+                                            <button type="button" onClick={decrementLength} className="px-3 py-1 bg-white text-black  focus:outline-none">-</button>
+                                            <div className="px-4 py-1 bg-white text-black min-w-[48px] text-center">{formatSize(length)}</div>
+                                            <button type="button" onClick={incrementLength} className="px-3 py-1 bg-white text-black  focus:outline-none">+</button>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-3">
+                                        <label className="block text-sm text-gray-700 mr-2">Width (inches):</label>
+                                        <div className="inline-flex items-center border rounded-md overflow-hidden ">
+                                            <button type="button" onClick={decrementWidth} className="px-3 py-1 bg-white text-black focus:outline-none">-</button>
+                                            <div className="px-4 py-1 bg-white text-black min-w-[48px] text-center">{formatSize(width)}</div>
+                                            <button type="button" onClick={incrementWidth} className="px-3 py-1 bg-white text-black focus:outline-none">+</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                            
                             
                            
@@ -1147,15 +1370,7 @@ const Cap= () => {
                         </div>
 
                         <div className="flex items-center gap-4">
-                            <button
-                                type="button"
-                                onClick={handleAddToCart}
-                                disabled={isAdding}
-                                aria-busy={isAdding}
-                                className={`bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0 ${isAdding ? 'opacity-60 pointer-events-none' : ''}`}
-                            >
-                                {cartSuccess ? cartSuccess : (isAdding ? 'ADDING...' : 'ADD TO CART')}
-                            </button>
+                            <button type="button" onClick={handleAddToCart} className="bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0">{cartSuccess ? cartSuccess : 'ADD TO CART'}</button>
                             <button
                                 type="button"
                                 className="bg-white p-1.5 rounded-full shadow-md focus:outline-none focus:ring-0"
@@ -1239,5 +1454,4 @@ const Cap= () => {
 };
 
 
-export default Cap;
-
+export default ProductInfo;

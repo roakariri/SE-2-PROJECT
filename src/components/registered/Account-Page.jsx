@@ -1,6 +1,6 @@
 import React from "react";
 import { v4 as uuidv4 } from 'uuid';
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { UserAuth } from "../../context/AuthContext";
 import { supabase } from "../../supabaseClient";
 import PH_CITIES_BY_PROVINCE from "../../PH_CITIES_BY_PROVINCE.js";
@@ -22,6 +22,7 @@ const AccountPage = () => {
         }
     });
     const navigate = useNavigate();
+    const location = useLocation();
     const { signOut } = UserAuth();
     const [userName, setUserName] = React.useState("");
     const [session, setSession] = React.useState(null);
@@ -185,6 +186,28 @@ const AccountPage = () => {
     React.useEffect(() => {
         fetchUserAndProfile();
     }, [fetchUserAndProfile]);
+
+    // If the URL includes a query like ?tab=orders or a hash #orders, prefer that
+    // over the stored activeTab. This allows other pages to deep-link into account sections.
+    React.useEffect(() => {
+        try {
+            const params = new URLSearchParams(location.search);
+            const tabFromQuery = params.get('tab');
+            const hash = (location.hash || '').replace('#', '');
+            if (tabFromQuery && ['homebase', 'orders', 'profile'].includes(tabFromQuery)) {
+                setActiveTab(tabFromQuery);
+                try { localStorage.setItem('accountActiveTab', tabFromQuery); } catch(e) {}
+                return;
+            }
+            if (hash && ['homebase', 'orders', 'profile'].includes(hash)) {
+                setActiveTab(hash);
+                try { localStorage.setItem('accountActiveTab', hash); } catch(e) {}
+                return;
+            }
+        } catch (err) {
+            // ignore malformed URLs
+        }
+    }, [location.search, location.hash]);
 
     // Listen for auth state changes (sign in / user update) and refresh profile so
     // display name shows immediately after account creation or update.
@@ -731,15 +754,15 @@ const AccountPage = () => {
                     <div className="flex flex-col border border-black rounded w-[300px] justify-center">
                         <div className="border border-black rounded w-[300px] h-[244px] p-2" style={{ lineHeight: "50px" }}>
                             <button
-                                className={`w-full border text-left text-[18px] font-dm-sans ${activeTab === "homebase" ? 'bg-[#ECECEC] text-black' : 'text-black'} focus:outline-none font-semibold bg-transparent rounded-none outline-none p-0 px-3 `}
+                                className={`w-full border text-left text-[18px] font-dm-sans ${activeTab === "homebase" ? 'bg-[#ECECEC] text-black' : 'text-black'} focus:outline-none font-semibold rounded-none outline-none p-0 px-3 `}
                                 onClick={() => handleSetActiveTab("homebase")}
                             >Homebase</button>
                             <button
-                                className={`w-full border text-left text-[18px] font-dm-sans ${activeTab === "orders" ? 'bg-[#ECECEC] text-black' : 'text-black'} focus:outline-none font-semibold bg-transparent rounded-none outline-none p-0 px-3 `}
+                                className={`w-full border text-left text-[18px] font-dm-sans ${activeTab === "orders" ? 'bg-[#ECECEC] text-black' : 'text-black'} focus:outline-none font-semibold  rounded-none outline-none p-0 px-3 `}
                                 onClick={() => handleSetActiveTab("orders")}
                             >Orders</button>
                             <button
-                                className={`w-full border text-left text-[18px] font-dm-sans ${activeTab === "profile" ? 'bg-[#ECECEC] text-black' : 'text-black'} focus:outline-none font-semibold bg-transparent rounded-none outline-none p-0 px-3 `}
+                                className={`w-full border text-left text-[18px] font-dm-sans ${activeTab === "profile" ? 'bg-[#ECECEC] text-black' : 'text-black'} focus:outline-none font-semibold  rounded-none outline-none p-0 px-3 `}
                                 onClick={() => handleSetActiveTab("profile")}
                             >Profile</button>
                             <hr className="my-2 border-black mb-2" />
@@ -906,7 +929,8 @@ const AccountPage = () => {
                             <div className="flex w-full justify-end mt-6">
                                 <button
                                     type="button"
-                                    className="bg-[#3B5B92] text-white font-bold font-dm-sans px-6 py-2 rounded-md hover:bg-[#2a4370] focus:outline-none focus:ring-0"
+                                    disabled={Boolean(firstNameError) || Boolean(lastNameError)}
+                                    className={`bg-[#3B5B92] text-white font-bold font-dm-sans px-6 py-2 rounded-md focus:outline-none focus:ring-0 ${ (firstNameError || lastNameError) ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[#2a4370]'}`}
                                     onClick={handleSaveChanges}
                                 >
                                     {successMsg ? successMsg : "Save Changes"}

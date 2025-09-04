@@ -66,6 +66,8 @@ const CartPage = () => {
           base_price,
           total_price,
           user_id,
+          route,
+          slug,
           products (
             id,
             name,
@@ -328,6 +330,98 @@ const CartPage = () => {
   const deleteCart = async (id) => {
     setActionLoadingIds((p) => ({ ...p, [id]: true }));
     try {
+      // Attempt to remove any uploaded files associated with this cart row (if uploaded_files.cart_id exists)
+      try {
+        // Try to fetch by cart_id first
+        const { data: files, error: fetchFilesErr } = await supabase.from('uploaded_files').select('*').eq('cart_id', id);
+        let resolvedFiles = files;
+        if (fetchFilesErr) {
+          // If the column doesn't exist (42703), fall back to querying by user_id and product_id
+          if (String(fetchFilesErr.message || '').toLowerCase().includes('does not exist') || String(fetchFilesErr.code) === '42703') {
+            console.debug('uploaded_files.cart_id column missing, falling back to user_id/product_id lookup');
+            const cartRow = carts.find(x => x.cart_id === id);
+            const userId = session?.user?.id;
+            if (userId && cartRow) {
+              let fallbackQuery = supabase.from('uploaded_files').select('*').eq('user_id', userId).order('uploaded_at', { ascending: false }).limit(10);
+              const productId = cartRow.product_id ?? cartRow.product?.id;
+              if (productId) fallbackQuery = fallbackQuery.eq('product_id', productId);
+              const { data: fb, error: fbErr } = await fallbackQuery;
+              if (fbErr) console.warn('Fallback uploaded_files query failed:', fbErr);
+              resolvedFiles = fb || [];
+            } else {
+              console.warn('Cannot fallback to uploaded_files by user/product because user or cart row is missing');
+              resolvedFiles = [];
+            }
+          } else {
+            console.warn('Failed fetching uploaded_files for cart:', fetchFilesErr);
+            resolvedFiles = [];
+          }
+        }
+
+        if (Array.isArray(resolvedFiles) && resolvedFiles.length > 0) {
+          console.debug('Found uploaded_files for cart, attempting removal:', resolvedFiles.map(f => ({ id: f.id, file_name: f.file_name, image_url: f.image_url })));
+          const ids = resolvedFiles.map(f => f.id).filter(Boolean);
+
+          // Attempt to delete storage objects first (best-effort)
+          for (const f of resolvedFiles) {
+            try {
+              if (f.image_url && typeof f.image_url === 'string') {
+                let path = null;
+                try {
+                  const u = new URL(f.image_url);
+                  const segments = u.pathname.split('/').filter(Boolean);
+                  const bucketIndex = segments.indexOf('product-files');
+                  if (bucketIndex !== -1 && segments.length > bucketIndex + 1) {
+                    path = segments.slice(bucketIndex + 1).join('/');
+                  } else {
+                    const marker = '/product-files/';
+                    const idx = f.image_url.indexOf(marker);
+                    if (idx !== -1) path = f.image_url.slice(idx + marker.length);
+                  }
+                } catch (e) {
+                  const marker = '/product-files/';
+                  const idx = f.image_url.indexOf(marker);
+                  if (idx !== -1) path = f.image_url.slice(idx + marker.length);
+                }
+
+                if (path) {
+                  try {
+                    const { error: removeErr } = await supabase.storage.from('product-files').remove([path]);
+                    if (removeErr) console.warn('Failed to remove storage object for uploaded file', { path, removeErr });
+                    else console.debug('Removed storage object for uploaded file', { path });
+                  } catch (e) {
+                    console.warn('Exception while removing storage object for uploaded file', e);
+                  }
+                } else {
+                  console.debug('Could not determine storage path for uploaded file, skipping storage deletion', { id: f.id, image_url: f.image_url });
+                }
+              }
+            } catch (e) {
+              console.warn('Error while attempting to remove storage for uploaded file', e);
+            }
+          }
+
+          // Delete DB rows in a single batch call. Prefer to scope deletion to the current user.
+          if (ids.length > 0) {
+            try {
+              const userId = session?.user?.id;
+              let delRes;
+              if (userId) {
+                delRes = await supabase.from('uploaded_files').delete().eq('user_id', userId).in('id', ids);
+              } else {
+                delRes = await supabase.from('uploaded_files').delete().in('id', ids);
+              }
+              if (delRes?.error) console.warn('Failed to delete uploaded_files rows for cart:', delRes.error);
+              else console.debug('Deleted uploaded_files rows for cart', { ids, userId: session?.user?.id });
+            } catch (e) {
+              console.warn('Exception while deleting uploaded_files rows for cart:', e);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Could not fetch uploaded_files for cart deletion:', e?.message || e);
+      }
+
       await supabase.from("cart_variants").delete().eq("cart_id", id);
       const { error } = await supabase.from("cart").delete().eq("cart_id", id);
       if (error) throw error;
@@ -344,7 +438,19 @@ const CartPage = () => {
   };
 
   const editCart = (cart) => {
-    navigate(`/product/${cart.product_id}`);
+    // Prefer route/slug stored on the cart row, then product object, then fallback to product id path
+    const routeFromRow = cart.route || cart.slug;
+    const prodRoute = cart.product?.route || cart.product?.slug;
+    const route = routeFromRow || prodRoute;
+    let path;
+    if (route) {
+      path = String(route).startsWith('/') ? route : `/${String(route)}`;
+    } else {
+      path = `/product/${cart.product_id}`;
+    }
+
+    // Pass the cart row so the product page can prefill selections
+    navigate(path, { state: { fromCart: true, cartRow: cart } });
   };
 
   const subtotal = (selectedIds && selectedIds.size > 0)

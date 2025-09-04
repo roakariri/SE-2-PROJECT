@@ -23,6 +23,8 @@ const RTshirt = () => {
     const [isFavorited, setIsFavorited] = useState(false);
     const [loading, setLoading] = useState(true);
     const [favLoading, setFavLoading] = useState(false);
+    const [thumbnails, setThumbnails] = useState([]);
+    const [activeThumb, setActiveThumb] = useState(0);
     const favVerifyTimer = useRef(null);
     const [lastFavResp, setLastFavResp] = useState(null);
     const [detailsOpen, setDetailsOpen] = useState(true);
@@ -31,6 +33,7 @@ const RTshirt = () => {
     const [selectedVariants, setSelectedVariants] = useState({});
     const [cartError, setCartError] = useState(null);
     const [cartSuccess, setCartSuccess] = useState(null);
+    const [isAdding, setIsAdding] = useState(false);
 
     // ...existing code...
 
@@ -175,19 +178,153 @@ const RTshirt = () => {
         setSelectedVariants(initial);
     }, [variantGroups]);
 
-    // Resolve imageKey to a public URL
+    // Prefill selections when navigated from Cart edit
     useEffect(() => {
-        if (!imageKey) {
-            setImageSrc('/logo-icon/logo.png');
-            return;
-        }
         try {
-            const { data } = supabase.storage.from('apparel-images').getPublicUrl(imageKey);
-            setImageSrc(data?.publicUrl || '/apparel-images/caps.png');
-        } catch (err) {
-            console.error('Error resolving image public URL:', err);
-            setImageSrc('/apparel-images/caps.png');
+            const navState = location?.state || {};
+            if (!navState?.fromCart || !navState?.cartRow) return;
+            const cart = navState.cartRow;
+            if (!variantGroups || variantGroups.length === 0) return;
+
+            const mapped = {};
+            for (const group of variantGroups) {
+                const cartVariant = (cart.variants || []).find(v => String(v.group).toLowerCase() === String(group.name).toLowerCase());
+                if (cartVariant) {
+                    const match = group.values.find(val => String(val.name || val.value).toLowerCase() === String(cartVariant.value).toLowerCase());
+                    if (match) mapped[group.id] = match;
+                    else mapped[group.id] = { id: `cart_prefill_${group.id}`, name: cartVariant.value, value: cartVariant.value, price: cartVariant.price || 0 };
+                } else {
+                    const def = group.values.find(v => v.is_default) || group.values[0];
+                    if (def) mapped[group.id] = def;
+                }
+            }
+            setSelectedVariants(mapped);
+            if (cart.quantity) setQuantity(Number(cart.quantity) || 1);
+        } catch (e) {
+            console.warn('Failed to prefill RTshirt from cart state', e);
         }
+    }, [location, variantGroups]);
+
+    // Resolve imageKey to a public URL (robust: accepts full urls, leading slashes, and tries common buckets)
+    useEffect(() => {
+        let isMounted = true;
+        const resolveImage = async () => {
+            if (!imageKey) {
+                if (isMounted) setImageSrc('/logo-icon/logo.png');
+                return;
+            }
+
+            // If already a full URL or a path starting with '/', use it directly
+            try {
+                if (/^https?:\/\//i.test(imageKey) || imageKey.startsWith('/')) {
+                    if (isMounted) setImageSrc(imageKey);
+                    return;
+                }
+
+                const cleanKey = String(imageKey).replace(/^\/+/, ''); // remove leading slash(es)
+
+                // Try buckets in the same order used elsewhere for apparel -> accessories fallback
+                const bucketsToTry = ['apparel-images', 'accessoriesdecorations-images', 'accessories-images', 'images', 'product-images', 'public'];
+                for (const bucket of bucketsToTry) {
+                    try {
+                        const { data, error } = supabase.storage.from(bucket).getPublicUrl(cleanKey);
+                        if (error) continue;
+                        const url = data?.publicUrl || data?.publicURL || null;
+                        if (url && !url.endsWith('/')) {
+                            if (isMounted) setImageSrc(url);
+                            return;
+                        }
+                    } catch (err) {
+                        // continue trying other buckets
+                    }
+                }
+
+                // Last-resort fallback to local public asset
+                if (isMounted) setImageSrc('/apparel-images/rounded_t-shirt.png');
+            } catch (err) {
+                console.error('Error resolving image public URL:', err);
+                if (isMounted) setImageSrc('/apparel-images/rounded_t-shirt-white.png');
+            }
+        };
+        resolveImage();
+        return () => { isMounted = false; };
+    }, [imageKey]);
+
+        // Build thumbnails: 1) rounded t-shirt main image as first thumb, 2) rounded_t-shirt variations, 3) fallbacks (tries storage buckets)
+    useEffect(() => {
+        let isMounted = true;
+        const tryGetPublic = async (bucket, keyBase) => {
+            const exts = ['.png', '.jpg', '.jpeg', '.webp'];
+            for (const ext of exts) {
+                try {
+                    const { data } = supabase.storage.from(bucket).getPublicUrl(keyBase + ext);
+                    const url = data?.publicUrl;
+                    if (url && !url.endsWith('/')) {
+                        try {
+                            const head = await fetch(url, { method: 'HEAD' });
+                            if (head.ok) return url;
+                        } catch (e) { /* ignore */ }
+                    }
+                } catch (e) { /* ignore */ }
+            }
+            return null;
+        };
+
+        const buildThumbnails = async () => {
+            const results = [];
+
+            // first thumbnail: use rounded_t-shirt as primary
+            results.push('/apparel-images/rounded_t-shirt.png');
+
+            // desired variant thumbnails (colors)
+            const desired = ['rounded_t-shirt-white', 'rounded_t-shirt-blue', 'rounded_t-shirt-red'];
+            for (const name of desired) {
+                if (results.length >= 4) break;
+                const url = await tryGetPublic('apparel-images', name);
+                if (url) results.push(url);
+            }
+
+            // if still short, try deriving from imageKey variants (numbered suffixes)
+            if (results.length < 4 && imageKey) {
+                const key = imageKey.toString().replace(/^\/+/, '');
+                const m = key.match(/(.+?)\.(png|jpg|jpeg|webp|gif)$/i);
+                const base = m ? m[1] : key;
+                const extras = [base + '-1', base + '-2', base + '-3'];
+                for (const cand of extras) {
+                    if (results.length >= 4) break;
+                    const url = await tryGetPublic('apparel-images', cand);
+                    if (url) results.push(url);
+                }
+            }
+
+            // last-resort local fallbacks
+            const fallbacks = ['/apparel-images/rounded_t-shirt.png', '/apparel-images/rounded_t-shirt-blue.png', '/apparel-images/rounded_t-shirt-red.png', '/apparel-images/rounded_t-shirt-white.png', '/logo-icon/logo.png'];
+            for (const f of fallbacks) {
+                if (results.length >= 4) break;
+                try {
+                    const r = await fetch(f, { method: 'HEAD' });
+                    if (r.ok) results.push(f);
+                } catch (e) { /* ignore */ }
+            }
+
+            if (!isMounted) return;
+
+            // Deduplicate while preserving order
+            const seen = new Set();
+            const ordered = [];
+            for (const u of results) {
+                if (!u) continue;
+                if (!seen.has(u)) { seen.add(u); ordered.push(u); }
+            }
+
+            let padded = ordered.slice(0, 4);
+            while (padded.length < 4) padded.push(undefined);
+
+            setThumbnails(padded);
+        };
+
+        buildThumbnails();
+        return () => { isMounted = false; };
     }, [imageKey]);
 
     // Helpers
@@ -356,22 +493,27 @@ const RTshirt = () => {
 
     // Handle Add to Cart (copied from Cap-Info)
     const handleAddToCart = async () => {
+        if (isAdding) return;
+
         if (!productId) {
             setCartError("No product selected");
             return;
         }
 
-        const userId = session?.user?.id ?? await getCurrentUserId();
-        if (!userId) {
-            setCartError("Please sign in to add to cart");
-            navigate("/signin");
-            return;
-        }
-
-        setCartError(null);
-        setCartSuccess(null);
+        setIsAdding(true);
 
         try {
+            const userId = session?.user?.id ?? await getCurrentUserId();
+            if (!userId) {
+                setCartError("Please sign in to add to cart");
+                setIsAdding(false);
+                navigate("/signin");
+                return;
+            }
+
+            setCartError(null);
+            setCartSuccess(null);
+
             // Get existing cart items for this user and product
             const { data: existingCarts, error: checkError } = await supabase
                 .from("cart")
@@ -408,7 +550,14 @@ const RTshirt = () => {
                     const newTotal = (Number(unitPrice) || 0) * newQuantity;
                     const { error: updateError } = await supabase
                         .from("cart")
-                        .update({ quantity: newQuantity, total_price: newTotal, base_price: Number(unitPrice) || Number(price) || 0 })
+                        .update({
+                            quantity: newQuantity,
+                            total_price: newTotal,
+                            base_price: Number(unitPrice) || Number(price) || 0,
+                            // persist current route and slug for cart -> edit navigation
+                            route: location?.pathname || `/${slug}`,
+                            slug: slug || null,
+                        })
                         .eq("cart_id", cart.cart_id)
                         .eq("user_id", userId);
                     if (updateError) throw updateError;
@@ -428,6 +577,9 @@ const RTshirt = () => {
                             quantity: quantity,
                             base_price: Number(unitPrice) || Number(price) || 0,
                             total_price: totalPrice,
+                            // include product route and slug so Cart can link back to friendly URL
+                            route: location?.pathname || `/${slug}`,
+                            slug: slug || null,
                         },
                     ])
                     .select("cart_id")
@@ -457,6 +609,18 @@ const RTshirt = () => {
                         throw variantsError;
                     }
                 }
+
+                // Attach uploaded files to cart row if any
+                try {
+                    if (uploadedFileMetas && uploadedFileMetas.length > 0) {
+                        const ids = uploadedFileMetas.map(m => m.id).filter(Boolean);
+                        if (ids.length > 0) {
+                            await supabase.from('uploaded_files').update({ cart_id: cartId }).in('id', ids);
+                        }
+                    }
+                } catch (e) {
+                    console.warn('Failed to attach uploaded_files to cart row:', e);
+                }
             }
 
             setCartSuccess("Item added to cart!");
@@ -469,6 +633,8 @@ const RTshirt = () => {
             } else {
                 setCartError("Failed to add to cart: " + (err.message || "Unknown error"));
             }
+        } finally {
+            setIsAdding(false);
         }
     };
 
@@ -494,35 +660,78 @@ const RTshirt = () => {
                     <div className="bg-white w-full tablet:w-[573px] h-auto">
                         <div className="rounded-md p-6 h-full flex flex-col">
                             <div className="relative w-full h-64 tablet:h-[480px] flex-1 flex items-center justify-center bg-[#f7f7f7]">
-                                <img src={imageSrc || "/apparel-images/caps.png"} alt="" className="w-full max-h-64 tablet:max-h-[420px] object-contain" />
+                                <img src={imageSrc || "/apparel-images/rounded_t-shirt-white.png"} alt="" className="w-full max-h-64 tablet:max-h-[420px] object-contain" />
                                 <button
                                     type="button"
                                     aria-label="Previous image"
-                                    className="absolute left-1 top-1/2 -translate-y-1/2 p-2 bg-transparent focus:outline-none focus:ring-0"
+                                    onClick={() => {
+                                        const valid = thumbnails.map((t, i) => t ? i : -1).filter(i => i >= 0);
+                                        if (!valid.length) return;
+                                        const current = valid.includes(activeThumb) ? activeThumb : valid[0];
+                                        const idx = valid.indexOf(current);
+                                        const prevIdx = valid[(idx - 1 + valid.length) % valid.length];
+                                        setActiveThumb(prevIdx);
+                                        if (thumbnails[prevIdx]) setImageSrc(thumbnails[prevIdx]);
+                                    }}
+                                    aria-disabled={thumbnails.filter(Boolean).length < 2}
+                                    className={`absolute left-1 top-1/2 -translate-y-1/2 p-2 bg-transparent focus:outline-none focus:ring-0 ${thumbnails.filter(Boolean).length < 2 ? 'opacity-40 pointer-events-none' : ''}`}
                                 >
                                     <img src="/logo-icon/arrow-left.svg" alt="Previous" className="h-6 w-6" />
                                 </button>
                                 <button
                                     type="button"
                                     aria-label="Next image"
-                                    className="absolute right-1 top-1/2 -translate-y-1/2 p-2 bg-transparent focus:outline-none focus:ring-0"
+                                    onClick={() => {
+                                        const valid = thumbnails.map((t, i) => t ? i : -1).filter(i => i >= 0);
+                                        if (!valid.length) return;
+                                        const current = valid.includes(activeThumb) ? activeThumb : valid[0];
+                                        const idx = valid.indexOf(current);
+                                        const nextIdx = valid[(idx + 1) % valid.length];
+                                        setActiveThumb(nextIdx);
+                                        if (thumbnails[nextIdx]) setImageSrc(thumbnails[nextIdx]);
+                                    }}
+                                    aria-disabled={thumbnails.filter(Boolean).length < 2}
+                                    className={`absolute right-1 top-1/2 -translate-y-1/2 p-2 bg-transparent focus:outline-none focus:ring-0 ${thumbnails.filter(Boolean).length < 2 ? 'opacity-40 pointer-events-none' : ''}`}
                                 >
                                     <img src="/logo-icon/arrow-right.svg" alt="Next" className="h-6 w-6" />
                                 </button>
                             </div>
 
-                            <div className="mt-4 grid grid-cols-4 gap-3">
-                                <div className="h-20 w-full border rounded p-2 bg-[#f7f7f7]" aria-hidden />
-                                <div className="h-20 w-full border rounded p-2 bg-[#f7f7f7]" aria-hidden />
-                                <div className="h-20 w-full border rounded p-2 bg-[#f7f7f7]" aria-hidden />
-                                <div className="h-20 w-full border rounded p-2 bg-gray-50" aria-hidden />
+                            <div className="mt-4 grid grid-cols-4 gap-4">
+                                {(() => {
+                                    const cells = [];
+                                    for (let i = 0; i < 4; i++) {
+                                        const src = thumbnails[i];
+                                        if (src) {
+                                            const isActive = i === activeThumb;
+                                            cells.push(
+                                                <button
+                                                    key={`thumb-${i}`}
+                                                    type="button"
+                                                    onClick={() => { setActiveThumb(i); setImageSrc(src); }}
+                                                    className={`border rounded p-1 overflow-hidden flex items-center justify-center ${isActive ? 'ring-2 ring-offset-1 ring-black focus:outline-none' : ''}`}
+                                                    style={{ width: 120, height: 135 }}
+                                                >
+                                                    <img
+                                                        src={src}
+                                                        alt={`Thumbnail ${i + 1}`}
+                                                        className={`h-full w-full object-cover transition-transform duration-200 ease-in-out transform ${isActive ? 'scale-110' : 'hover:scale-110'}`}
+                                                    />
+                                                </button>
+                                            );
+                                        } else {
+                                            cells.push(<div key={`placeholder-${i}`} className="border rounded p-2 bg-[#f7f7f7]"  aria-hidden />);
+                                        }
+                                    }
+                                    return cells;
+                                })()}
                             </div>
                         </div>
                     </div>
 
                     {/* Right: Details */}
                     <div className="border border-black rounded-md p-6 w-full tablet:w-[601px] h-[732px] flex flex-col overflow-y-auto pr-2">
-                        <h1 className="text-[36px] font-bold text-[#111233] mt-4  mb-2">{loading ? "" : productName}</h1>
+                        <h1 className="text-[36px] font-bold text-[#111233] mt-4  font-dm-sans mb-2">{loading ? "" : productName}</h1>
                         {/*stars*/}
                         <div className="flex flex-row gap-2">
                             <div className="flex items-center gap-2 text-gray-300" aria-hidden>
@@ -555,7 +764,7 @@ const RTshirt = () => {
                         {/* scrollable content area */}
                         <div className="flex-1 pr-2">
                         <div className="mb-6">
-                            <div className="text-[16px] font-semibold text-gray-700 mb-2">PRINTING</div>
+                            <p className="text-[16px] font-semibold text-gray-700 mb-2 font-dm-sans">PRINTING</p>
                             {printingGroup && (
                                 <div className="flex gap-3">
                                     {printingGroup.values.map(val => {
@@ -592,7 +801,7 @@ const RTshirt = () => {
 
                         {/* SIZE selection */}
                         <div className="mb-6">
-                            <div className="text-[16px]font-semibold text-gray-700 mb-2">SIZE</div>
+                            <p className="text-[16px] font-semibold text-gray-700 mb-2 font-dm-sans">SIZE</p>
                             {sizeGroup && (
                                 <div className="flex gap-3">
                                     {sizeGroup.values.map(val => {
@@ -614,7 +823,7 @@ const RTshirt = () => {
 
                         {/* MATERIAL selection */}
                         <div className="mb-6">
-                            <div className="text-[16px] font-semibold text-gray-700 mb-2">MATERIAL</div>
+                            <p className="text-[16px] font-semibold text-gray-700 mb-2 font-dm-sans">MATERIAL</p>
                             {materialGroup && (
                                 <div className="flex gap-3">
                                     {materialGroup.values.map(val => {
@@ -656,7 +865,7 @@ const RTshirt = () => {
                         </div>
 
                         <div className="mb-6">
-                            <div className="text-sm font-semibold text-gray-700 mb-2">UPLOAD DESIGN</div>
+                            <div className="text-[16px] font-semibold text-gray-700 mb-2">UPLOAD DESIGN</div>
                             <UploadDesign productId={productId} session={session} />
                         </div>
 
@@ -673,7 +882,15 @@ const RTshirt = () => {
 
                         {/* footer actions pinned at bottom */}
                         <div className="flex items-center gap-4 mt-4">
-                            <button onClick={handleAddToCart} className="bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold hover:bg-orange-600">{cartSuccess ? cartSuccess : 'ADD TO CART'}</button>
+                            <button
+                                type="button"
+                                onClick={handleAddToCart}
+                                disabled={isAdding}
+                                aria-busy={isAdding}
+                                className={`bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0 ${isAdding ? 'opacity-60 pointer-events-none' : ''}`}
+                            >
+                                {cartSuccess ? cartSuccess : (isAdding ? 'ADDING...' : 'ADD TO CART')}
+                            </button>
                             {cartError && <div className="text-red-600 text-sm ml-2">{cartError}</div>}
                             <button
                                 className="bg-white p-1.5 rounded-full shadow-md"

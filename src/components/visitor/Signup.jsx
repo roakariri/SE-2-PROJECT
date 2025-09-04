@@ -45,6 +45,103 @@ const Signup = () => {
   const { signUpNewUser } = UserAuth();
   const navigate = useNavigate();
 
+  // Live validation: first/last name should not contain digits
+  const handleFirstNameChange = (e) => {
+    const v = e.target.value;
+    // enforce max length 32
+    if (v.length > 32) {
+      setFirstName(v.slice(0, 32));
+      setFirstNameError("First name cannot exceed 32 characters.");
+      return;
+    }
+  setFirstName(v);
+  // validate name rules (no digits, allowed punctuation limits)
+  const err = validateName(v, 'First');
+  if (err) setFirstNameError(err);
+  else if (firstNameError) setFirstNameError('');
+  };
+
+  const handleLastNameChange = (e) => {
+    const v = e.target.value;
+    // enforce max length 32
+    if (v.length > 32) {
+      setLastName(v.slice(0, 32));
+      setLastNameError("Last name cannot exceed 32 characters.");
+      return;
+    }
+    setLastName(v);
+    const err = validateName(v, 'Last');
+    if (err) setLastNameError(err);
+    else if (lastNameError) setLastNameError('');
+  };
+
+  // validate name helper
+  // rules: allow letters, spaces, hyphen, apostrophe; at least 2 letters; max 2 special chars (- and '); no consecutive special characters (including spaces)
+  const validateName = (raw, label = 'Name') => {
+    const s = String(raw || '').trim();
+    if (s.length === 0) return '';
+    // disallow digits
+    if (/\d/.test(s)) return `${label} name cannot contain numbers.`;
+    // allowed characters only
+    if (!/^[A-Za-z '\-]+$/.test(s)) return `${label} contains invalid characters.`;
+    // minimum length of letters (at least 2 letters somewhere)
+    const lettersOnly = (s.match(/[A-Za-z]/g) || []).length;
+    if (lettersOnly < 2) return `It must contain at least 2 letters.`;
+    // count special chars (hyphen and apostrophe)
+    const specialCount = (s.match(/[\-']/g) || []).length;
+    if (specialCount > 2) return `${label} can contain at most 2 special characters (hyphen/apostrophe).`;
+    // no consecutive special characters or consecutive spaces or mix
+    if (/[ '\-]{2,}/.test(s)) return `${label} cannot contain consecutive special characters or spaces.`;
+    return '';
+  };
+
+  // Live validation for email local-part length (6-30 chars before @)
+  const handleEmailChange = (e) => {
+    const v = e.target.value;
+    setEmail(v);
+    // determine local part (text before @). If no @ yet, whole value is local part
+    const atIndex = v.indexOf('@');
+    const local = atIndex === -1 ? v : v.slice(0, atIndex);
+    if (local.length > 0 && local.length < 6) {
+      setEmailError('Email must have 6 to 30 characters before the @ symbol.');
+    } else if (local.length > 30) {
+      setEmailError('Email must have 6 to 30 characters before the @ symbol.');
+    } else {
+      if (emailError) setEmailError('');
+    }
+  };
+
+  // Live validation for password fields: min length and match
+  const handlePasswordChange = (e) => {
+    const v = e.target.value;
+    setPassword(v);
+    // minimum length 6
+    if (v.length > 0 && v.length < 6) {
+      setPasswordError('Password must be at least 6 characters long.');
+      return;
+    }
+    // if confirm already filled, check match
+    if (confirmPassword && v !== confirmPassword) {
+      setPasswordError('Passwords do not match.');
+      return;
+    }
+    if (passwordError) setPasswordError('');
+  };
+
+  const handleConfirmPasswordChange = (e) => {
+    const v = e.target.value;
+    setConfirmPassword(v);
+    if (password && v !== password) {
+      setPasswordError('Passwords do not match.');
+      return;
+    }
+    if (v.length > 0 && v.length < 6) {
+      setPasswordError('Password must be at least 6 characters long.');
+      return;
+    }
+    if (passwordError) setPasswordError('');
+  };
+
   const handleSignUp = async (e) => {
   e.preventDefault();
   setError("");
@@ -53,20 +150,23 @@ const Signup = () => {
   // Validate first and last name: alphabets only, minimum 2 chars each
   setFirstNameError("");
   setLastNameError("");
-  const nameRegex = /^[A-Za-z]{2,}$/;
-  let nameValid = true;
-  if (!nameRegex.test(String(firstName || "").trim())) {
-    setFirstNameError("First name must be letters only and at least 2 characters.");
-    nameValid = false;
+  // enforce length limits
+  if ((firstName || '').length > 32) {
+    setFirstNameError('First name cannot exceed 32 characters.');
+    return;
   }
-    const lastTrim = String(lastName || "").trim();
-    if (lastTrim !== "") {
-      if (!nameRegex.test(lastTrim)) {
-        setLastNameError("Last name must be letters only and at least 2 characters.");
-        nameValid = false;
-      }
-    }
-  if (!nameValid) return;
+  if ((lastName || '').length > 32) {
+    setLastNameError('Last name cannot exceed 32 characters.');
+    return;
+  }
+  // validate names with helper
+  const firstErr = validateName(firstName, 'First');
+  if (firstErr) { setFirstNameError(firstErr); return; }
+  const lastTrim = String(lastName || '').trim();
+  if (lastTrim) {
+    const lastErr = validateName(lastTrim, 'Last');
+    if (lastErr) { setLastNameError(lastErr); return; }
+  }
 
   // Validate email local-part length: min 6, max 30 characters before '@'
   setEmailError("");
@@ -160,6 +260,14 @@ const Signup = () => {
   }
 };
 
+  // whether name/email/password fields currently have validation errors
+  const formHasError = Boolean(firstNameError) || Boolean(lastNameError) || Boolean(emailError) || Boolean(passwordError);
+
+  // whether any required field is empty: firstName, email, password, confirmPassword
+  const requiredMissing = !String(firstName || '').trim() || !String(email || '').trim() || !password || !confirmPassword;
+
+  const formDisabled = loading || formHasError || requiredMissing;
+
   return (
     <div className="min-h-screen flex flex-col">
       
@@ -202,7 +310,7 @@ const Signup = () => {
               <div className="flex flex-col w-1/2">
                 <p className="font-dm-sans">First Name</p>
                 <input
-                  onChange={(e) => { setFirstName(e.target.value); if (firstNameError) setFirstNameError(""); }}
+                  onChange={handleFirstNameChange}
                   className="p-3 mt-2 text-black bg-white border border-gray-500 rounded"
                   type="text"
                   name="firstName"
@@ -216,7 +324,7 @@ const Signup = () => {
               <div className="flex flex-col w-1/2">
                 <p className="font-dm-sans">Last Name (optional)</p>
                 <input
-                  onChange={(e) => { setLastName(e.target.value); if (lastNameError) setLastNameError(""); }}
+                  onChange={handleLastNameChange}
                   className="p-3 mt-2 text-black bg-white border border-gray-500 rounded font-dm-sans"
                   type="text"
                   name="lastName"
@@ -232,12 +340,12 @@ const Signup = () => {
             <div className="flex flex-col py-4">
               <p className="font-dm-sans">Email address</p>
               <input
-                onChange={(e) => { setEmail(e.target.value); if (emailError) setEmailError(""); }}
+                onChange={handleEmailChange}
                 className="p-3 mt-2 text-black bg-white border border-gray-500 rounded"
                 type="email"
                 name="email"
                 id="email"
-                placeholder="Email (min. of 6 to 30 characters before @ symbol)"
+                placeholder="Email"
               />
               {emailError && <p className="text-red-600 text-sm mt-1 font-dm-sans">{emailError}</p>}
             </div>
@@ -247,7 +355,7 @@ const Signup = () => {
               <p className="font-dm-sans">Create Password <span className="text-gray-400 text-[12px] italic font-dm-sans">(At least 6 characters.)</span></p>
               <div className="relative">
                 <input
-                  onChange={(e) => { setPassword(e.target.value); if (passwordError) setPasswordError(""); }}
+                  onChange={handlePasswordChange}
                   className="p-3 mt-2 text-black bg-white border border-gray-500 rounded w-full pr-10 focus:border-transparent"
                   type={showPassword ? "text" : "password"}
                   name="password"
@@ -275,7 +383,7 @@ const Signup = () => {
               <p className="font-dm-sans">Confirm Password</p>
               <div className="relative">
                 <input
-                  onChange={(e) => { setConfirmPassword(e.target.value); if (passwordError) setPasswordError(""); }}
+                  onChange={handleConfirmPasswordChange}
                   className="p-3 mt-2 text-black bg-white border border-gray-500 rounded w-full pr-10 focus:border-transparent"
                   type={showConfirmPassword ? "text" : "password"}
                   name="confirmPassword"
@@ -296,7 +404,12 @@ const Signup = () => {
               </div>
               {passwordError && <p className="text-red-600 text-sm mt-1 font-dm-sans">{passwordError}</p>}
             </div>
-            <button type="submit" disabled={loading} className="w-full mt-4 submit-button font-dm-sans">
+            <button
+              type="submit"
+              disabled={formDisabled}
+              className={`w-full mt-4 submit-button font-dm-sans ${formDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+              title={formDisabled ? 'Please fill required fields and fix errors' : 'Sign Up'}
+            >
               Sign Up
             </button>
             {error && (

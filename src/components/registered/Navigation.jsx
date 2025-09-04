@@ -248,7 +248,7 @@ const Navigation = () => {
                 <button
                   type="button"
                   className="flex items-center semi-bigscreen:ml-2 focus:outline-none focus:ring-0 font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]"
-                  onClick={() => navigate('/account')}
+                  onClick={() => navigate('/account?tab=orders')}
                 >
                   <img
                     src={profilePhotoUrl || DEFAULT_AVATAR}

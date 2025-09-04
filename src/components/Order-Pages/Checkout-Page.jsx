@@ -24,7 +24,7 @@ const CheckoutPage = () => {
                         <div className="flex items-center pr-4">
                             <button
                                 aria-label="Open cart"
-                                onClick={() => navigate('/account')}
+                                onClick={() => navigate('/account?tab=orders')}
                                 className="p-2 rounded-md  w-[40px] h-[40px] flex items-center justify-center focus:outline-none bg-white hover:bg-gray-200"
                             >
                                 <img src="/logo-icon/shopping-bag.svg" alt="Project icon" className="w-[40px] h-[40px] object-contain bg-transparent" />

@@ -19,13 +19,10 @@ const ForgotPassword = () => {
       return;
     }
     try {
-      // Ensure we don't send any active session with this request.
-      // If the user is currently signed-in in this browser, sign them out
-      // before requesting a password reset so the reset link is issued
-      // in an unauthenticated context.
-      try { await supabase.auth.signOut(); } catch {}
-
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      // Keep the current session intact; do not sign the user out here.
+      // Supabase will send the reset link for the provided email regardless
+      // of the active client session.
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
       // Ensure the reset link redirects to the ResetPassword route defined in router.jsx
       redirectTo: window.location.origin + "/reset-password?type=recovery"
     });
