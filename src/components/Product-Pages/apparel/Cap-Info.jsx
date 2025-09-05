@@ -807,7 +807,10 @@ const Cap= () => {
     };
 
     const toggleDetails = () => setDetailsOpen((s) => !s);
-    const incrementQuantity = () => setQuantity((q) => q + 1);
+    const incrementQuantity = () => setQuantity((q) => {
+        const maxStock = stockInfo?.quantity || Infinity;
+        return Math.min(q + 1, maxStock);
+    });
     const decrementQuantity = () => setQuantity((q) => Math.max(1, q - 1));
 
     const selectVariant = (groupId, value) => {
@@ -1167,7 +1170,7 @@ const Cap= () => {
                             {variantGroups.length === 0 || Object.keys(selectedVariants).length !== variantGroups.length ? (
                                 <span className="text-gray-500">Select all variants to see stock.</span>
                             ) : stockInfo === null ? (
-                                <span className="text-red-600 font-semibold">This combination is not available.</span>
+                                 <span className="text font-semibold">Checking stocks.</span>
                             ) : stockInfo.quantity > 0 ? (
                                 <span className="text-green-700 font-semibold">Stock: {stockInfo.quantity}</span>
                             ) : (
@@ -1308,10 +1311,12 @@ const Cap= () => {
                                 <input
                                     type="number"
                                     min={1}
+                                    max={stockInfo?.quantity || undefined}
                                     value={quantity}
                                     onChange={(e) => {
                                         const v = Number(e.target.value);
-                                        setQuantity(isNaN(v) || v < 1 ? 1 : v);
+                                        const maxStock = stockInfo?.quantity || Infinity;
+                                        setQuantity(isNaN(v) || v < 1 ? 1 : Math.min(v, maxStock));
                                     }}
                                     onKeyDown={(e) => {
                                         if (e.key === 'Enter') e.currentTarget.blur();
@@ -1319,7 +1324,7 @@ const Cap= () => {
                                     className="w-20 text-center px-2 text-black outline-none"
                                     aria-label="Quantity input"
                                 />
-                                <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={incrementQuantity} aria-label="Increase quantity">+</button>
+                                <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={incrementQuantity} aria-label="Increase quantity" disabled={quantity >= (stockInfo?.quantity || Infinity)}>+</button>
                             </div>
                         </div>
 

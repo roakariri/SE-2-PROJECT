@@ -31,6 +31,7 @@ const RTshirt = () => {
     const [quantity, setQuantity] = useState(1);
     const [variantGroups, setVariantGroups] = useState([]);
     const [selectedVariants, setSelectedVariants] = useState({});
+    const [stockInfo, setStockInfo] = useState(null);
     const [cartError, setCartError] = useState(null);
     const [cartSuccess, setCartSuccess] = useState(null);
     const [isAdding, setIsAdding] = useState(false);
@@ -474,6 +475,69 @@ const RTshirt = () => {
         };
     }, []);
 
+    // Fetch stock info based on selected variants
+    useEffect(() => {
+        const fetchStockInfo = async () => {
+            if (!productId || !variantGroups.length) {
+                setStockInfo(null);
+                return;
+            }
+            // Only fetch if all groups are selected
+            const variantIds = Object.values(selectedVariants)
+                .map(v => v.id)
+                .filter(Boolean);
+
+            if (variantIds.length !== variantGroups.length) {
+                setStockInfo(null);
+                return;
+            }
+
+            // Sort for consistency (if your DB stores sorted arrays)
+            const sortedVariantIds = [...variantIds].sort((a, b) => a - b);
+
+            // 1. Find the matching combination
+            const { data: combinations, error: combError } = await supabase
+                .from('product_variant_combinations')
+                .select('combination_id, variants')
+                .eq('product_id', productId);
+
+            if (combError) {
+                setStockInfo(null);
+                return;
+            }
+
+            // Find the combination where variants array matches exactly
+            const match = (combinations || []).find(row => {
+                if (!row.variants || row.variants.length !== sortedVariantIds.length) return false;
+                // Compare arrays (order-insensitive)
+                const a = [...row.variants].sort((x, y) => x - y);
+                return a.every((v, i) => v === sortedVariantIds[i]);
+            });
+
+            if (!match) {
+                setStockInfo(null);
+                return;
+            }
+
+            // 2. Get inventory for this combination_id
+            const { data: inventory, error: invError } = await supabase
+                .from('inventory')
+                .select('quantity, low_stock_limit')
+                .eq('combination_id', match.combination_id)
+                .eq('status', 'in_stock')
+                .single();
+
+            if (invError || !inventory) {
+                setStockInfo(null);
+                return;
+            }
+
+            setStockInfo(inventory);
+        };
+
+        fetchStockInfo();
+    }, [productId, selectedVariants, variantGroups]);
+
     // Reviews
     const [reviewsCount, setReviewsCount] = useState(0);
     const [averageRating, setAverageRating] = useState(null);
@@ -523,7 +587,10 @@ const RTshirt = () => {
     }, [productId]);
 
     const toggleDetails = () => setDetailsOpen((s) => !s);
-    const incrementQuantity = () => setQuantity((q) => q + 1);
+    const incrementQuantity = () => setQuantity((q) => {
+        const maxStock = stockInfo?.quantity || Infinity;
+        return Math.min(q + 1, maxStock);
+    });
     const decrementQuantity = () => setQuantity((q) => Math.max(1, q - 1));
 
     const selectVariant = (groupId, value) => {
@@ -803,6 +870,20 @@ const RTshirt = () => {
                             {loading ? "" : `₱${totalPrice.toFixed(2)}`}
                             <p className="italic text-black text-[12px]">Shipping calculated at checkout.</p>
                         </div>
+                        <div className="mt-2 text-sm">
+                            {variantGroups.length === 0 || Object.keys(selectedVariants).length !== variantGroups.length ? (
+                                <span className="text-gray-500">Select all variants to see stock.</span>
+                            ) : stockInfo === null ? (
+                                 <span className="text font-semibold">Checking stocks.</span>
+                            ) : stockInfo.quantity > 0 ? (
+                                <span className="text-green-700 font-semibold">Stock: {stockInfo.quantity}</span>
+                            ) : (
+                                <span className="text-red-600 font-semibold">Out of stock</span>
+                            )}
+                        </div>
+                        {stockInfo && stockInfo.low_stock_limit && stockInfo.quantity > 0 && stockInfo.quantity <= stockInfo.low_stock_limit && (
+                            <div className="text-xs text-yellow-600 mt-1">Hurry! Only {stockInfo.quantity} left in stock.</div>
+                        )}
                         <hr className="mb-6" />
 
                         {/* scrollable content area */}
@@ -920,10 +1001,12 @@ const RTshirt = () => {
                                 <input
                                     type="number"
                                     min={1}
+                                    max={stockInfo?.quantity || undefined}
                                     value={quantity}
                                     onChange={(e) => {
                                         const v = Number(e.target.value);
-                                        setQuantity(isNaN(v) || v < 1 ? 1 : v);
+                                        const maxStock = stockInfo?.quantity || Infinity;
+                                        setQuantity(isNaN(v) || v < 1 ? 1 : Math.min(v, maxStock));
                                     }}
                                     onKeyDown={(e) => {
                                         if (e.key === 'Enter') e.currentTarget.blur();
@@ -931,7 +1014,7 @@ const RTshirt = () => {
                                     className="w-20 text-center px-2 text-black outline-none"
                                     aria-label="Quantity input"
                                 />
-                                <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={incrementQuantity} aria-label="Increase quantity">+</button>
+                                <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={incrementQuantity} aria-label="Increase quantity" disabled={quantity >= (stockInfo?.quantity || Infinity)}>+</button>
                             </div>
                         </div>
 
