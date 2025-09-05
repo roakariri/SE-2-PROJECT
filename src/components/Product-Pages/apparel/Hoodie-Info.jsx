@@ -173,42 +173,86 @@ const Hoodie = () => {
         return () => { isMounted = false; };
     }, [productId]);
 
-    // Set initial selected variants to defaults
+    // Initialize defaults only for groups not already set (avoid overwriting restored cart selections)
     useEffect(() => {
-        const initial = {};
-        for (let group of variantGroups) {
-            const def = group.values.find(v => v.is_default) || group.values[0];
-            if (def) initial[group.id] = def;
-        }
-        setSelectedVariants(initial);
+        if (!variantGroups || variantGroups.length === 0) return;
+        setSelectedVariants(prev => {
+            const updated = { ...prev };
+            for (let group of variantGroups) {
+                if (updated[group.id]) continue;
+                const def = group.values.find(v => v.is_default) || group.values[0];
+                if (def) updated[group.id] = def;
+            }
+            return updated;
+        });
     }, [variantGroups]);
 
-    // Prefill selections when navigated from Cart edit
-    useEffect(() => {
-        try {
-            const navState = location?.state || {};
-            if (!navState?.fromCart || !navState?.cartRow) return;
-            const cart = navState.cartRow;
-            if (!variantGroups || variantGroups.length === 0) return;
+    // Cart editing state
+    const [fromCart, setFromCart] = useState(false);
+    const [editingCartId, setEditingCartId] = useState(null);
 
-            const mapped = {};
-            for (const group of variantGroups) {
-                const cartVariant = (cart.variants || []).find(v => String(v.group).toLowerCase() === String(group.name).toLowerCase());
-                if (cartVariant) {
-                    const match = group.values.find(val => String(val.name || val.value).toLowerCase() === String(cartVariant.value).toLowerCase());
-                    if (match) mapped[group.id] = match;
-                    else mapped[group.id] = { id: `cart_prefill_${group.id}`, name: cartVariant.value, value: cartVariant.value, price: cartVariant.price || 0 };
-                } else {
-                    const def = group.values.find(v => v.is_default) || group.values[0];
-                    if (def) mapped[group.id] = def;
-                }
-            }
-            setSelectedVariants(mapped);
-            if (cart.quantity) setQuantity(Number(cart.quantity) || 1);
-        } catch (e) {
-            console.warn('Failed to prefill Hoodie from cart state', e);
+    useEffect(() => {
+        if (location.state?.fromCart && location.state?.cartRow) {
+            const cartRow = location.state.cartRow;
+            setFromCart(true);
+            setEditingCartId(cartRow.cart_id);
+            if (cartRow.quantity) setQuantity(Number(cartRow.quantity) || 1);
         }
-    }, [location, variantGroups]);
+    }, [location.state]);
+
+    // Authoritative fetch by cart_id (variants + quantity) so selection matches UI option ids
+    useEffect(() => {
+        const restoreFromCart = async () => {
+            if (!fromCart || !editingCartId) return;
+            try {
+                const { data, error } = await supabase
+                    .from('cart')
+                    .select(`
+                        cart_id,
+                        quantity,
+                        cart_variants (
+                            cart_variant_id,
+                            price,
+                            product_variant_values (
+                                product_variant_value_id,
+                                price,
+                                variant_values (
+                                    value_name,
+                                    variant_group_id,
+                                    variant_groups ( variant_group_id, name, input_type )
+                                )
+                            )
+                        )
+                    `)
+                    .eq('cart_id', editingCartId)
+                    .limit(1)
+                    .single();
+                if (error || !data) return;
+                if (Number(data.quantity) > 0) setQuantity(Number(data.quantity));
+                if (Array.isArray(data.cart_variants) && data.cart_variants.length > 0) {
+                    const vMap = {};
+                    data.cart_variants.forEach(cv => {
+                        const pv = cv.product_variant_values; const vv = pv?.variant_values; if (!vv) return;
+                        const groupId = (vv.variant_group_id ?? vv.variant_groups?.variant_group_id); if (groupId == null) return;
+                        vMap[String(groupId)] = {
+                            id: pv.product_variant_value_id,
+                            cart_variant_id: cv.cart_variant_id,
+                            variant_value_id: pv.product_variant_value_id,
+                            name: vv.value_name,
+                            value: vv.value_name,
+                            price: Number(cv.price ?? pv.price ?? 0)
+                        };
+                    });
+                    if (Object.keys(vMap).length) setSelectedVariants(prev => ({ ...vMap, ...prev }));
+                }
+            } catch (e) {
+                console.debug('[EditCart] hoodie restore failed', e);
+            }
+        };
+        restoreFromCart();
+    }, [fromCart, editingCartId]);
+
+    // Remove old prefill logic (replaced by cart_id restoration)
 
     // Resolve imageKey to a public URL (robust: accepts full urls, leading slashes, and tries common buckets)
     useEffect(() => {
@@ -601,7 +645,9 @@ const Hoodie = () => {
                     if (uploadedFileMetas && uploadedFileMetas.length > 0) {
                         const ids = uploadedFileMetas.map(m => m.id).filter(Boolean);
                         if (ids.length > 0) {
-                            await supabase.from('uploaded_files').update({ cart_id: cartId }).in('id', ids);
+                            const { data: updData, error: updErr } = await supabase.from('uploaded_files').update({ cart_id: cartId }).in('file_id', ids);
+                            if (updErr) console.warn('Failed to link uploaded_files:', updErr);
+                            else if ((updData?.length ?? 0) === 0) console.warn('No uploaded_files rows linked for ids:', ids);
                         }
                     }
                 } catch (e) {
@@ -1090,7 +1136,7 @@ const Hoodie = () => {
     aria-busy={isAdding}
     className={`bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0 ${isAdding ? 'opacity-60 pointer-events-none' : ''}`}
 >
-    {cartSuccess ? cartSuccess : (isAdding ? 'ADDING...' : 'ADD TO CART')}
+    {cartSuccess ? cartSuccess : (isAdding ? (fromCart ? 'UPDATING...' : 'ADDING...') : (fromCart ? 'UPDATE CART' : 'ADD TO CART'))}
 </button>
                             {cartError && <div className="text-red-600 text-sm ml-2">{cartError}</div>}
                             <button

@@ -31,6 +31,8 @@ const ToteBag = () => {
     const [quantity, setQuantity] = useState(1);
     const [variantGroups, setVariantGroups] = useState([]);
     const [selectedVariants, setSelectedVariants] = useState({});
+    const [fromCart, setFromCart] = useState(false);
+    const [editingCartId, setEditingCartId] = useState(null);
     const [printingRow, setPrintingRow] = useState(null);
     const [typeRow, setTypeRow] = useState(null);
     const [strapRow, setStrapRow] = useState(null);
@@ -178,44 +180,79 @@ const ToteBag = () => {
         return () => { isMounted = false; };
     }, [productId]);
 
-    // Set initial selected variants to defaults
+    // Detect edit navigation
     useEffect(() => {
-        // Only auto-select values that are explicitly marked `is_default`.
-        // Avoid selecting the first value automatically because that can add prices unexpectedly.
-        const initial = {};
-        for (let group of variantGroups) {
-            const def = group.values.find(v => v.is_default);
-            if (def) initial[group.id] = def;
+        if (location.state?.fromCart && location.state?.cartRow) {
+            const cartRow = location.state.cartRow;
+            setFromCart(true);
+            setEditingCartId(cartRow.cart_id);
+            if (cartRow.quantity) setQuantity(Number(cartRow.quantity) || 1);
         }
-        setSelectedVariants(initial);
-    }, [variantGroups]);
+    }, [location.state]);
 
-    // Prefill selections when navigated from Cart edit
+    // Restore variants from authoritative cart_id
     useEffect(() => {
-        try {
-            const navState = location?.state || {};
-            if (!navState?.fromCart || !navState?.cartRow) return;
-            const cart = navState.cartRow;
-            if (!variantGroups || variantGroups.length === 0) return;
-
-            const mapped = {};
-            for (const group of variantGroups) {
-                const cartVariant = (cart.variants || []).find(v => String(v.group).toLowerCase() === String(group.name).toLowerCase());
-                if (cartVariant) {
-                    const match = group.values.find(val => String(val.name || val.value).toLowerCase() === String(cartVariant.value).toLowerCase());
-                    if (match) mapped[group.id] = match;
-                    else mapped[group.id] = { id: `cart_prefill_${group.id}`, name: cartVariant.value, value: cartVariant.value, price: cartVariant.price || 0 };
-                } else {
-                    const def = group.values.find(v => v.is_default) || group.values[0];
-                    if (def) mapped[group.id] = def;
+        const restore = async () => {
+            if (!fromCart || !editingCartId) return;
+            try {
+                const { data, error } = await supabase
+                    .from('cart')
+                    .select(`
+                        cart_id,
+                        quantity,
+                        cart_variants (
+                            cart_variant_id,
+                            price,
+                            product_variant_values (
+                                product_variant_value_id,
+                                price,
+                                variant_values (
+                                    value_name,
+                                    variant_group_id,
+                                    variant_groups ( variant_group_id, name, input_type )
+                                )
+                            )
+                        )
+                    `)
+                    .eq('cart_id', editingCartId)
+                    .limit(1)
+                    .single();
+                if (error || !data) return;
+                if (Number(data.quantity) > 0) setQuantity(Number(data.quantity));
+                if (Array.isArray(data.cart_variants)) {
+                    const map = {};
+                    data.cart_variants.forEach(cv => {
+                        const pv = cv.product_variant_values; const vv = pv?.variant_values; if (!vv) return;
+                        const groupId = vv.variant_group_id ?? vv.variant_groups?.variant_group_id; if (groupId == null) return;
+                        map[String(groupId)] = {
+                            id: pv.product_variant_value_id,
+                            cart_variant_id: cv.cart_variant_id,
+                            variant_value_id: pv.product_variant_value_id,
+                            name: vv.value_name,
+                            value: vv.value_name,
+                            price: Number(cv.price ?? pv.price ?? 0)
+                        };
+                    });
+                    if (Object.keys(map).length) setSelectedVariants(prev => ({ ...map, ...prev }));
                 }
+            } catch (e) { console.debug('[EditCart] BasicTBag restore failed', e); }
+        };
+        restore();
+    }, [fromCart, editingCartId]);
+
+    // Guarded default initialization (do not overwrite restored selections)
+    useEffect(() => {
+        if (!variantGroups || variantGroups.length === 0) return;
+        setSelectedVariants(prev => {
+            const updated = { ...prev };
+            for (let group of variantGroups) {
+                if (updated[group.id]) continue;
+                const def = group.values.find(v => v.is_default) || group.values[0];
+                if (def) updated[group.id] = def;
             }
-            setSelectedVariants(mapped);
-            if (cart.quantity) setQuantity(Number(cart.quantity) || 1);
-        } catch (e) {
-            console.warn('Failed to prefill BasicTBag from cart state', e);
-        }
-    }, [location, variantGroups]);
+            return updated;
+        });
+    }, [variantGroups]);
 
     // Resolve imageKey to a public URL (robust: accepts full urls, leading slashes, and tries common buckets)
     useEffect(() => {
@@ -514,6 +551,58 @@ const ToteBag = () => {
             setCartError(null);
             setCartSuccess(null);
 
+            // EDIT MODE: update existing row directly
+            if (fromCart && editingCartId) {
+                const variantPriceForCart = Object.values(selectedVariants || {}).reduce((acc, val) => acc + (Number(val?.price) || 0), 0);
+                const unitPriceForCart = (Number(price) || 0) + variantPriceForCart;
+                const newTotal = (Number(unitPriceForCart) || 0) * Number(quantity || 0);
+
+                const { error: updateError } = await supabase
+                    .from('cart')
+                    .update({
+                        quantity: quantity,
+                        total_price: newTotal,
+                        base_price: Number(unitPriceForCart) || Number(price) || 0,
+                        route: location?.pathname || `/${slug}`,
+                        slug: slug || null,
+                    })
+                    .eq('cart_id', editingCartId)
+                    .eq('user_id', userId);
+                if (updateError) throw updateError;
+
+                // Replace variants
+                const { error: delVarErr } = await supabase.from('cart_variants').delete().eq('cart_id', editingCartId).eq('user_id', userId);
+                if (delVarErr) throw delVarErr;
+                const variantInserts = Object.entries(selectedVariants).map(([groupId, value]) => ({
+                    cart_id: editingCartId,
+                    user_id: userId,
+                    cartvariant_id: value?.variant_value_id ?? value?.id ?? value,
+                    price: Number(value?.price) || 0,
+                }));
+                if (variantInserts.length > 0) {
+                    const { error: insVarErr } = await supabase.from('cart_variants').insert(variantInserts);
+                    if (insVarErr) throw insVarErr;
+                }
+
+                // Attach uploaded files if any (re-associate)
+                try {
+                    if (uploadedFileMetas && uploadedFileMetas.length > 0) {
+                        const ids = uploadedFileMetas.map(m => m.id).filter(Boolean);
+                        if (ids.length > 0) {
+                            const { data: updData, error: updErr } = await supabase.from('uploaded_files').update({ cart_id: editingCartId }).in('file_id', ids);
+                            if (updErr) console.warn('Failed to link uploaded_files (edit mode):', updErr);
+                            else if ((updData?.length ?? 0) === 0) console.warn('No uploaded_files rows linked (edit mode) for ids:', ids);
+                        }
+                    }
+                } catch (e) { console.warn('[EditCart] attach files failed', e); }
+
+                setCartSuccess('Cart item updated!');
+                setTimeout(() => setCartSuccess(null), 2500);
+                setIsAdding(false);
+                navigate('/cart');
+                return;
+            }
+
             const { data: existingCarts, error: checkError } = await supabase
                 .from("cart")
                 .select("cart_id, quantity, total_price")
@@ -600,7 +689,9 @@ const ToteBag = () => {
                     if (uploadedFileMetas && uploadedFileMetas.length > 0) {
                         const ids = uploadedFileMetas.map(m => m.id).filter(Boolean);
                         if (ids.length > 0) {
-                            await supabase.from('uploaded_files').update({ cart_id: cartId }).in('id', ids);
+                            const { data: updData, error: updErr } = await supabase.from('uploaded_files').update({ cart_id: cartId }).in('file_id', ids);
+                            if (updErr) console.warn('Failed to link uploaded_files:', updErr);
+                            else if ((updData?.length ?? 0) === 0) console.warn('No uploaded_files rows linked for ids:', ids);
                         }
                     }
                 } catch (e) {
@@ -964,7 +1055,7 @@ const ToteBag = () => {
                                 aria-busy={isAdding}
                                 className={`bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0 ${isAdding ? 'opacity-60 pointer-events-none' : ''}`}
                             >
-                                {cartSuccess ? cartSuccess : (isAdding ? 'ADDING...' : 'ADD TO CART')}
+                                {cartSuccess ? cartSuccess : (isAdding ? (fromCart ? 'UPDATING...' : 'ADDING...') : (fromCart ? 'UPDATE CART' : 'ADD TO CART'))}
                             </button>
                             {cartError && <div className="text-red-600 text-sm ml-2">{cartError}</div>}
                             <button

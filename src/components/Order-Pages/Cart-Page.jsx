@@ -359,11 +359,13 @@ const CartPage = () => {
         }
 
         if (Array.isArray(resolvedFiles) && resolvedFiles.length > 0) {
-          console.debug('Found uploaded_files for cart, attempting removal:', resolvedFiles.map(f => ({ id: f.id, file_name: f.file_name, image_url: f.image_url })));
-          const ids = resolvedFiles.map(f => f.id).filter(Boolean);
+          // Normalize records to have both id and file_id keys for downstream consistency
+          const normFiles = resolvedFiles.map(f => ({ ...f, id: f.id ?? f.file_id, file_id: f.file_id ?? f.id }));
+          console.debug('Found uploaded_files for cart, attempting removal:', normFiles.map(f => ({ file_id: f.file_id, file_name: f.file_name, image_url: f.image_url })));
+          const ids = normFiles.map(f => f.file_id).filter(Boolean);
 
           // Attempt to delete storage objects first (best-effort)
-          for (const f of resolvedFiles) {
+          for (const f of normFiles) {
             try {
               if (f.image_url && typeof f.image_url === 'string') {
                 let path = null;
@@ -407,9 +409,9 @@ const CartPage = () => {
               const userId = session?.user?.id;
               let delRes;
               if (userId) {
-                delRes = await supabase.from('uploaded_files').delete().eq('user_id', userId).in('id', ids);
+                delRes = await supabase.from('uploaded_files').delete().eq('user_id', userId).in('file_id', ids);
               } else {
-                delRes = await supabase.from('uploaded_files').delete().in('id', ids);
+                delRes = await supabase.from('uploaded_files').delete().in('file_id', ids);
               }
               if (delRes?.error) console.warn('Failed to delete uploaded_files rows for cart:', delRes.error);
               else console.debug('Deleted uploaded_files rows for cart', { ids, userId: session?.user?.id });

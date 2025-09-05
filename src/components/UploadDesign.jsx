@@ -89,9 +89,10 @@ export default function UploadDesign({ productId, session }) {
                     await supabase.storage.from('product-files').remove([filePath]);
                     throw insertError;
                 }
-
+                // Normalize meta so downstream code can reference either meta.file_id or meta.id
+                const normalized = { ...insertData, id: insertData.file_id ?? insertData.id };
                 uploadedFilesLocal.push(file);
-                uploadedMetasLocal.push(insertData);
+                uploadedMetasLocal.push(normalized);
                 uploadedPathsLocal.push(filePath);
             }
 
@@ -123,7 +124,10 @@ export default function UploadDesign({ productId, session }) {
             const userId = session?.user?.id ?? await getCurrentUserId();
             if (path) await supabase.storage.from('product-files').remove([path]);
             if (meta) {
-                if (meta.id) await supabase.from('uploaded_files').delete().eq('id', meta.id);
+                if (meta?.file_id || meta?.id) {
+                    const fid = meta.file_id ?? meta.id;
+                    await supabase.from('uploaded_files').delete().eq('file_id', fid);
+                }
                 else await supabase.from('uploaded_files').delete().match({ user_id: userId, file_name: meta.file_name });
             }
         } catch (err) {
@@ -182,7 +186,8 @@ export default function UploadDesign({ productId, session }) {
 
                 if (!isMounted) return;
                 if (Array.isArray(data) && data.length > 0) {
-                    setUploadedFileMetas(data);
+                    const normalizedData = data.map(r => ({ ...r, id: r.file_id ?? r.id }));
+                    setUploadedFileMetas(normalizedData);
                     setUploadedFilePaths([]);
                 }
             } catch (err) {

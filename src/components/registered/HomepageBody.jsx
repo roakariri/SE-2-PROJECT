@@ -191,10 +191,10 @@ const HomePage = () => {
           {/* ID Cards */}
           <div className="flex flex-col justify-between items-center border rounded-[4px] bg-cover bg-center text-center text-white border-white laptop:w-[290px] laptop:h-[360px] bigscreen:w-[290px] bigscreen:h-[360px] relative" style={{ backgroundImage: 'url("/images/id-cards.png")' }}>
             <div className="flex flex-1 items-center justify-center w-full h-full">
-              <p className="laptop:text-[46px] font-bold text-white font-dm-sans drop-shadow-lg bigscreen:text-[46px] bigscreen:text-center">ID CARDS</p>
+              <p className="laptop:text-[46px] font-bold text-white font-dm-sans drop-shadow-lg bigscreen:text-[46px] bigscreen:text-center">ID <br></br>CARDS</p>
             </div>
             <div className="flex justify-center items-end w-full pb-6">
-              <button type="button" className="flex p-1 laptop:h-[36px] laptop:w-[190px] bigscreen:h-[36px] bigscreen:w-[190px] rounded-[20px] text-white justify-center items-center bg-white/20 border border-white font-bold laptop:text-[17px] bigscreen:text-[17px] font-dm-sans" onClick={() => navigate('/customize')}>
+              <button type="button" className="flex p-1 laptop:h-[36px] laptop:w-[190px] bigscreen:h-[36px] bigscreen:w-[190px] rounded-[20px] text-white justify-center items-center bg-white/20 border border-white font-bold laptop:text-[17px] bigscreen:text-[17px] font-dm-sans" onClick={() => navigate('/cards-stickers/id-cards')}>
                 Customize Yours!
               </button>
             </div>
@@ -202,10 +202,10 @@ const HomePage = () => {
           {/* Banners */}
           <div className="flex flex-col justify-between items-center border rounded-[4px] bg-cover bg-center text-center text-white border-white laptop:w-[290px] laptop:h-[360px] bigscreen:w-[290px] bigscreen:h-[360px] relative" style={{ backgroundImage: 'url("/images/banners1.png")' }}>
             <div className="flex flex-1 items-center justify-center w-full h-full">
-              <p className="laptop:text-[46px] font-bold text-white font-dm-sans drop-shadow-lg bigscreen:text-[46px] bigscreen:text-center">BANNERS</p>
+              <p className="laptop:text-[46px] font-bold text-white font-dm-sans drop-shadow-lg bigscreen:text-[46px] bigscreen:text-center">CLOTHING BANNERS</p>
             </div>
             <div className="flex justify-center items-end w-full pb-6">
-              <button type="button" className="flex p-1 laptop:h-[36px] laptop:w-[190px] bigscreen:h-[36px] bigscreen:w-[190px] rounded-[20px] text-white justify-center items-center bg-white/20 border border-white font-bold laptop:text-[17px] bigscreen:text-[17px] font-dm-sans">
+              <button type="button" className="flex p-1 laptop:h-[36px] laptop:w-[190px] bigscreen:h-[36px] bigscreen:w-[190px] rounded-[20px] text-white justify-center items-center bg-white/20 border border-white font-bold laptop:text-[17px] bigscreen:text-[17px] font-dm-sans " onClick={() => navigate('/signage-posters/clothing-banner')}>
                 Customize Yours!
               </button>
             </div>
@@ -213,10 +213,10 @@ const HomePage = () => {
           {/* Pins */}
           <div className="flex flex-col justify-between items-center border rounded-[4px] bg-cover bg-center text-center text-white border-white laptop:w-[290px] laptop:h-[360px] bigscreen:w-[290px] bigscreen:h-[360px] relative" style={{ backgroundImage: 'url("/images/pins.png")' }}>
             <div className="flex flex-1 items-center justify-center w-full h-full">
-              <p className="laptop:text-[46px] font-bold text-white font-dm-sans drop-shadow-lg bigscreen:text-[46px] bigscreen:text-center">PINS</p>
+              <p className="laptop:text-[46px] font-bold text-white font-dm-sans drop-shadow-lg bigscreen:text-[46px] bigscreen:text-center">BUTTON <br></br>PINS</p>
             </div>
             <div className="flex justify-center items-end w-full pb-6">
-              <button type="button" className="flex p-1 laptop:h-[36px] laptop:w-[190px] bigscreen:h-[36px] bigscreen:w-[190px] rounded-[20px] text-white justify-center items-center bg-white/20 border border-white font-bold laptop:text-[17px] bigscreen:text-[17px] font-dm-sans">
+              <button type="button" className="flex p-1 laptop:h-[36px] laptop:w-[190px] bigscreen:h-[36px] bigscreen:w-[190px] rounded-[20px] text-white justify-center items-center bg-white/20 border border-white font-bold laptop:text-[17px] bigscreen:text-[17px] font-dm-sans" onClick={() => navigate('/accessories-decorations/button-pins')}>
                 Customize Yours!
               </button>
             </div>
@@ -228,7 +228,7 @@ const HomePage = () => {
               <p className="laptop:text-[46px] font-bold text-white font-dm-sans drop-shadow-lg bigscreen:text-[46px] bigscreen:text-center">STANDEES</p>
             </div>
             <div className="flex justify-center items-end w-full pb-6">
-              <button type="button" className="flex p-1 laptop:h-[36px] laptop:w-[190px] bigscreen:h-[36px] bigscreen:w-[190px] rounded-[20px] text-white justify-center items-center bg-white/20 border border-white font-bold laptop:text-[17px] bigscreen:text-[17px] font-dm-sans">
+              <button type="button" className="flex p-1 laptop:h-[36px] laptop:w-[190px] bigscreen:h-[36px] bigscreen:w-[190px] rounded-[20px] text-white justify-center items-center bg-white/20 border border-white font-bold laptop:text-[17px] bigscreen:text-[17px] font-dm-sans" onClick={() => navigate('/accessories-decorations/acrylic-stand')}>
                 Customize Yours!
               </button>
             </div>

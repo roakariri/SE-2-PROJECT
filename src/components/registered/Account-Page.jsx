@@ -754,16 +754,16 @@ const AccountPage = () => {
                     <div className="flex flex-col border border-black rounded w-[300px] justify-center">
                         <div className="border border-black rounded w-[300px] h-[244px] p-2" style={{ lineHeight: "50px" }}>
                             <button
-                                className={`w-full border text-left text-[18px] font-dm-sans ${activeTab === "homebase" ? 'bg-[#ECECEC] text-black' : 'text-black'} focus:outline-none font-semibold rounded-none outline-none p-0 px-3 `}
-                                onClick={() => handleSetActiveTab("homebase")}
+                                className={`w-full border text-left text-[18px] font-dm-sans font-semibold rounded-none outline-none p-0 px-3 transition-colors focus:outline-none ${activeTab === 'homebase' ? 'bg-[#ECECEC] text-black' : 'bg-white text-black'}`}
+                                onClick={() => handleSetActiveTab('homebase')}
                             >Homebase</button>
                             <button
-                                className={`w-full border text-left text-[18px] font-dm-sans ${activeTab === "orders" ? 'bg-[#ECECEC] text-black' : 'text-black'} focus:outline-none font-semibold  rounded-none outline-none p-0 px-3 `}
-                                onClick={() => handleSetActiveTab("orders")}
+                                className={`w-full border text-left text-[18px] font-dm-sans font-semibold rounded-none outline-none p-0 px-3 transition-colors focus:outline-none ${activeTab === 'orders' ? 'bg-[#ECECEC] text-black' : 'bg-white text-black'}`}
+                                onClick={() => handleSetActiveTab('orders')}
                             >Orders</button>
                             <button
-                                className={`w-full border text-left text-[18px] font-dm-sans ${activeTab === "profile" ? 'bg-[#ECECEC] text-black' : 'text-black'} focus:outline-none font-semibold  rounded-none outline-none p-0 px-3 `}
-                                onClick={() => handleSetActiveTab("profile")}
+                                className={`w-full border text-left text-[18px] font-dm-sans font-semibold rounded-none outline-none p-0 px-3 transition-colors focus:outline-none ${activeTab === 'profile' ? 'bg-[#ECECEC] text-black' : 'bg-white text-black'}`}
+                                onClick={() => handleSetActiveTab('profile')}
                             >Profile</button>
                             <hr className="my-2 border-black mb-2" />
                             <button

@@ -32,6 +32,9 @@ const Cap= () => {
     const [quantity, setQuantity] = useState(1);
     const [variantGroups, setVariantGroups] = useState([]);
     const [selectedVariants, setSelectedVariants] = useState({});
+    const [fromCart, setFromCart] = useState(false);
+    const [editingCartId, setEditingCartId] = useState(null);
+    const [stockInfo, setStockInfo] = useState(null);
 
     const slug = location.pathname.split('/').filter(Boolean).pop();
 
@@ -164,42 +167,142 @@ const Cap= () => {
         return () => { isMounted = false; };
     }, [productId]);
 
-    // Set initial selected variants to defaults
+    // Detect navigation from cart (edit mode)
     useEffect(() => {
-        const initial = {};
-        for (let group of variantGroups) {
-            const def = group.values.find(v => v.is_default) || group.values[0];
-            if (def) initial[group.id] = def;
+        if (location.state?.fromCart && location.state?.cartRow) {
+            const cartRow = location.state.cartRow;
+            setFromCart(true);
+            setEditingCartId(cartRow.cart_id);
+            if (cartRow.quantity) setQuantity(Number(cartRow.quantity) || 1);
         }
-        setSelectedVariants(initial);
+    }, [location.state]);
+
+    // Restore variants via cart_id
+    useEffect(() => {
+        const restore = async () => {
+            if (!fromCart || !editingCartId) return;
+            try {
+                const { data, error } = await supabase
+                    .from('cart')
+                    .select(`
+                        cart_id,
+                        quantity,
+                        cart_variants (
+                            cart_variant_id,
+                            price,
+                            product_variant_values (
+                                product_variant_value_id,
+                                price,
+                                variant_values (
+                                    value_name,
+                                    variant_group_id,
+                                    variant_groups ( variant_group_id, name, input_type )
+                                )
+                            )
+                        )
+                    `)
+                    .eq('cart_id', editingCartId)
+                    .limit(1)
+                    .single();
+                if (error || !data) return;
+                if (Number(data.quantity) > 0) setQuantity(Number(data.quantity));
+                if (Array.isArray(data.cart_variants)) {
+                    const map = {};
+                    data.cart_variants.forEach(cv => {
+                        const pv = cv.product_variant_values; const vv = pv?.variant_values; if (!vv) return;
+                        const groupId = vv.variant_group_id ?? vv.variant_groups?.variant_group_id; if (groupId == null) return;
+                        map[String(groupId)] = {
+                            id: pv.product_variant_value_id,
+                            cart_variant_id: cv.cart_variant_id,
+                            variant_value_id: pv.product_variant_value_id,
+                            name: vv.value_name,
+                            value: vv.value_name,
+                            price: Number(cv.price ?? pv.price ?? 0)
+                        };
+                    });
+                    if (Object.keys(map).length) setSelectedVariants(prev => ({ ...map, ...prev }));
+                }
+            } catch (e) { console.debug('[EditCart] Cap restore failed', e); }
+        };
+        restore();
+    }, [fromCart, editingCartId]);
+
+    // Guarded defaults
+    useEffect(() => {
+        if (!variantGroups || variantGroups.length === 0) return;
+        setSelectedVariants(prev => {
+            const next = { ...prev };
+            for (let group of variantGroups) {
+                if (next[group.id]) continue;
+                const def = group.values.find(v => v.is_default) || group.values[0];
+                if (def) next[group.id] = def;
+            }
+            return next;
+        });
     }, [variantGroups]);
 
-    // Prefill selections when navigated from Cart edit
+    // Fetch stock info based on selected variants
     useEffect(() => {
-        try {
-            const navState = location?.state || {};
-            if (!navState?.fromCart || !navState?.cartRow) return;
-            const cart = navState.cartRow;
-            if (!variantGroups || variantGroups.length === 0) return;
-
-            const mapped = {};
-            for (const group of variantGroups) {
-                const cartVariant = (cart.variants || []).find(v => String(v.group).toLowerCase() === String(group.name).toLowerCase());
-                if (cartVariant) {
-                    const match = group.values.find(val => String(val.name || val.value).toLowerCase() === String(cartVariant.value).toLowerCase());
-                    if (match) mapped[group.id] = match;
-                    else mapped[group.id] = { id: `cart_prefill_${group.id}`, name: cartVariant.value, value: cartVariant.value, price: cartVariant.price || 0 };
-                } else {
-                    const def = group.values.find(v => v.is_default) || group.values[0];
-                    if (def) mapped[group.id] = def;
-                }
+        const fetchStockInfo = async () => {
+            if (!productId || !variantGroups.length) {
+                setStockInfo(null);
+                return;
             }
-            setSelectedVariants(mapped);
-            if (cart.quantity) setQuantity(Number(cart.quantity) || 1);
-        } catch (e) {
-            console.warn('Failed to prefill Cap from cart state', e);
-        }
-    }, [location, variantGroups]);
+            // Only fetch if all groups are selected
+            const variantIds = Object.values(selectedVariants)
+                .map(v => v.id)
+                .filter(Boolean);
+
+            if (variantIds.length !== variantGroups.length) {
+                setStockInfo(null);
+                return;
+            }
+
+            // Sort for consistency (if your DB stores sorted arrays)
+            const sortedVariantIds = [...variantIds].sort((a, b) => a - b);
+
+            // 1. Find the matching combination
+            const { data: combinations, error: combError } = await supabase
+                .from('product_variant_combinations')
+                .select('combination_id, variants')
+                .eq('product_id', productId);
+
+            if (combError) {
+                setStockInfo(null);
+                return;
+            }
+
+            // Find the combination where variants array matches exactly
+            const match = (combinations || []).find(row => {
+                if (!row.variants || row.variants.length !== sortedVariantIds.length) return false;
+                // Compare arrays (order-insensitive)
+                const a = [...row.variants].sort((x, y) => x - y);
+                return a.every((v, i) => v === sortedVariantIds[i]);
+            });
+
+            if (!match) {
+                setStockInfo(null);
+                return;
+            }
+
+            // 2. Get inventory for this combination_id
+            const { data: inventory, error: invError } = await supabase
+                .from('inventory')
+                .select('quantity, low_stock_limit')
+                .eq('combination_id', match.combination_id)
+                .eq('status', 'in_stock')
+                .single();
+
+            if (invError || !inventory) {
+                setStockInfo(null);
+                return;
+            }
+
+            setStockInfo(inventory);
+        };
+
+        fetchStockInfo();
+    }, [productId, selectedVariants, variantGroups]);
 
     // Resolve imageKey to a public URL (robust: accepts full urls, leading slashes, and tries common buckets)
     useEffect(() => {
@@ -541,7 +644,52 @@ const Cap= () => {
             setCartError(null);
             setCartSuccess(null);
 
-            
+            // EDIT MODE path
+            if (fromCart && editingCartId) {
+                const variantPriceForCart = Object.values(selectedVariants || {}).reduce((acc, val) => acc + (Number(val?.price) || 0), 0);
+                const unitPriceForCart = (sizeDimensions ? Number(calculateSizePrice()) : Number(price) || 0) + variantPriceForCart;
+                const newTotal = (Number(unitPriceForCart) || 0) * Number(quantity || 0);
+                const { error: updErr } = await supabase
+                    .from('cart')
+                    .update({
+                        quantity: quantity,
+                        total_price: newTotal,
+                        base_price: Number(unitPriceForCart) || Number(price) || 0,
+                        route: location?.pathname || `/${slug}`,
+                        slug: slug || null,
+                    })
+                    .eq('cart_id', editingCartId)
+                    .eq('user_id', userId);
+                if (updErr) throw updErr;
+                const { error: delErr } = await supabase.from('cart_variants').delete().eq('cart_id', editingCartId).eq('user_id', userId);
+                if (delErr) throw delErr;
+                const variantInserts = Object.entries(selectedVariants).map(([groupId, value]) => ({
+                    cart_id: editingCartId,
+                    user_id: userId,
+                    cartvariant_id: value?.variant_value_id ?? value?.id ?? value,
+                    price: Number(value?.price) || 0,
+                }));
+                if (variantInserts.length > 0) {
+                    const { error: insErr } = await supabase.from('cart_variants').insert(variantInserts);
+                    if (insErr) throw insErr;
+                }
+                try {
+                    if (uploadedFileMetas && uploadedFileMetas.length > 0) {
+                        const ids = uploadedFileMetas.map(m => m.id).filter(Boolean);
+                        if (ids.length > 0) {
+                            const { data: updData, error: updErr } = await supabase.from('uploaded_files').update({ cart_id: editingCartId }).in('file_id', ids);
+                            if (updErr) console.warn('Failed to link uploaded_files (edit mode):', updErr);
+                            else if ((updData?.length ?? 0) === 0) console.warn('No uploaded_files rows linked (edit mode) for ids:', ids);
+                        }
+                    }
+                } catch (e) { console.warn('[EditCart] Cap attach files failed', e); }
+                setCartSuccess('Cart item updated!');
+                setTimeout(() => setCartSuccess(null), 2500);
+                setIsAdding(false);
+                navigate('/cart');
+                return;
+            }
+
             const { data: existingCarts, error: checkError } = await supabase
                 .from("cart")
                 .select("cart_id, quantity, total_price")
@@ -633,7 +781,9 @@ const Cap= () => {
                     if (uploadedFileMetas && uploadedFileMetas.length > 0) {
                         const ids = uploadedFileMetas.map(m => m.id).filter(Boolean);
                         if (ids.length > 0) {
-                            await supabase.from('uploaded_files').update({ cart_id: cartId }).in('id', ids);
+                            const { data: updData, error: updErr } = await supabase.from('uploaded_files').update({ cart_id: cartId }).in('file_id', ids);
+                            if (updErr) console.warn('Failed to link uploaded_files:', updErr);
+                            else if ((updData?.length ?? 0) === 0) console.warn('No uploaded_files rows linked for ids:', ids);
                         }
                     }
                 } catch (e) {
@@ -904,7 +1054,7 @@ const Cap= () => {
             <div className="max-w-[1201px] mx-auto mt-8 flex flex-col">
                 <div className="phone:p-2 tablet:p-2">
                     <p className="pt-5 font-dm-sans">
-                        <Link to="/Homepage" className="text-gray-600">Home </Link>/ <Link to="/accessories-decorations" className="text-gray-600">Accessories & Decorations </Link>
+                        <Link to="/Homepage" className="text-gray-600">Home </Link>/ <Link to="/apparel" className="text-gray-600">Apparel </Link>
                     </p>
                 </div>
 
@@ -1013,6 +1163,20 @@ const Cap= () => {
                             {loading ? "" : `₱${totalPrice.toFixed(2)}`}
                             <p className="italic text-[12px]">Shipping calculated at checkout.</p>
                         </div>
+                        <div className="mt-2 text-sm">
+                            {variantGroups.length === 0 || Object.keys(selectedVariants).length !== variantGroups.length ? (
+                                <span className="text-gray-500">Select all variants to see stock.</span>
+                            ) : stockInfo === null ? (
+                                <span className="text-red-600 font-semibold">This combination is not available.</span>
+                            ) : stockInfo.quantity > 0 ? (
+                                <span className="text-green-700 font-semibold">Stock: {stockInfo.quantity}</span>
+                            ) : (
+                                <span className="text-red-600 font-semibold">Out of stock</span>
+                            )}
+                        </div>
+                        {stockInfo && stockInfo.low_stock_limit && stockInfo.quantity > 0 && stockInfo.quantity <= stockInfo.low_stock_limit && (
+                            <div className="text-xs text-yellow-600 mt-1">Hurry! Only {stockInfo.quantity} left in stock.</div>
+                        )}
                         <hr className="mb-6" />
 
                         
@@ -1167,7 +1331,7 @@ const Cap= () => {
                                 aria-busy={isAdding}
                                 className={`bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0 ${isAdding ? 'opacity-60 pointer-events-none' : ''}`}
                             >
-                                {cartSuccess ? cartSuccess : (isAdding ? 'ADDING...' : 'ADD TO CART')}
+                                {cartSuccess ? cartSuccess : (isAdding ? (fromCart ? 'UPDATING...' : 'ADDING...') : (fromCart ? 'UPDATE CART' : 'ADD TO CART'))}
                             </button>
                             <button
                                 type="button"
