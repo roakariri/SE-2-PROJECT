@@ -1141,7 +1141,20 @@ const Cap= () => {
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">QUANTITY</div>
                             <div className="inline-flex items-center border border-black rounded">
                                 <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={decrementQuantity} aria-label="Decrease quantity" disabled={quantity <= 1}>-</button>
-                                <div className="px-4 text-black" aria-live="polite">{quantity}</div>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    value={quantity}
+                                    onChange={(e) => {
+                                        const v = Number(e.target.value);
+                                        setQuantity(isNaN(v) || v < 1 ? 1 : v);
+                                    }}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') e.currentTarget.blur();
+                                    }}
+                                    className="w-20 text-center px-2 text-black outline-none"
+                                    aria-label="Quantity input"
+                                />
                                 <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={incrementQuantity} aria-label="Increase quantity">+</button>
                             </div>
                         </div>

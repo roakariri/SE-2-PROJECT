@@ -449,7 +449,7 @@ const CartPage = () => {
       path = `/product/${cart.product_id}`;
     }
 
-    // Pass the cart row so the product page can prefill selections
+    // Pass the cart row so the product page can prefill selections and update the existing cart item
     navigate(path, { state: { fromCart: true, cartRow: cart } });
   };
 

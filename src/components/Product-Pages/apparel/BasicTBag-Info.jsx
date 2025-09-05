@@ -936,7 +936,7 @@ const ToteBag = () => {
 
                         <div className="mb-6">
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">QUANTITY</div>
-                            <div className="inline-flex items-center border border-blaack rounded">
+                            <div className="inline-flex items-center border border-black rounded">
                                 <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={decrementQuantity} aria-label="Decrease quantity" disabled={quantity <= 1}>-</button>
                                 <input
                                     type="number"

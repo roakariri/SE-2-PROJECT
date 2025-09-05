@@ -21,6 +21,8 @@ const ButtonPin = () => {
     const [price, setPrice] = useState(null);
     const [imageKey, setImageKey] = useState("");
     const [imageSrc, setImageSrc] = useState("");
+    const [thumbnails, setThumbnails] = useState([]);
+    const [activeThumb, setActiveThumb] = useState(0);
     const [isFavorited, setIsFavorited] = useState(false);
     const [loading, setLoading] = useState(true);
     const [favLoading, setFavLoading] = useState(false);
@@ -30,6 +32,8 @@ const ButtonPin = () => {
     const [quantity, setQuantity] = useState(1);
     const [variantGroups, setVariantGroups] = useState([]);
     const [selectedVariants, setSelectedVariants] = useState({});
+    const [editingCartId, setEditingCartId] = useState(null);
+    const [fromCart, setFromCart] = useState(false);
 
     const slug = location.pathname.split('/').filter(Boolean).pop();
 
@@ -77,6 +81,73 @@ const ButtonPin = () => {
         fetchProduct();
         return () => { isMounted = false; };
     }, [slug]);
+
+    // Handle cart editing state
+    useEffect(() => {
+        if (location.state?.fromCart && location.state?.cartRow) {
+            const cartRow = location.state.cartRow;
+            setFromCart(true);
+            setEditingCartId(cartRow.cart_id);
+            setQuantity(cartRow.quantity || 1);
+        }
+    }, [location.state]);
+
+    useEffect(() => {
+        if (fromCart && location.state?.cartRow) {
+            const q = Number(location.state.cartRow.quantity);
+            if (q > 0 && q !== quantity) setQuantity(q);
+        }
+    }, [fromCart, location.state, quantity]);
+
+    // Restore variants by cart_id
+    useEffect(() => {
+        const loadCart = async () => {
+            if (!fromCart || !editingCartId) return;
+            try {
+                const { data, error } = await supabase
+                    .from('cart')
+                    .select(`
+                        cart_id,
+                        quantity,
+                        cart_variants (
+                            cart_variant_id,
+                            price,
+                            product_variant_values (
+                                product_variant_value_id,
+                                price,
+                                variant_values (
+                                    value_name,
+                                    variant_group_id,
+                                    variant_groups ( variant_group_id, name, input_type )
+                                )
+                            )
+                        )
+                    `)
+                    .eq('cart_id', editingCartId)
+                    .limit(1)
+                    .single();
+                if (error || !data) return;
+                if (Number(data.quantity) > 0) setQuantity(Number(data.quantity));
+                if (Array.isArray(data.cart_variants)) {
+                    const vMap = {};
+                    data.cart_variants.forEach(cv => {
+                        const pv = cv.product_variant_values; const vv = pv?.variant_values; if (!vv) return;
+                        const groupId = (vv.variant_group_id ?? vv.variant_groups?.variant_group_id); if (groupId == null) return;
+                        vMap[String(groupId)] = {
+                            id: pv.product_variant_value_id,
+                            cart_variant_id: cv.cart_variant_id,
+                            variant_value_id: pv.product_variant_value_id,
+                            name: vv.value_name,
+                            value: vv.value_name,
+                            price: Number(cv.price ?? pv.price ?? 0)
+                        };
+                    });
+                    if (Object.keys(vMap).length) setSelectedVariants(vMap);
+                }
+            } catch (e) { console.debug('[EditCart] restore pin cart failed', e); }
+        };
+        loadCart();
+    }, [fromCart, editingCartId]);
 
     // Fetch variants with nested joins
     useEffect(() => {
@@ -162,14 +233,18 @@ const ButtonPin = () => {
         return () => { isMounted = false; };
     }, [productId]);
 
-    // Set initial selected variants to defaults
+    // Initialize defaults only for groups not already set (avoid overwriting restored cart selections)
     useEffect(() => {
-        const initial = {};
-        for (let group of variantGroups) {
-            const def = group.values.find(v => v.is_default) || group.values[0];
-            if (def) initial[group.id] = def;
-        }
-        setSelectedVariants(initial);
+        if (!variantGroups || variantGroups.length === 0) return;
+        setSelectedVariants(prev => {
+            const updated = { ...prev };
+            for (let group of variantGroups) {
+                if (updated[group.id]) continue;
+                const def = group.values.find(v => v.is_default) || group.values[0];
+                if (def) updated[group.id] = def;
+            }
+            return updated;
+        });
     }, [variantGroups]);
 
     // Resolve imageKey to a public URL (robust: accepts full urls, leading slashes, and tries common buckets)
@@ -221,6 +296,113 @@ const ButtonPin = () => {
         resolveImage();
         return () => { isMounted = false; };
     }, [imageKey]);
+
+    // Build thumbnails: 1) main product image as first thumb, 2) variants from accessories-images storage, 3) fallbacks
+    useEffect(() => {
+        let isMounted = true;
+        const tryGetPublic = async (bucket, keyBase) => {
+            const exts = ['.png', '.jpg', '.jpeg', '.webp'];
+            for (const ext of exts) {
+                try {
+                    const { data } = supabase.storage.from(bucket).getPublicUrl(keyBase + ext);
+                    const url = data?.publicUrl;
+                    if (url && !url.endsWith('/')) {
+                        try {
+                            const head = await fetch(url, { method: 'HEAD' });
+                            if (head.ok) return url;
+                        } catch (e) { /* ignore */ }
+                    }
+                } catch (e) { /* ignore */ }
+            }
+            return null;
+        };
+
+        const buildThumbnails = async () => {
+            const results = [];
+
+            // first thumbnail: main product image
+            results.push('/accessories-images/button-pins.png');
+
+            // desired variant thumbnails
+            const desired = ['button-pins-1', 'button-pins-2', 'button-pins-3'];
+            for (const name of desired) {
+                if (results.length >= 4) break;
+                const url = await tryGetPublic('accessoriesdecorations-images', name);
+                if (url) results.push(url);
+            }
+
+            // if still short, try deriving from imageKey variants (numbered suffixes)
+            if (results.length < 4 && imageKey) {
+                const key = imageKey.toString().replace(/^\/+/, '');
+                const m = key.match(/(.+?)\.(png|jpg|jpeg|webp|gif)$/i);
+                const base = m ? m[1] : key;
+                const extras = [base + '-1', base + '-2', base + '-3'];
+                for (const cand of extras) {
+                    if (results.length >= 4) break;
+                    const url = await tryGetPublic('accessoriesdecorations-images', cand);
+                    if (url) results.push(url);
+                }
+            }
+
+            // last-resort local fallbacks
+            const fallbacks = ['/accessories-images/button-pins.png', '/accessories-images/button-pins-1.png', '/accessories-images/button-pins-2.png', '/logo-icon/logo.png'];
+            for (const f of fallbacks) {
+                if (results.length >= 4) break;
+                try {
+                    const r = await fetch(f, { method: 'HEAD' });
+                    if (r.ok) results.push(f);
+                } catch (e) { /* ignore */ }
+            }
+
+            if (!isMounted) return;
+
+            // Deduplicate while preserving order
+            const seen = new Set();
+            const ordered = [];
+            for (const u of results) {
+                if (!u) continue;
+                if (!seen.has(u)) { seen.add(u); ordered.push(u); }
+            }
+
+            let padded = ordered.slice(0, 4);
+            while (padded.length < 4) padded.push(undefined);
+
+            setThumbnails(padded);
+
+            // Preserve the user's clicked thumbnail when possible. If the previous active index
+            // still points to a valid thumbnail, keep it. Otherwise choose the first available
+            // thumbnail (fallback to 0).
+            setActiveThumb(prev => {
+                if (padded[prev]) return prev;
+                const firstAvailable = padded.findIndex(u => !!u);
+                return firstAvailable === -1 ? 0 : firstAvailable;
+            });
+        };
+
+        buildThumbnails();
+        return () => { isMounted = false; };
+    }, [imageKey, imageSrc]);
+
+    // Gallery navigation helpers: move to previous/next available thumbnail, wrapping around.
+    const prevImage = () => {
+        const valid = thumbnails.map((t, i) => t ? i : -1).filter(i => i >= 0);
+        if (valid.length === 0) return;
+        const current = valid.includes(activeThumb) ? activeThumb : valid[0];
+        const currentIdx = valid.indexOf(current);
+        const prevIdx = currentIdx > 0 ? valid[currentIdx - 1] : valid[valid.length - 1];
+        if (thumbnails[prevIdx]) setImageSrc(thumbnails[prevIdx]);
+        setActiveThumb(prevIdx);
+    };
+
+    const nextImage = () => {
+        const valid = thumbnails.map((t, i) => t ? i : -1).filter(i => i >= 0);
+        if (valid.length === 0) return;
+        const current = valid.includes(activeThumb) ? activeThumb : valid[0];
+        const currentIdx = valid.indexOf(current);
+        const nextIdx = currentIdx < valid.length - 1 ? valid[currentIdx + 1] : valid[0];
+        if (thumbnails[nextIdx]) setImageSrc(thumbnails[nextIdx]);
+        setActiveThumb(nextIdx);
+    };
 
     // Helpers
     const getCurrentUserId = async () => {
@@ -378,14 +560,19 @@ const ButtonPin = () => {
     // Cart UI state and Add-to-Cart logic (copied from BasicTBag-Info)
     const [cartError, setCartError] = useState(null);
     const [cartSuccess, setCartSuccess] = useState(null);
+    const [isAdding, setIsAdding] = useState(false);
 
     const computedUnitPrice = (Number(price) || 0) + Object.values(selectedVariants).reduce((acc, val) => acc + (Number(val?.price) || 0), 0);
 
     const handleAddToCart = async () => {
+        if (isAdding) return;
+
         if (!productId) {
             setCartError("No product selected");
             return;
         }
+
+        setIsAdding(true);
 
         const userId = session?.user?.id ?? await getCurrentUserId();
         if (!userId) {
@@ -398,6 +585,57 @@ const ButtonPin = () => {
         setCartSuccess(null);
 
         try {
+            // If editing from cart, update the existing cart item directly
+            if (fromCart && editingCartId) {
+                const variantPriceForCart = Object.values(selectedVariants || {}).reduce((acc, val) => acc + (Number(val?.price) || 0), 0);
+                const unitPriceForCart = (sizeDimensions ? Number(calculateSizePrice()) : Number(price) || 0) + variantPriceForCart;
+                const newTotal = (Number(unitPriceForCart) || 0) * Number(quantity || 0);
+
+                // Update the existing cart item
+                const { error: updateError } = await supabase
+                    .from("cart")
+                    .update({
+                        quantity: quantity,
+                        total_price: newTotal,
+                        base_price: Number(unitPriceForCart) || Number(price) || 0,
+                        route: location?.pathname || `/${slug}`,
+                        slug: slug || null
+                    })
+                    .eq("cart_id", editingCartId)
+                    .eq("user_id", userId);
+
+                if (updateError) throw updateError;
+
+                // Update cart variants
+                const { error: deleteVariantsError } = await supabase
+                    .from("cart_variants")
+                    .delete()
+                    .eq("cart_id", editingCartId)
+                    .eq("user_id", userId);
+
+                if (deleteVariantsError) throw deleteVariantsError;
+
+                const variantInserts = Object.entries(selectedVariants).map(([groupId, value]) => ({
+                    cart_id: editingCartId,
+                    user_id: userId,
+                    cartvariant_id: value?.variant_value_id ?? value?.id ?? value,
+                    price: Number(value?.price) || 0,
+                }));
+
+                if (variantInserts.length > 0) {
+                    const { error: variantsError } = await supabase.from("cart_variants").insert(variantInserts);
+                    if (variantsError) throw variantsError;
+                }
+
+                setCartSuccess("Cart item updated!");
+                setTimeout(() => setCartSuccess(null), 3000);
+                setIsAdding(false);
+
+                // Navigate back to cart
+                navigate('/cart');
+                return;
+            }
+
             const { data: existingCarts, error: checkError } = await supabase
                 .from("cart")
                 .select("cart_id, quantity, total_price")
@@ -430,7 +668,7 @@ const ButtonPin = () => {
                     const newTotal = (Number(unitPriceForCart) || 0) * newQuantity;
                     const { error: updateError } = await supabase
                         .from("cart")
-                        .update({ quantity: newQuantity, total_price: newTotal, base_price: Number(unitPriceForCart) || Number(price) || 0 })
+                        .update({ quantity: newQuantity, total_price: newTotal, base_price: Number(unitPriceForCart) || Number(price) || 0, route: location?.pathname || `/${slug}`, slug: slug || null })
                         .eq("cart_id", cart.cart_id)
                         .eq("user_id", userId);
                     if (updateError) throw updateError;
@@ -449,6 +687,8 @@ const ButtonPin = () => {
                             quantity: quantity,
                             base_price: Number(unitPriceForCart) || Number(price) || 0,
                             total_price: Number(unitPriceForCart * quantity) || 0,
+                            route: location?.pathname || `/${slug}`,
+                            slug: slug || null,
                         },
                     ])
                     .select("cart_id")
@@ -485,6 +725,8 @@ const ButtonPin = () => {
             } else {
                 setCartError("Failed to add to cart: " + (err.message || "Unknown error"));
             }
+        } finally {
+            setIsAdding(false);
         }
     };
 
@@ -764,24 +1006,52 @@ const ButtonPin = () => {
                                 <button
                                     type="button"
                                     aria-label="Previous image"
-                                    className="absolute left-1 top-1/2 -translate-y-1/2 p-2 bg-transparent focus:outline-none focus:ring-0"
+                                    onClick={prevImage}
+                                    aria-disabled={thumbnails.filter(Boolean).length < 2}
+                                    className={`absolute left-1 top-1/2 -translate-y-1/2 p-2 bg-transparent focus:outline-none focus:ring-0 ${thumbnails.filter(Boolean).length < 2 ? 'opacity-40 pointer-events-none' : ''}`}
                                 >
                                     <img src="/logo-icon/arrow-left.svg" alt="Previous" className="h-6 w-6" />
                                 </button>
                                 <button
                                     type="button"
                                     aria-label="Next image"
-                                    className="absolute right-1 top-1/2 -translate-y-1/2 p-2 bg-transparent focus:outline-none focus:ring-0"
+                                    onClick={nextImage}
+                                    aria-disabled={thumbnails.filter(Boolean).length < 2}
+                                    className={`absolute right-1 top-1/2 -translate-y-1/2 p-2 bg-transparent focus:outline-none focus:ring-0 ${thumbnails.filter(Boolean).length < 2 ? 'opacity-40 pointer-events-none' : ''}`}
                                 >
                                     <img src="/logo-icon/arrow-right.svg" alt="Next" className="h-6 w-6" />
                                 </button>
                             </div>
 
-                            <div className="mt-4 grid grid-cols-4 gap-3">
-                                <div className="h-20 w-full border rounded p-2 bg-[#f7f7f7]" aria-hidden />
-                                <div className="h-20 w-full border rounded p-2 bg-[#f7f7f7]" aria-hidden />
-                                <div className="h-20 w-full border rounded p-2 bg-[#f7f7f7]" aria-hidden />
-                                <div className="h-20 w-full border rounded p-2 bg-gray-50" aria-hidden />
+                            <div className="mt-4 grid grid-cols-4 gap-4">
+                                {(() => {
+                                    // this make the our thumbnail sa baba ng pic to 4 
+                                    const cells = [];
+                                    for (let i = 0; i < 4; i++) {
+                                        const src = thumbnails[i];
+                                        if (src) {
+                                            const isActive = i === activeThumb;
+                                            cells.push(
+                                                <button
+                                                    key={`thumb-${i}`}
+                                                    type="button"
+                                                    onClick={() => { setActiveThumb(i); setImageSrc(src); }}
+                                                    className={`border rounded p-1 overflow-hidden flex items-center justify-center ${isActive ? 'ring-2 ring-offset-1 ring-black focus:outline-none' : ''}`}
+                                                    style={{ width: 120, height: 135 }}
+                                                >
+                                                    <img
+                                                        src={src}
+                                                        alt={`Thumbnail ${i + 1}`}
+                                                        className={`h-full w-full object-cover transition-transform duration-200 ease-in-out transform ${isActive ? 'scale-110' : 'hover:scale-110'}`}
+                                                    />
+                                                </button>
+                                            );
+                                        } else {
+                                            cells.push(<div key={`placeholder-${i}`} className="border rounded p-2 bg-[#f7f7f7]"  aria-hidden />);
+                                        }
+                                    }
+                                    return cells;
+                                })()}
                             </div>
                         </div>
                     </div>
@@ -968,7 +1238,15 @@ const ButtonPin = () => {
                         </div>
 
                         <div className="flex items-center gap-4">
-                            <button type="button" onClick={handleAddToCart} className="bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0">{cartSuccess ? cartSuccess : 'ADD TO CART'}</button>
+                            <button
+                                type="button"
+                                onClick={handleAddToCart}
+                                disabled={isAdding}
+                                aria-busy={isAdding}
+                                className={`bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0 ${isAdding ? 'opacity-60 pointer-events-none' : ''}`}
+                            >
+                                {cartSuccess ? cartSuccess : (isAdding ? (fromCart ? 'UPDATING...' : 'ADDING...') : (fromCart ? 'UPDATE CART' : 'ADD TO CART'))}
+                            </button>
                             <button
                                 type="button"
                                 className="bg-white p-1.5 rounded-full shadow-md focus:outline-none focus:ring-0"

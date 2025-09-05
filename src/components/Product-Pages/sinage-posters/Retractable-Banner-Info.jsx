@@ -31,8 +31,91 @@ const RetractableBanner = () => {
     const [cartSuccess, setCartSuccess] = useState(null);
     const [variantGroups, setVariantGroups] = useState([]);
     const [selectedVariants, setSelectedVariants] = useState({});
+    const [thumbnails, setThumbnails] = useState([]);
+    const [activeThumb, setActiveThumb] = useState(0);
 
     const slug = location.pathname.split('/').filter(Boolean).pop();
+
+    // Helper to try getting public URL, with fallback
+    const tryGetPublic = async (bucket, path) => {
+        try {
+            const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+            if (data?.publicUrl && !data.publicUrl.endsWith('/')) {
+                // Test if the URL is accessible by fetching it
+                const response = await fetch(data.publicUrl, { method: 'HEAD' });
+                if (response.ok) return data.publicUrl;
+            }
+        } catch (err) {
+            console.debug(`[RetractableBanner] Failed to get public URL for ${bucket}/${path}:`, err);
+        }
+        return null;
+    };
+
+    // Build thumbnails array from available images
+    const buildThumbnails = async () => {
+        const results = [];
+
+        // first thumbnail: try Supabase first, then fallback to local
+        const mainUrl = await tryGetPublic('sinage-posters-images', 'retractable-banner.png');
+        results.push(mainUrl || '/signages & posters/retractable-banner.png');
+
+        // desired variant thumbnails
+        const desired = ['retractable-banner-1.png', 'retractable-banner-2.png', 'retractable-banner-3.png'];
+        for (const name of desired) {
+            if (results.length >= 4) break;
+            const url = await tryGetPublic('sinage-posters-images', name);
+            if (url) results.push(url);
+        }
+
+        // if still short, try deriving from imageKey variants (numbered suffixes)
+        if (results.length < 4 && imageKey) {
+            const key = imageKey.toString().replace(/^\/+/, '');
+            const m = key.match(/(.+?)\.(png|jpg|jpeg|webp|gif)$/i);
+            const base = m ? m[1] : key;
+            const extras = [base + '-1', base + '-2', base + '-3'];
+            for (const cand of extras) {
+                if (results.length >= 4) break;
+                const url = await tryGetPublic('sinage-posters-images', cand);
+                if (url) results.push(url);
+            }
+        }
+
+        // last-resort local fallbacks
+        const fallbacks = ['/signages & posters/retractable-banner.png', '/signages & posters/retractable-banner-1.png', '/signages & posters/retractable-banner-2.png', '/logo-icon/logo.png'];
+        for (const f of fallbacks) {
+            if (results.length >= 4) break;
+            try {
+                const r = await fetch(f, { method: 'HEAD' });
+                if (r.ok) results.push(f);
+            } catch (e) { /* ignore */ }
+        }
+
+        // Deduplicate while preserving order
+        const seen = new Set();
+        const ordered = [];
+        for (const u of results) {
+            if (!u) continue;
+            if (!seen.has(u)) { seen.add(u); ordered.push(u); }
+        }
+
+        let padded = ordered.slice(0, 4);
+        while (padded.length < 4) padded.push(undefined);
+
+        setThumbnails(padded);
+
+        // Preserve the user's clicked thumbnail when possible. If the previous active index
+        // still points to a valid thumbnail, keep it. Otherwise choose the first available
+        // thumbnail (fallback to 0).
+        const firstAvailableIndex = padded.findIndex(u => !!u);
+        const newActiveThumb = firstAvailableIndex === -1 ? 0 : firstAvailableIndex;
+        
+        setActiveThumb(newActiveThumb);
+        
+        // Set imageSrc to the first available thumbnail if it's not already set
+        if (!imageSrc && padded[newActiveThumb]) {
+            setImageSrc(padded[newActiveThumb]);
+        }
+    };
 
     useEffect(() => {
         let isMounted = true;
@@ -78,6 +161,34 @@ const RetractableBanner = () => {
         fetchProduct();
         return () => { isMounted = false; };
     }, [slug]);
+
+    // Build thumbnails when imageKey changes
+    useEffect(() => {
+        let isMounted = true;
+        buildThumbnails();
+        return () => { isMounted = false; };
+    }, [imageKey]);
+
+    // Gallery navigation helpers: move to previous/next available thumbnail, wrapping around.
+    const prevImage = () => {
+        const valid = thumbnails.map((t, i) => t ? i : -1).filter(i => i >= 0);
+        if (!valid.length) return;
+        const current = valid.includes(activeThumb) ? activeThumb : valid[0];
+        const idx = valid.indexOf(current);
+        const prevIdx = valid[(idx - 1 + valid.length) % valid.length];
+        setActiveThumb(prevIdx);
+        if (thumbnails[prevIdx]) setImageSrc(thumbnails[prevIdx]);
+    };
+
+    const nextImage = () => {
+        const valid = thumbnails.map((t, i) => t ? i : -1).filter(i => i >= 0);
+        if (!valid.length) return;
+        const current = valid.includes(activeThumb) ? activeThumb : valid[0];
+        const idx = valid.indexOf(current);
+        const nextIdx = valid[(idx + 1) % valid.length];
+        setActiveThumb(nextIdx);
+        if (thumbnails[nextIdx]) setImageSrc(thumbnails[nextIdx]);
+    };
 
     // Fetch variants with nested joins
     useEffect(() => {
@@ -204,7 +315,7 @@ const RetractableBanner = () => {
                 const cleanKey = String(imageKey).replace(/^\/+/, ''); // remove leading slash(es)
 
                 // Try buckets in order; include sinage-posters-images first for retractable banners
-                const bucketsToTry = ['signage-posters-images', 'accessoriesdecorations-images', 'apparel-images', '3d-prints-images', 'product-images', 'images', 'public'];
+                const bucketsToTry = ['sinage-posters-images', 'accessoriesdecorations-images', 'apparel-images', '3d-prints-images', 'product-images', 'images', 'public'];
                 for (const bucket of bucketsToTry) {
                     try {
                         const { data, error } = supabase.storage.from(bucket).getPublicUrl(cleanKey);
@@ -557,6 +668,7 @@ const RetractableBanner = () => {
                                     type="button"
                                     aria-label="Previous image"
                                     className="absolute left-1 top-1/2 -translate-y-1/2 p-2 bg-transparent focus:outline-none focus:ring-0"
+                                    onClick={prevImage}
                                 >
                                     <img src="/logo-icon/arrow-left.svg" alt="Previous" className="h-6 w-6" />
                                 </button>
@@ -564,16 +676,41 @@ const RetractableBanner = () => {
                                     type="button"
                                     aria-label="Next image"
                                     className="absolute right-1 top-1/2 -translate-y-1/2 p-2 bg-transparent focus:outline-none focus:ring-0"
+                                    onClick={nextImage}
                                 >
                                     <img src="/logo-icon/arrow-right.svg" alt="Next" className="h-6 w-6" />
                                 </button>
                             </div>
 
-                            <div className="mt-4 grid grid-cols-4 gap-3">
-                                <div className="h-20 w-full border rounded p-2 bg-[#f7f7f7]" aria-hidden />
-                                <div className="h-20 w-full border rounded p-2 bg-[#f7f7f7]" aria-hidden />
-                                <div className="h-20 w-full border rounded p-2 bg-[#f7f7f7]" aria-hidden />
-                                <div className="h-20 w-full border rounded p-2 bg-gray-50" aria-hidden />
+                            <div className="mt-4 grid grid-cols-4 gap-4">
+                                {(() => {
+                                    // this make the our thumbnail sa baba ng pic to 4
+                                    const cells = [];
+                                    for (let i = 0; i < 4; i++) {
+                                        const src = thumbnails[i];
+                                        if (src) {
+                                            const isActive = i === activeThumb;
+                                            cells.push(
+                                                <button
+                                                    key={`thumb-${i}`}
+                                                    type="button"
+                                                    onClick={() => { setActiveThumb(i); setImageSrc(src); }}
+                                                    className={`border rounded p-1 overflow-hidden flex items-center justify-center ${isActive ? 'ring-2 ring-offset-1 ring-black focus:outline-none' : ''}`}
+                                                    style={{ width: 120, height: 135 }}
+                                                >
+                                                    <img
+                                                        src={src}
+                                                        alt={`Thumbnail ${i + 1}`}
+                                                        className={`h-full w-full object-cover transition-transform duration-200 ease-in-out transform ${isActive ? 'scale-110' : 'hover:scale-110'}`}
+                                                    />
+                                                </button>
+                                            );
+                                        } else {
+                                            cells.push(<div key={`placeholder-${i}`} className="border rounded p-2 bg-[#f7f7f7]"  aria-hidden />);
+                                        }
+                                    }
+                                    return cells;
+                                })()}
                             </div>
                         </div>
                     </div>

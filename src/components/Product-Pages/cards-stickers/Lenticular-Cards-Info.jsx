@@ -20,6 +20,8 @@ const LenticularCards = () => {
     const [price, setPrice] = useState(null);
     const [imageKey, setImageKey] = useState("");
     const [imageSrc, setImageSrc] = useState("");
+    const [thumbnails, setThumbnails] = useState([]);
+    const [activeThumb, setActiveThumb] = useState(0);
     const [isFavorited, setIsFavorited] = useState(false);
     const [loading, setLoading] = useState(true);
     const [favLoading, setFavLoading] = useState(false);
@@ -234,6 +236,92 @@ const LenticularCards = () => {
         return () => { isMounted = false; };
     }, [imageKey]);
 
+    // Build thumbnails: 1) main product image as first thumb, 2) lenticular-cards variants from cards-stickers-images storage, 3) fallbacks
+    useEffect(() => {
+        let isMounted = true;
+        const tryGetPublic = async (bucket, keyBase) => {
+            const exts = ['.png', '.jpg', '.jpeg', '.webp'];
+            for (const ext of exts) {
+                try {
+                    const { data } = supabase.storage.from(bucket).getPublicUrl(keyBase + ext);
+                    const url = data?.publicUrl;
+                    if (url && !url.endsWith('/')) {
+                        try {
+                            const head = await fetch(url, { method: 'HEAD' });
+                            if (head.ok) return url;
+                        } catch (e) { /* ignore */ }
+                    }
+                } catch (e) { /* ignore */ }
+            }
+            return null;
+        };
+
+        const buildThumbnails = async () => {
+            const results = [];
+
+            // first thumbnail: ensure lenticular-cards.png is always first
+            results.push('/cards/lenticular-cards.png');
+
+            // desired variant thumbnails
+            const desired = ['lenticular-cards-white', 'lenticular-cards-black', 'lenticular-cards-transparent'];
+            for (const name of desired) {
+                if (results.length >= 4) break;
+                const url = await tryGetPublic('cards-stickers-images', name);
+                if (url) results.push(url);
+            }
+
+            // if still short, try deriving from imageKey variants (numbered suffixes)
+            if (results.length < 4 && imageKey) {
+                const key = imageKey.toString().replace(/^\/+/, '');
+                const m = key.match(/(.+?)\.(png|jpg|jpeg|webp|gif)$/i);
+                const base = m ? m[1] : key;
+                const extras = [base + '-1', base + '-2', base + '-3'];
+                for (const cand of extras) {
+                    if (results.length >= 4) break;
+                    const url = await tryGetPublic('cards-stickers-images', cand);
+                    if (url) results.push(url);
+                }
+            }
+
+            // last-resort local fallbacks
+            const fallbacks = ['/cards/lenticular-cards.png', '/cards/lenticular-cards-1.png', '/cards/lenticular-cards-2.png', '/logo-icon/logo.png'];
+            for (const f of fallbacks) {
+                if (results.length >= 4) break;
+                try {
+                    const r = await fetch(f, { method: 'HEAD' });
+                    if (r.ok) results.push(f);
+                } catch (e) { /* ignore */ }
+            }
+
+            if (!isMounted) return;
+
+            // Deduplicate while preserving order
+            const seen = new Set();
+            const ordered = [];
+            for (const u of results) {
+                if (!u) continue;
+                if (!seen.has(u)) { seen.add(u); ordered.push(u); }
+            }
+
+            let padded = ordered.slice(0, 4);
+            while (padded.length < 4) padded.push(undefined);
+
+            setThumbnails(padded);
+
+            // Preserve the user's clicked thumbnail when possible. If the previous active index
+            // still points to a valid thumbnail, keep it. Otherwise choose the first available
+            // thumbnail (fallback to 0).
+            setActiveThumb(prev => {
+                if (padded[prev]) return prev;
+                const firstAvailable = padded.findIndex(u => !!u);
+                return firstAvailable === -1 ? 0 : firstAvailable;
+            });
+        };
+
+        buildThumbnails();
+        return () => { isMounted = false; };
+    }, [imageKey, imageSrc]);
+
     // Helpers
     const getCurrentUserId = async () => {
         if (session?.user?.id) return session.user.id;
@@ -395,6 +483,26 @@ const LenticularCards = () => {
         setSelectedVariants(prev => ({ ...prev, [groupId]: value }));
     };
 
+    // Gallery navigation helpers: move to previous/next available thumbnail, wrapping around.
+    const prevImage = () => {
+        const valid = thumbnails.map((t, i) => t ? i : -1).filter(i => i >= 0);
+        if (!valid.length) return;
+        const current = valid.includes(activeThumb) ? activeThumb : valid[0];
+        const idx = valid.indexOf(current);
+        const prevIdx = valid[(idx - 1 + valid.length) % valid.length];
+        setActiveThumb(prevIdx);
+        if (thumbnails[prevIdx]) setImageSrc(thumbnails[prevIdx]);
+    };
+
+    const nextImage = () => {
+        const valid = thumbnails.map((t, i) => t ? i : -1).filter(i => i >= 0);
+        if (!valid.length) return;
+        const current = valid.includes(activeThumb) ? activeThumb : valid[0];
+        const idx = valid.indexOf(current);
+        const nextIdx = valid[(idx + 1) % valid.length];
+        setActiveThumb(nextIdx);
+        if (thumbnails[nextIdx]) setImageSrc(thumbnails[nextIdx]);
+    };
 
     // Calculate unit price (base + variants) and multiply by quantity for total
     const unitPrice = (Number(price) || 0) + Object.values(selectedVariants).reduce((acc, val) => acc + (Number(val?.price) || 0), 0);
@@ -556,24 +664,52 @@ const LenticularCards = () => {
                                 <button
                                     type="button"
                                     aria-label="Previous image"
-                                    className="absolute left-1 top-1/2 -translate-y-1/2 p-2 bg-transparent focus:outline-none focus:ring-0"
+                                    onClick={prevImage}
+                                    aria-disabled={thumbnails.filter(Boolean).length < 2}
+                                    className={`absolute left-1 top-1/2 -translate-y-1/2 p-2 bg-transparent focus:outline-none focus:ring-0 ${thumbnails.filter(Boolean).length < 2 ? 'opacity-40 pointer-events-none' : ''}`}
                                 >
                                     <img src="/logo-icon/arrow-left.svg" alt="Previous" className="h-6 w-6" />
                                 </button>
                                 <button
                                     type="button"
                                     aria-label="Next image"
-                                    className="absolute right-1 top-1/2 -translate-y-1/2 p-2 bg-transparent focus:outline-none focus:ring-0"
+                                    onClick={nextImage}
+                                    aria-disabled={thumbnails.filter(Boolean).length < 2}
+                                    className={`absolute right-1 top-1/2 -translate-y-1/2 p-2 bg-transparent focus:outline-none focus:ring-0 ${thumbnails.filter(Boolean).length < 2 ? 'opacity-40 pointer-events-none' : ''}`}
                                 >
                                     <img src="/logo-icon/arrow-right.svg" alt="Next" className="h-6 w-6" />
                                 </button>
                             </div>
 
-                            <div className="mt-4 grid grid-cols-4 gap-3">
-                                <div className="h-20 w-full border rounded p-2 bg-[#f7f7f7]" aria-hidden />
-                                <div className="h-20 w-full border rounded p-2 bg-[#f7f7f7]" aria-hidden />
-                                <div className="h-20 w-full border rounded p-2 bg-[#f7f7f7]" aria-hidden />
-                                <div className="h-20 w-full border rounded p-2 bg-[#f7f7f7]" aria-hidden />
+                            <div className="mt-4 grid grid-cols-4 gap-4">
+                                {(() => {
+                                    // this make the our thumbnail sa baba ng pic to 4 
+                                    const cells = [];
+                                    for (let i = 0; i < 4; i++) {
+                                        const src = thumbnails[i];
+                                        if (src) {
+                                            const isActive = i === activeThumb;
+                                            cells.push(
+                                                <button
+                                                    key={`thumb-${i}`}
+                                                    type="button"
+                                                    onClick={() => { setActiveThumb(i); setImageSrc(src); }}
+                                                    className={`border rounded p-1 overflow-hidden flex items-center justify-center ${isActive ? 'ring-2 ring-offset-1 ring-black focus:outline-none' : ''}`}
+                                                    style={{ width: 120, height: 135 }}
+                                                >
+                                                    <img
+                                                        src={src}
+                                                        alt={`Thumbnail ${i + 1}`}
+                                                        className={`h-full w-full object-cover transition-transform duration-200 ease-in-out transform ${isActive ? 'scale-110' : 'hover:scale-110'}`}
+                                                    />
+                                                </button>
+                                            );
+                                        } else {
+                                            cells.push(<div key={`placeholder-${i}`} className="border rounded p-2 bg-[#f7f7f7]"  aria-hidden />);
+                                        }
+                                    }
+                                    return cells;
+                                })()}
                             </div>
                         </div>
                     </div>
