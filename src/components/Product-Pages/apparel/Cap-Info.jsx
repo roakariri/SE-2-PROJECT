@@ -174,6 +174,7 @@ const Cap= () => {
             setFromCart(true);
             setEditingCartId(cartRow.cart_id);
             if (cartRow.quantity) setQuantity(Number(cartRow.quantity) || 1);
+            setShowUploadUI(true);
         }
     }, [location.state]);
 
@@ -619,6 +620,8 @@ const Cap= () => {
     const [cartError, setCartError] = useState(null);
     const [cartSuccess, setCartSuccess] = useState(null);
     const [isAdding, setIsAdding] = useState(false);
+    const [showUploadUI, setShowUploadUI] = useState(true);
+    const [uploadResetKey, setUploadResetKey] = useState(0);
 
     const computedUnitPrice = (Number(price) || 0) + Object.values(selectedVariants).reduce((acc, val) => acc + (Number(val?.price) || 0), 0);
 
@@ -715,8 +718,28 @@ const Cap= () => {
 
                 const existingVarSet = new Set((cartVariants || []).map((v) => `${v.cartvariant_id}`));
                 const selectedVarSet = new Set(Object.values(selectedVariants || {}).map((val) => `${val?.variant_value_id ?? val?.id ?? val}`));
+                    // Also compare uploaded files attached to this cart. If files differ, treat as different cart item.
+                    let filesMatch = false;
+                    try {
+                        const { data: cartFiles, error: cartFilesErr } = await supabase.from('uploaded_files').select('file_id,id').eq('cart_id', cart.cart_id).eq('user_id', userId);
+                        if (cartFilesErr) {
+                            console.warn('Failed to fetch uploaded_files for cart match check:', cartFilesErr);
+                        }
+                        const existingFileIds = (Array.isArray(cartFiles) ? cartFiles.map(f => f.file_id ?? f.id).filter(Boolean) : []);
+                        const selectedFileIds = (Array.isArray(uploadedFileMetas) ? uploadedFileMetas.map(m => m.file_id ?? m.id).filter(Boolean) : []);
+                        if (existingFileIds.length === 0 && selectedFileIds.length === 0) filesMatch = true;
+                        else if (existingFileIds.length > 0 && selectedFileIds.length > 0) {
+                            const s = new Set(selectedFileIds.map(String));
+                            filesMatch = existingFileIds.length === selectedFileIds.length && existingFileIds.every(f => s.has(String(f)));
+                        } else {
+                            filesMatch = false;
+                        }
+                    } catch (e) {
+                        console.warn('Error checking cart uploaded files:', e);
+                        filesMatch = false;
+                    }
 
-                if (existingVarSet.size === selectedVarSet.size && [...existingVarSet].every((v) => selectedVarSet.has(v))) {
+                    if (existingVarSet.size === selectedVarSet.size && [...existingVarSet].every((v) => selectedVarSet.has(v)) && filesMatch) {
                     cartMatched = true;
                     const newQuantity = (Number(cart.quantity) || 0) + Number(quantity || 0);
                     const newTotal = (Number(unitPriceForCart) || 0) * newQuantity;
@@ -789,10 +812,24 @@ const Cap= () => {
                 } catch (e) {
                     console.warn('Failed to attach uploaded_files to cart row:', e);
                 }
+
+                // Fallback: attach any uploaded_files for this user & product that have a NULL cart_id
+                try {
+                    const { error: fallbackAttachErr } = await supabase
+                        .from('uploaded_files')
+                        .update({ cart_id: cartId })
+                        .match({ user_id: userId, product_id: productId })
+                        .is('cart_id', null);
+                    if (fallbackAttachErr) console.warn('Fallback: failed to attach uploaded_files by user+product match:', fallbackAttachErr);
+                } catch (fbErr) {
+                    console.warn('Fallback attach uploaded_files error:', fbErr);
+                }
             }
 
             setCartSuccess("Item added to cart!");
             setQuantity(1);
+            // Reset UploadDesign to clear thumbnails while keeping the upload UI visible
+            setUploadResetKey(k => (k || 0) + 1);
             setTimeout(() => setCartSuccess(null), 3000);
         } catch (err) {
             console.error("Error adding to cart - Details:", { message: err.message, code: err.code, details: err.details });
@@ -1359,10 +1396,12 @@ const Cap= () => {
                         
                         
 
+                        {showUploadUI && (
                         <div className="mb-6">
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">UPLOAD DESIGN</div>
-                            <UploadDesign productId={productId} session={session} />
+                            <UploadDesign key={uploadResetKey} productId={productId} session={session} hidePreviews={!showUploadUI} isEditMode={fromCart && !!editingCartId} cartId={fromCart ? editingCartId : null} />
                         </div>
+                        )}
 
                         <div className="mb-6">
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">QUANTITY</div>

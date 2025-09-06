@@ -34,6 +34,15 @@ const Poster = () => {
     const [thumbnails, setThumbnails] = useState([]);
     const [activeThumb, setActiveThumb] = useState(0);
 
+    // upload design state (added for UploadDesign integration)
+    const [uploadedFileMetas, setUploadedFileMetas] = useState([]); // DB rows
+    const [uploadResetKey, setUploadResetKey] = useState(0);
+    const [showUploadUI, setShowUploadUI] = useState(true);
+
+    // Cart editing state
+    const [fromCart, setFromCart] = useState(!!location.state?.fromCart);
+    const [editingCartId, setEditingCartId] = useState(location.state?.cartRow?.cart_id || null);
+
     const slug = location.pathname.split('/').filter(Boolean).pop();
 
     // Helper to try getting public URL, with fallback
@@ -114,6 +123,14 @@ const Poster = () => {
             return firstAvailable === -1 ? 0 : firstAvailable;
         });
     };
+
+    // Cart editing state
+    useEffect(() => {
+        if (location.state?.fromCart && location.state?.cartRow) {
+            setFromCart(true);
+            setEditingCartId(location.state.cartRow.cart_id);
+        }
+    }, [location.state]);
 
     useEffect(() => {
         let isMounted = true;
@@ -529,6 +546,51 @@ const Poster = () => {
         setCartSuccess(null);
 
         try {
+            let cartId;
+
+            // Handle cart editing case
+            if (fromCart && editingCartId) {
+                // Update existing cart row
+                const { error: updateError } = await supabase
+                    .from("cart")
+                    .update({ 
+                        quantity: quantity,
+                        total_price: totalPrice,
+                        base_price: Number(unitPrice) || Number(price) || 0,
+                        route: location?.pathname || `/${slug}`,
+                        slug: slug || null,
+                    })
+                    .eq("cart_id", editingCartId)
+                    .eq("user_id", userId);
+
+                if (updateError) throw updateError;
+
+                // Delete existing variants and insert new ones
+                await supabase.from("cart_variants").delete().eq("cart_id", editingCartId).eq("user_id", userId);
+
+                const variantInserts = Object.entries(selectedVariants).map(([groupId, value]) => ({
+                    cart_id: editingCartId,
+                    user_id: userId,
+                    cartvariant_id: value?.variant_value_id ?? value?.id ?? value,
+                    price: Number(value?.price) || 0,
+                }));
+
+                if (variantInserts.length > 0) {
+                    const { error: variantsError } = await supabase.from("cart_variants").insert(variantInserts);
+                    if (variantsError) throw variantsError;
+                }
+
+                setCartSuccess("Cart updated successfully!");
+                setTimeout(() => {
+                    setCartSuccess(null);
+                    if (fromCart) {
+                        navigate('/cart');
+                    }
+                }, 1000);
+                return;
+            }
+
+            // Original add to cart logic for new items
             const { data: existingCarts, error: checkError } = await supabase
                 .from("cart")
                 .select("cart_id, quantity, total_price")
@@ -537,7 +599,6 @@ const Poster = () => {
 
             if (checkError) throw checkError;
 
-            let cartId;
             let cartMatched = false;
 
             for (const cart of existingCarts || []) {
@@ -558,7 +619,7 @@ const Poster = () => {
                     const newTotal = (Number(totalPrice) || 0);
                     const { error: updateError } = await supabase
                         .from("cart")
-                        .update({ quantity: newQuantity, total_price: newTotal, base_price: Number(unitPrice) || Number(price) || 0 })
+                        .update({ quantity: newQuantity, total_price: newTotal, base_price: Number(unitPrice) || Number(price) || 0, route: location?.pathname || `/${slug}`, slug: slug || null })
                         .eq("cart_id", cart.cart_id)
                         .eq("user_id", userId);
                     if (updateError) throw updateError;
@@ -577,6 +638,8 @@ const Poster = () => {
                             quantity: quantity,
                             base_price: Number(unitPrice) || Number(price) || 0,
                             total_price: totalPrice,
+                            route: location?.pathname || `/${slug}`,
+                            slug: slug || null,
                         },
                     ])
                     .select("cart_id")
@@ -920,7 +983,18 @@ const Poster = () => {
 
                         <div className="mb-6">
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">UPLOAD DESIGN</div>
-                            <UploadDesign productId={productId} session={session} />
+                            <UploadDesign 
+                                productId={productId} 
+                                session={session} 
+                                uploadedFileMetas={uploadedFileMetas}
+                                setUploadedFileMetas={setUploadedFileMetas}
+                                uploadResetKey={uploadResetKey}
+                                setUploadResetKey={setUploadResetKey}
+                                showUploadUI={showUploadUI}
+                                setShowUploadUI={setShowUploadUI}
+                                isEditMode={fromCart && !!editingCartId}
+                                cartId={fromCart ? editingCartId : null}
+                            />
                         </div>
 
                         <div className="mb-6">
@@ -936,7 +1010,7 @@ const Poster = () => {
 
                         {/* footer actions pinned at bottom */}
                         <div className="flex items-center gap-4 mt-4">
-                            <button type="button" onClick={handleAddToCart} className="bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0">{cartSuccess ? cartSuccess : 'ADD TO CART'}</button>
+                            <button type="button" onClick={handleAddToCart} className="bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0">{cartSuccess ? cartSuccess : (fromCart ? 'UPDATE CART' : 'ADD TO CART')}</button>
                             {cartError && <div className="text-red-600 text-sm ml-2">{cartError}</div>}
                             <button
                                 type="button"

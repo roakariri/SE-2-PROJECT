@@ -34,6 +34,15 @@ const ClothingBanner = () => {
     const [thumbnails, setThumbnails] = useState([]);
     const [activeThumb, setActiveThumb] = useState(0);
 
+    // upload design state (added for UploadDesign integration)
+    const [uploadedFileMetas, setUploadedFileMetas] = useState([]); // DB rows
+    const [uploadResetKey, setUploadResetKey] = useState(0);
+    const [showUploadUI, setShowUploadUI] = useState(true);
+
+    // Cart editing state
+    const [fromCart, setFromCart] = useState(!!location.state?.fromCart);
+    const [editingCartId, setEditingCartId] = useState(location.state?.cartRow?.cart_id || null);
+
     const slug = location.pathname.split('/').filter(Boolean).pop();
 
     // Build thumbnails: 1) main product image as first thumb, 2) variants from accessories-images storage, 3) fallbacks
@@ -60,53 +69,96 @@ const ClothingBanner = () => {
             const results = [];
 
             // first thumbnail: main product image
-            results.push('/accessories-images/phone-holder.png');
-
-            // desired variant thumbnails
-            const desired = ['phone-holder-1', 'phone-holder-2', 'phone-holder-3'];
-            for (const name of desired) {
-                if (results.length >= 4) break;
-                const url = await tryGetPublic('accessoriesdecorations-images', name);
-                if (url) results.push(url);
-            }
-
-            // if still short, try deriving from imageKey variants (numbered suffixes)
-            if (results.length < 4 && imageKey) {
-                const key = imageKey.toString().replace(/^\/+/, '');
-                const m = key.match(/(.+?)\.(png|jpg|jpeg|webp|gif)$/i);
-                const base = m ? m[1] : key;
-                const extras = [base + '-1', base + '-2', base + '-3'];
-                for (const cand of extras) {
-                    if (results.length >= 4) break;
-                    const url = await tryGetPublic('accessoriesdecorations-images', cand);
-                    if (url) results.push(url);
+            if (imageKey) {
+                // Use the same image resolution logic as the main product image
+                const cleanKey = String(imageKey).replace(/^\/+/, '');
+                const bucketsToTry = ['sinage-posters-images', 'accessoriesdecorations-images', 'apparel-images', '3d-prints-images', 'product-images', 'images', 'public'];
+                for (const bucket of bucketsToTry) {
+                    try {
+                        const { data, error } = supabase.storage.from(bucket).getPublicUrl(cleanKey);
+                        if (error) continue;
+                        const url = data?.publicUrl || data?.publicURL || null;
+                        if (url && !url.endsWith('/')) {
+                            results.push(url);
+                            break;
+                        }
+                    } catch (err) {
+                        // continue trying other buckets
+                    }
                 }
             }
 
-            // last-resort local fallbacks
-            const fallbacks = ['/accessories-images/phone-holder.png', '/accessories-images/phone-holder-1.png', '/accessories-images/phone-holder-2.png', '/logo-icon/logo.png'];
-            for (const f of fallbacks) {
-                if (results.length >= 4) break;
+            // If we couldn't get the main product image, use fallback
+            if (results.length === 0) {
                 try {
-                    const r = await fetch(f, { method: 'HEAD' });
-                    if (r.ok) results.push(f);
-                } catch (e) { /* ignore */ }
+                    const { data } = supabase.storage.from('sinage-posters-images').getPublicUrl('clothing-banner.png');
+                    const url = data?.publicUrl;
+                    if (url && !url.endsWith('/')) {
+                        results.push(url);
+                    } else {
+                        results.push('/logo-icon/logo.png');
+                    }
+                } catch (err) {
+                    results.push('/logo-icon/logo.png');
+                }
             }
 
-            if (!isMounted) return;
+            // Add additional thumbnails based on the main image (variations)
+            if (imageKey && results.length > 0) {
+                const cleanKey = String(imageKey).replace(/^\/+/, '');
+                const m = cleanKey.match(/(.+?)\.(png|jpg|jpeg|webp|gif)$/i);
+                const base = m ? m[1] : cleanKey;
+                
+                // Try to get variations of the main image
+                const variations = [`${base}-1`, `${base}-2`, `${base}-3`];
+                const bucketsToTry = ['sinage-posters-images', 'accessoriesdecorations-images', 'apparel-images', '3d-prints-images', 'product-images', 'images', 'public'];
+                
+                for (const variation of variations) {
+                    if (results.length >= 4) break;
+                    for (const bucket of bucketsToTry) {
+                        try {
+                            const { data, error } = supabase.storage.from(bucket).getPublicUrl(variation + (m ? '.' + m[2] : '.png'));
+                            if (error) continue;
+                            const url = data?.publicUrl || data?.publicURL || null;
+                            if (url && !url.endsWith('/')) {
+                                results.push(url);
+                                break;
+                            }
+                        } catch (err) {
+                            // continue
+                        }
+                    }
+                }
+            }
+
+            // Fill remaining slots with the main image or fallbacks
+            while (results.length < 4) {
+                if (results.length === 0) {
+                    results.push('/logo-icon/logo.png');
+                } else {
+                    results.push(results[0]); // Duplicate the main image
+                }
+            }
 
             // Deduplicate while preserving order
             const seen = new Set();
             const ordered = [];
             for (const u of results) {
                 if (!u) continue;
-                if (!seen.has(u)) { seen.add(u); ordered.push(u); }
+                if (!seen.has(u)) { 
+                    seen.add(u); 
+                    ordered.push(u); 
+                }
             }
 
             let padded = ordered.slice(0, 4);
-            while (padded.length < 4) padded.push(undefined);
+            while (padded.length < 4) {
+                padded.push(padded[0] || '/logo-icon/logo.png');
+            }
 
             setThumbnails(padded);
+
+            if (!isMounted) return;
 
             // Preserve the user's clicked thumbnail when possible. If the previous active index
             // still points to a valid thumbnail, keep it. Otherwise choose the first available
@@ -121,6 +173,61 @@ const ClothingBanner = () => {
         buildThumbnails();
         return () => { isMounted = false; };
     }, [imageKey, imageSrc]);
+
+    // Cart editing state
+    useEffect(() => {
+        if (location.state?.fromCart && location.state?.cartRow) {
+            setFromCart(true);
+            setEditingCartId(location.state.cartRow.cart_id);
+        }
+    }, [location.state]);
+
+    useEffect(() => {
+        let isMounted = true;
+        const fetchProduct = async () => {
+            setLoading(true);
+            if (!slug) {
+                setLoading(false);
+                return;
+            }
+            try {
+                let { data, error } = await supabase
+                    .from('products')
+                    .select('id, name, starting_price, image_url')
+                    .eq('route', slug)
+                    .single();
+
+                if (error || !data) {
+                    const fallback = await supabase
+                        .from('products')
+                        .select('id, name, starting_price, image_url')
+                        .eq('slug', slug)
+                        .single();
+                    data = fallback.data;
+                    error = fallback.error;
+                }
+
+                if (!isMounted) return;
+                if (error) {
+                    console.error('Error fetching product:', error.message || error);
+                } else if (data) {
+                    console.log('Fetched product data:', data);
+                    setProductId(data.id ?? null);
+                    setProductName(data.name || "");
+                    setPrice(data.starting_price ?? null);
+                    setImageKey(data.image_url || "");
+                    console.log('Set imageKey to:', data.image_url || "");
+                }
+            } catch (err) {
+                if (!isMounted) return;
+                console.error('Unexpected error fetching product:', err);
+            } finally {
+                if (isMounted) setLoading(false);
+            }
+        };
+        fetchProduct();
+        return () => { isMounted = false; };
+    }, [slug]);
 
     // Gallery navigation helpers: move to previous/next available thumbnail, wrapping around.
     const prevImage = () => {
@@ -241,10 +348,11 @@ const ClothingBanner = () => {
     useEffect(() => {
         let isMounted = true;
         const resolveImage = async () => {
-            // If imageKey is not provided, prefer the sinage-posters-images bucket's retractable-banner.png
+            console.log('Resolving image for imageKey:', imageKey);
+            // If imageKey is not provided, prefer the sinage-posters-images bucket's clothing-banner.png
             if (!imageKey) {
                 try {
-                    const { data } = supabase.storage.from('sinage-posters-images').getPublicUrl('retractable-banner.png');
+                    const { data } = supabase.storage.from('sinage-posters-images').getPublicUrl('clothing-banner.png');
                     const url = data?.publicUrl;
                     if (url && !url.endsWith('/')) {
                         if (isMounted) setImageSrc(url);
@@ -261,7 +369,7 @@ const ClothingBanner = () => {
             try {
                 if (/^https?:\/\//i.test(imageKey) || imageKey.startsWith('/')) {
                     if (isMounted) setImageSrc(imageKey);
-                    console.debug('[ShakerKeychain] using provided imageKey as src', { imageKey });
+                    console.debug('[ClothingBanner] using provided imageKey as src', { imageKey });
                     return;
                 }
 
@@ -272,23 +380,24 @@ const ClothingBanner = () => {
                 for (const bucket of bucketsToTry) {
                     try {
                         const { data, error } = supabase.storage.from(bucket).getPublicUrl(cleanKey);
-                        console.debug('[ShakerKeychain] getPublicUrl attempt', { bucket, cleanKey, data, error });
+                        console.debug('[ClothingBanner] getPublicUrl attempt', { bucket, cleanKey, data, error });
                         if (error) continue; // try next bucket
                         const url = data?.publicUrl || data?.publicURL || null;
                         // Supabase returns a publicUrl that ends with '/' when the object isn't found.
                         if (url && !url.endsWith('/')) {
+                            console.log('Successfully resolved image URL:', url);
                             if (isMounted) setImageSrc(url);
                             return;
                         }
                     } catch (err) {
-                        console.warn('[ShakerKeychain] bucket attempt failed', { bucket, err });
+                        console.warn('[ClothingBanner] bucket attempt failed', { bucket, err });
                         // continue trying other buckets
                     }
                 }
 
                 // Last-resort fallback to local public asset
                 if (isMounted) setImageSrc('/logo-icon/logo.png');
-                console.warn('[ShakerKeychain] could not resolve imageKey to a public URL, using fallback', { imageKey });
+                console.warn('[ClothingBanner] could not resolve imageKey to a public URL, using fallback', { imageKey });
             } catch (err) {
                 console.error('Error resolving image public URL:', err);
                 if (isMounted) setImageSrc('/logo-icon/logo.png');
@@ -484,6 +593,51 @@ const ClothingBanner = () => {
         setCartSuccess(null);
 
         try {
+            let cartId;
+
+            // Handle cart editing case
+            if (fromCart && editingCartId) {
+                // Update existing cart row
+                const { error: updateError } = await supabase
+                    .from("cart")
+                    .update({ 
+                        quantity: quantity,
+                        total_price: totalPrice,
+                        base_price: Number(unitPrice) || Number(price) || 0,
+                        route: location?.pathname || `/${slug}`,
+                        slug: slug || null,
+                    })
+                    .eq("cart_id", editingCartId)
+                    .eq("user_id", userId);
+
+                if (updateError) throw updateError;
+
+                // Delete existing variants and insert new ones
+                await supabase.from("cart_variants").delete().eq("cart_id", editingCartId).eq("user_id", userId);
+
+                const variantInserts = Object.entries(selectedVariants).map(([groupId, value]) => ({
+                    cart_id: editingCartId,
+                    user_id: userId,
+                    cartvariant_id: value?.variant_value_id ?? value?.id ?? value,
+                    price: Number(value?.price) || 0,
+                }));
+
+                if (variantInserts.length > 0) {
+                    const { error: variantsError } = await supabase.from("cart_variants").insert(variantInserts);
+                    if (variantsError) throw variantsError;
+                }
+
+                setCartSuccess("Cart updated successfully!");
+                setTimeout(() => {
+                    setCartSuccess(null);
+                    if (fromCart) {
+                        navigate('/cart');
+                    }
+                }, 1000);
+                return;
+            }
+
+            // Original add to cart logic for new items
             const { data: existingCarts, error: checkError } = await supabase
                 .from("cart")
                 .select("cart_id, quantity, total_price")
@@ -492,7 +646,6 @@ const ClothingBanner = () => {
 
             if (checkError) throw checkError;
 
-            let cartId;
             let cartMatched = false;
 
             for (const cart of existingCarts || []) {
@@ -513,7 +666,7 @@ const ClothingBanner = () => {
                     const newTotal = (Number(totalPrice) || 0);
                         const { error: updateError } = await supabase
                             .from("cart")
-                            .update({ quantity: newQuantity, total_price: newTotal, base_price: Number(unitPrice) || Number(price) || 0 })
+                            .update({ quantity: newQuantity, total_price: newTotal, base_price: Number(unitPrice) || Number(price) || 0, route: location?.pathname || `/${slug}`, slug: slug || null })
                         .eq("cart_id", cart.cart_id)
                         .eq("user_id", userId);
                     if (updateError) throw updateError;
@@ -532,6 +685,8 @@ const ClothingBanner = () => {
                             quantity: quantity,
                                 base_price: Number(unitPrice) || Number(price) || 0,
                             total_price: totalPrice,
+                            route: location?.pathname || `/${slug}`,
+                            slug: slug || null,
                         },
                     ])
                     .select("cart_id")
@@ -587,6 +742,9 @@ const ClothingBanner = () => {
 
     
 
+    console.log('ClothingBanner component rendering, imageSrc:', imageSrc);
+    console.log('ClothingBanner component rendering, imageKey:', imageKey);
+
     return (
         <div className="font-dm-sans w-full bg-cover bg-white phone:pt-[210px] tablet:pt-[220px] laptop:pt-[161px] phone:pb-40 tablet:pb-32 laptop:pb-24 z-0">
             <div className="max-w-[1201px] mx-auto mt-8 flex flex-col">
@@ -605,8 +763,10 @@ const ClothingBanner = () => {
                                     src={imageSrc || "/logo-icon/logo.png"}
                                     alt=""
                                     className="w-full max-h-64 tablet:max-h-[420px] object-contain"
+                                    onLoad={() => console.log('Image loaded successfully:', imageSrc)}
                                     onError={(e) => {
-                                        console.debug('[ShakerKeychain] main image failed to load, src=', e.target.src);
+                                        console.debug('[ClothingBanner] main image failed to load, src=', e.target.src);
+                                        console.debug('[ClothingBanner] current imageSrc state:', imageSrc);
                                         // try resolving fallback from supabase buckets directly
                                         try {
                                             const { data } = supabase.storage.from('apparel-images').getPublicUrl('logo.png');
@@ -853,7 +1013,19 @@ const ClothingBanner = () => {
 
                         {/* footer actions pinned at bottom */}
                         <div className="flex items-center gap-4 mt-4">
-                            <button type="button" onClick={handleAddToCart} className="bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0">{cartSuccess ? cartSuccess : 'ADD TO CART'}</button>
+                            <UploadDesign 
+                                productId={productId} 
+                                session={session} 
+                                uploadedFileMetas={uploadedFileMetas}
+                                setUploadedFileMetas={setUploadedFileMetas}
+                                uploadResetKey={uploadResetKey}
+                                setUploadResetKey={setUploadResetKey}
+                                showUploadUI={showUploadUI}
+                                setShowUploadUI={setShowUploadUI}
+                                isEditMode={fromCart && !!editingCartId}
+                                cartId={fromCart ? editingCartId : null}
+                            />
+                            <button type="button" onClick={handleAddToCart} className="bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0">{cartSuccess ? cartSuccess : (fromCart ? 'UPDATE CART' : 'ADD TO CART')}</button>
                             {cartError && <div className="text-red-600 text-sm ml-2">{cartError}</div>}
                             <button
                                 type="button"

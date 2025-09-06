@@ -34,6 +34,11 @@ const ShakerKeychain = () => {
     const [editingCartId, setEditingCartId] = useState(null);
     const [fromCart, setFromCart] = useState(false);
 
+    // upload design state (added for UploadDesign integration)
+    const [uploadedFileMetas, setUploadedFileMetas] = useState([]); // DB rows
+    const [uploadResetKey, setUploadResetKey] = useState(0);
+    const [showUploadUI, setShowUploadUI] = useState(true);
+
     const slug = location.pathname.split('/').filter(Boolean).pop();
 
     useEffect(() => {
@@ -774,6 +779,13 @@ const ShakerKeychain = () => {
             setCartSuccess("Item added to cart!");
             setQuantity(1);
             setTimeout(() => setCartSuccess(null), 3000);
+
+            // Dispatch a window-level event so UploadDesign (if mounted) can attach any pending uploads
+            window.dispatchEvent(new CustomEvent('cart-created', { detail: { cartId } }));
+
+            // Reset UploadDesign to clear thumbnails while keeping the upload UI visible
+            try { setUploadResetKey(k => (k || 0) + 1); } catch (e) { /* no-op if reset key missing */ }
+            try { setShowUploadUI(true); } catch (e) { /* no-op if showUploadUI missing */ }
         } catch (err) {
             console.error("Error adding to cart - Details:", { message: err.message, code: err.code, details: err.details });
             if (err.code === "23505") {
@@ -1306,7 +1318,7 @@ const ShakerKeychain = () => {
 
                         <div className="mb-6">
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">UPLOAD DESIGN</div>
-                            <UploadDesign productId={productId} session={session} />
+                            <UploadDesign key={uploadResetKey} productId={productId} session={session} hidePreviews={!showUploadUI} isEditMode={fromCart && !!editingCartId} cartId={fromCart ? editingCartId : null} setUploadedFileMetas={setUploadedFileMetas} />
                         </div>
 
                         <div className="mb-6">

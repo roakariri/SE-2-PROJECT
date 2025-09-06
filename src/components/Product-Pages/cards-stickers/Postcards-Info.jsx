@@ -31,8 +31,18 @@ const Postcards = () => {
     const [quantity, setQuantity] = useState(1);
     const [cartError, setCartError] = useState(null);
     const [cartSuccess, setCartSuccess] = useState(null);
+    const [isAdding, setIsAdding] = useState(false);
     const [variantGroups, setVariantGroups] = useState([]);
     const [selectedVariants, setSelectedVariants] = useState({});
+
+    // upload design state (added for UploadDesign integration)
+    const [uploadedFileMetas, setUploadedFileMetas] = useState([]); // DB rows
+    const [uploadResetKey, setUploadResetKey] = useState(0);
+    const [showUploadUI, setShowUploadUI] = useState(true);
+
+    // Cart editing state
+    const [fromCart, setFromCart] = useState(!!location.state?.fromCart);
+    const [editingCartId, setEditingCartId] = useState(location.state?.cartRow?.cart_id || null);
 
     const slug = location.pathname.split('/').filter(Boolean).pop();
 
@@ -475,6 +485,101 @@ const Postcards = () => {
         return () => { isMounted = false; };
     }, [productId]);
 
+    // Cart editing: Check if coming from cart for editing
+    useEffect(() => {
+        if (location.state?.fromCart && location.state?.cartRow) {
+            setFromCart(true);
+            setEditingCartId(location.state.cartRow.cart_id);
+        }
+    }, [location.state]);
+
+    // Authoritative fetch by cart_id (variants + quantity) so selection matches UI option ids
+    useEffect(() => {
+        const restoreFromCart = async () => {
+            if (!fromCart || !editingCartId) return;
+
+            try {
+                const { data: cartData, error } = await supabase
+                    .from('cart')
+                    .select('quantity, total_price')
+                    .eq('cart_id', editingCartId)
+                    .single();
+
+                if (error) throw error;
+
+                // Set quantity from cart
+                if (cartData.quantity) {
+                    setQuantity(cartData.quantity);
+                }
+
+                // Fetch and set variants
+                const { data: variantData, error: varError } = await supabase
+                    .from('cart_variants')
+                    .select(`
+                        cartvariant_id,
+                        variants!inner(
+                            id,
+                            name,
+                            value,
+                            price,
+                            variant_groups!inner(
+                                id,
+                                name
+                            )
+                        )
+                    `)
+                    .eq('cart_id', editingCartId);
+
+                if (varError) throw varError;
+
+                // Map to selectedVariants format
+                const restoredVariants = {};
+                if (variantData) {
+                    for (const cv of variantData) {
+                        if (cv.variants?.variant_groups) {
+                            const groupId = cv.variants.variant_groups.id;
+                            restoredVariants[groupId] = {
+                                id: cv.variants.id,
+                                name: cv.variants.name,
+                                value: cv.variants.value,
+                                price: cv.variants.price,
+                                variant_value_id: cv.cartvariant_id
+                            };
+                        }
+                    }
+                }
+                setSelectedVariants(restoredVariants);
+
+            } catch (err) {
+                console.error('Error restoring from cart:', err);
+            }
+        };
+        restoreFromCart();
+    }, [fromCart, editingCartId]);
+
+    // Cart editing: Restore uploaded files when editing
+    useEffect(() => {
+        if (fromCart && editingCartId) {
+            const restoreUploadedFiles = async () => {
+                try {
+                    const { data, error } = await supabase
+                        .from('uploaded_files')
+                        .select('*')
+                        .eq('cart_id', editingCartId);
+
+                    if (error) throw error;
+                    if (data && data.length > 0) {
+                        setUploadedFileMetas(data);
+                        setShowUploadUI(true);
+                    }
+                } catch (err) {
+                    console.error('Error restoring uploaded files:', err);
+                }
+            };
+            restoreUploadedFiles();
+        }
+    }, [fromCart, editingCartId]);
+
     const toggleDetails = () => setDetailsOpen((s) => !s);
 
     const incrementQuantity = () => setQuantity((q) => q + 1);
@@ -485,83 +590,54 @@ const Postcards = () => {
     const totalPrice = unitPrice * quantity;
 
     // Add to Cart logic from Tote Bag
+    // Add to Cart logic with cart editing support
     const handleAddToCart = async () => {
+        if (isAdding) return;
+        setIsAdding(true);
+
         if (!productId) {
             setCartError("No product selected");
+            setIsAdding(false);
             return;
         }
 
         const userId = session?.user?.id ?? await getCurrentUserId();
         if (!userId) {
             setCartError("Please sign in to add to cart");
+            setIsAdding(false);
             navigate("/signin");
             return;
         }
 
         setCartError(null);
         setCartSuccess(null);
+        setIsAdding(true);
 
         try {
-            const { data: existingCarts, error: checkError } = await supabase
-                .from("cart")
-                .select("cart_id, quantity, total_price")
-                .eq("user_id", userId)
-                .eq("product_id", productId);
-
-            if (checkError) throw checkError;
-
             let cartId;
-            let cartMatched = false;
 
-            for (const cart of existingCarts || []) {
-                const { data: cartVariants, error: varError } = await supabase
-                    .from("cart_variants")
-                    .select("cartvariant_id, cart_id")
-                    .eq("cart_id", cart.cart_id)
+            if (fromCart && editingCartId) {
+                // Update existing cart item
+                cartId = editingCartId;
+                const { error: updateError } = await supabase
+                    .from("cart")
+                    .update({
+                        quantity: quantity,
+                        base_price: Number(unitPrice) || Number(price) || 0,
+                        total_price: totalPrice,
+                        route: location?.pathname || `/${slug}`,
+                        slug: slug || null,
+                    })
+                    .eq("cart_id", editingCartId)
                     .eq("user_id", userId);
 
-                if (varError) throw varError;
+                if (updateError) throw updateError;
 
-                const existingVarSet = new Set((cartVariants || []).map((v) => `${v.cartvariant_id}`));
-                const selectedVarSet = new Set(Object.values(selectedVariants || {}).map((val) => `${val?.variant_value_id ?? val?.id ?? val}`));
-
-                if (existingVarSet.size === selectedVarSet.size && [...existingVarSet].every((v) => selectedVarSet.has(v))) {
-                    cartMatched = true;
-                    const newQuantity = (Number(cart.quantity) || 0) + Number(quantity || 0);
-                    const newTotal = (Number(unitPrice) || 0) * newQuantity;
-                    const { error: updateError } = await supabase
-                        .from("cart")
-                        .update({ quantity: newQuantity, total_price: newTotal, base_price: Number(unitPrice) || Number(price) || 0 })
-                        .eq("cart_id", cart.cart_id)
-                        .eq("user_id", userId);
-                    if (updateError) throw updateError;
-                    cartId = cart.cart_id;
-                    break;
-                }
-            }
-
-            if (!cartMatched) {
-                const { data: cartData, error: cartError } = await supabase
-                    .from("cart")
-                    .insert([
-                        {
-                            user_id: userId,
-                            product_id: productId,
-                            quantity: quantity,
-                            base_price: Number(unitPrice) || Number(price) || 0,
-                            total_price: totalPrice,
-                        },
-                    ])
-                    .select("cart_id")
-                    .single();
-
-                if (cartError) throw cartError;
-                if (!cartData || !cartData.cart_id) throw new Error("Failed to retrieve cart_id after insertion");
-
-                cartId = cartData.cart_id;
+                // Delete existing variants and re-insert
+                await supabase.from("cart_variants").delete().eq("cart_id", editingCartId).eq("user_id", userId);
 
                 const variantInserts = Object.entries(selectedVariants).map(([groupId, value]) => ({
-                    cart_id: cartId,
+                    cart_id: editingCartId,
                     user_id: userId,
                     cartvariant_id: value?.variant_value_id ?? value?.id ?? value,
                     price: Number(value?.price) || 0,
@@ -569,23 +645,159 @@ const Postcards = () => {
 
                 if (variantInserts.length > 0) {
                     const { error: variantsError } = await supabase.from("cart_variants").insert(variantInserts);
-                    if (variantsError) {
-                        await supabase.from("cart").delete().eq("cart_id", cartId).eq("user_id", userId);
-                        throw variantsError;
+                    if (variantsError) throw variantsError;
+                }
+
+                console.log('Cart updated successfully');
+            } else {
+                // Check for existing cart items with same variants
+                const { data: existingCarts, error: checkError } = await supabase
+                    .from("cart")
+                    .select("cart_id, quantity, total_price")
+                    .eq("user_id", userId)
+                    .eq("product_id", productId);
+
+                if (checkError) throw checkError;
+
+                let cartMatched = false;
+
+                for (const cart of existingCarts || []) {
+                    const { data: cartVariants, error: varError } = await supabase
+                        .from("cart_variants")
+                        .select("cartvariant_id, cart_id")
+                        .eq("cart_id", cart.cart_id)
+                        .eq("user_id", userId);
+
+                    if (varError) throw varError;
+
+                    const existingVarSet = new Set((cartVariants || []).map((v) => `${v.cartvariant_id}`));
+                    const selectedVarSet = new Set(Object.values(selectedVariants || {}).map((val) => `${val?.variant_value_id ?? val?.id ?? val}`));
+
+                    if (existingVarSet.size === selectedVarSet.size && [...existingVarSet].every((v) => selectedVarSet.has(v))) {
+                        cartMatched = true;
+                        const newQuantity = (Number(cart.quantity) || 0) + Number(quantity || 0);
+                        const newTotal = (Number(unitPrice) || 0) * newQuantity;
+                        const { error: updateError } = await supabase
+                            .from("cart")
+                            .update({ quantity: newQuantity, total_price: newTotal, base_price: Number(unitPrice) || Number(price) || 0, route: location?.pathname || `/${slug}`, slug: slug || null })
+                            .eq("cart_id", cart.cart_id)
+                            .eq("user_id", userId);
+                        if (updateError) throw updateError;
+                        cartId = cart.cart_id;
+                        break;
+                    }
+                }
+
+                if (!cartMatched) {
+                    const { data: cartData, error: cartError } = await supabase
+                        .from("cart")
+                        .insert([
+                            {
+                                user_id: userId,
+                                product_id: productId,
+                                quantity: quantity,
+                                base_price: Number(unitPrice) || Number(price) || 0,
+                                total_price: totalPrice,
+                                route: location?.pathname || `/${slug}`,
+                                slug: slug || null,
+                            },
+                        ])
+                        .select("cart_id")
+                        .single();
+
+                    if (cartError) throw cartError;
+                    if (!cartData || !cartData.cart_id) throw new Error("Failed to retrieve cart_id after insertion");
+
+                    cartId = cartData.cart_id;
+
+                    const variantInserts = Object.entries(selectedVariants).map(([groupId, value]) => ({
+                        cart_id: cartId,
+                        user_id: userId,
+                        cartvariant_id: value?.variant_value_id ?? value?.id ?? value,
+                        price: Number(value?.price) || 0,
+                    }));
+
+                    if (variantInserts.length > 0) {
+                        const { error: variantsError } = await supabase.from("cart_variants").insert(variantInserts);
+                        if (variantsError) {
+                            await supabase.from("cart").delete().eq("cart_id", cartId).eq("user_id", userId);
+                            throw variantsError;
+                        }
                     }
                 }
             }
 
-            setCartSuccess("Item added to cart!");
-            setQuantity(1);
-            setTimeout(() => setCartSuccess(null), 3000);
+            // Handle uploaded files attachment with fallback
+            if (uploadedFileMetas.length > 0 && cartId) {
+                try {
+                    // Update existing uploaded_files with cart_id
+                    const { error: attachError } = await supabase
+                        .from('uploaded_files')
+                        .update({ cart_id: cartId })
+                        .in('id', uploadedFileMetas.map(f => f.id));
+
+                    if (attachError) {
+                        console.error('Failed to attach uploaded files to cart:', attachError);
+                        // Fallback: try to insert new records
+                        const fallbackInserts = uploadedFileMetas.map(file => ({
+                            cart_id: cartId,
+                            user_id: userId,
+                            file_name: file.file_name,
+                            file_path: file.file_path,
+                            file_size: file.file_size,
+                            file_type: file.file_type,
+                            uploaded_at: file.uploaded_at || new Date().toISOString()
+                        }));
+
+                        const { error: fallbackError } = await supabase
+                            .from('uploaded_files')
+                            .insert(fallbackInserts);
+
+                        if (fallbackError) {
+                            console.error('Fallback attachment also failed:', fallbackError);
+                        }
+                    }
+                } catch (attachErr) {
+                    console.error('Error handling file attachments:', attachErr);
+                }
+            }
+
+            // Reset form state for new additions
+            if (!fromCart) {
+                setQuantity(1);
+                setSelectedVariants({});
+                setUploadedFileMetas([]);
+                setUploadResetKey(prev => prev + 1);
+                setShowUploadUI(true);
+            }
+
+            if (fromCart) {
+                setCartSuccess("Cart updated!");
+                setTimeout(() => {
+                    navigate('/cart');
+                }, 1000);
+            } else {
+                setCartSuccess("Item added to cart!");
+                setTimeout(() => setCartSuccess(null), 3000);
+            }
+
+            // Dispatch a window-level event so UploadDesign (if mounted) can attach any pending uploads
+            window.dispatchEvent(new CustomEvent('cart-created', { detail: { cartId } }));
+
+            // Navigate back to cart if editing
+            if (fromCart) {
+                setTimeout(() => navigate('/cart'), 1000);
+            }
+
         } catch (err) {
-            console.error("Error adding to cart - Details:", { message: err.message, code: err.code, details: err.details });
+            console.error("Error adding/updating cart - Details:", { message: err.message, code: err.code, details: err.details });
             if (err.code === "23505") {
                 setCartError("This item with the same variants is already in your cart");
             } else {
-                setCartError("Failed to add to cart: " + (err.message || "Unknown error"));
+                setCartError("Failed to add/update cart: " + (err.message || "Unknown error"));
             }
+        } finally {
+            setIsAdding(false);
         }
     };
 
@@ -851,7 +1063,15 @@ const Postcards = () => {
 
                         <div className="mb-6">
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">UPLOAD DESIGN</div>
-                            <UploadDesign productId={productId} session={session} />
+                            <UploadDesign
+                                key={uploadResetKey}
+                                productId={productId}
+                                session={session}
+                                hidePreviews={!showUploadUI}
+                                isEditMode={fromCart && !!editingCartId}
+                                cartId={fromCart ? editingCartId : null}
+                                setUploadedFileMetas={setUploadedFileMetas}
+                            />
                         </div>
 
                         <div className="mb-6">
@@ -864,9 +1084,15 @@ const Postcards = () => {
                         </div>
 
 
-                        {/* footer actions pinned at bottom */}
                         <div className="flex items-center gap-4 mt-4">
-                            <button type="button" onClick={handleAddToCart} className="bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0">{cartSuccess ? cartSuccess : 'ADD TO CART'}</button>
+                            <button
+                                type="button"
+                                onClick={handleAddToCart}
+                                disabled={isAdding}
+                                className={`bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0 ${isAdding ? 'opacity-60 pointer-events-none' : ''}`}
+                            >
+                                {cartSuccess ? cartSuccess : (isAdding ? (fromCart ? 'UPDATING...' : 'ADDING...') : (fromCart ? 'UPDATE CART' : 'ADD TO CART'))}
+                            </button>
                             {cartError && <div className="text-red-600 text-sm ml-2">{cartError}</div>}
                             <button
                                 type="button"

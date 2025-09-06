@@ -32,6 +32,14 @@ const ProductBox = () => {
     const [cartError, setCartError] = useState(null);
     const [cartSuccess, setCartSuccess] = useState(null);
 
+    // upload design state (added for UploadDesign integration)
+    const [uploadedFileMetas, setUploadedFileMetas] = useState([]);
+    const [uploadResetKey, setUploadResetKey] = useState(0);
+    const [showUploadUI, setShowUploadUI] = useState(true);
+    const [fromCart, setFromCart] = useState(!!location.state?.fromCart);
+    const [editingCartId, setEditingCartId] = useState(location.state?.cartRow?.cart_id || null);
+    const [isAdding, setIsAdding] = useState(false);
+
     const slug = location.pathname.split('/').filter(Boolean).pop();
 
     useEffect(() => {
@@ -234,6 +242,71 @@ const ProductBox = () => {
         return () => { isMounted = false; };
     }, [imageKey]);
 
+    // Cart editing: detect if coming from cart and restore state
+    useEffect(() => {
+        if (location?.state?.fromCart && location?.state?.cartId) {
+            setFromCart(true);
+            setEditingCartId(location.state.cartId);
+        }
+    }, [location?.state]);
+
+    // Cart editing: restore variants and quantity from cart data
+    useEffect(() => {
+        if (!fromCart || !editingCartId) return;
+
+        const restoreCartData = async () => {
+            try {
+                // Fetch cart data
+                const { data: cartData, error: cartError } = await supabase
+                    .from('cart')
+                    .select('quantity, total_price')
+                    .eq('cart_id', editingCartId)
+                    .single();
+
+                if (cartError) throw cartError;
+
+                // Set quantity from cart
+                if (cartData.quantity) {
+                    setQuantity(cartData.quantity);
+                }
+
+                // Fetch and set variants
+                const { data: cartVariants, error: varError } = await supabase
+                    .from('cart_variants')
+                    .select(`
+                        cartvariant_id,
+                        variant_values (
+                            id,
+                            name,
+                            price,
+                            variant_groups (
+                                id,
+                                name
+                            )
+                        )
+                    `)
+                    .eq('cart_id', editingCartId);
+
+                if (varError) throw varError;
+
+                const restoredVariants = {};
+                (cartVariants || []).forEach(cv => {
+                    if (cv.variant_values?.variant_groups?.id) {
+                        restoredVariants[cv.variant_values.variant_groups.id] = {
+                            ...cv.variant_values,
+                            variant_value_id: cv.cartvariant_id
+                        };
+                    }
+                });
+                setSelectedVariants(restoredVariants);
+            } catch (err) {
+                console.error('Error restoring cart data:', err);
+            }
+        };
+
+        restoreCartData();
+    }, [fromCart, editingCartId]);
+
     // Helpers
     const getCurrentUserId = async () => {
         if (session?.user?.id) return session.user.id;
@@ -248,15 +321,21 @@ const ProductBox = () => {
     };
 
     // Handle Add to Cart (copied/adapted from BasicTBag)
+    // Handle Add to Cart (copied/adapted from BasicTBag)
     const handleAddToCart = async () => {
+        if (isAdding) return;
+
         if (!productId) {
             setCartError("No product selected");
             return;
         }
 
+        setIsAdding(true);
+
         const userId = session?.user?.id ?? await getCurrentUserId();
         if (!userId) {
             setCartError("Please sign in to add to cart");
+            setIsAdding(false);
             navigate("/signin");
             return;
         }
@@ -265,70 +344,30 @@ const ProductBox = () => {
         setCartSuccess(null);
 
         try {
-            const { data: existingCarts, error: checkError } = await supabase
-                .from("cart")
-                .select("cart_id, quantity, total_price")
-                .eq("user_id", userId)
-                .eq("product_id", productId);
-
-            if (checkError) throw checkError;
-
             let cartId;
-            let cartMatched = false;
 
-            for (const cart of existingCarts || []) {
-                const { data: cartVariants, error: varError } = await supabase
-                    .from("cart_variants")
-                    .select("cartvariant_id, cart_id")
-                    .eq("cart_id", cart.cart_id)
+            // Handle cart editing case
+            if (fromCart && editingCartId) {
+                // Update existing cart row
+                const { error: updateError } = await supabase
+                    .from("cart")
+                    .update({ 
+                        quantity: quantity,
+                        total_price: totalPrice,
+                        base_price: Number(unitPrice) || Number(price) || 0,
+                        route: location?.pathname || `/${slug}`,
+                        slug: slug || null,
+                    })
+                    .eq("cart_id", editingCartId)
                     .eq("user_id", userId);
 
-                if (varError) throw varError;
+                if (updateError) throw updateError;
 
-                const existingVarSet = new Set((cartVariants || []).map((v) => `${v.cartvariant_id}`));
-                const selectedVarSet = new Set(Object.values(selectedVariants || {}).map((val) => `${val?.variant_value_id ?? val?.id ?? val}`));
-
-                if (existingVarSet.size === selectedVarSet.size && [...existingVarSet].every((v) => selectedVarSet.has(v))) {
-                    cartMatched = true;
-                    const newQuantity = (Number(cart.quantity) || 0) + Number(quantity || 0);
-                    const unitPrice = (Number(price) || 0) + Object.values(selectedVariants).reduce((acc, val) => acc + (Number(val?.price) || 0), 0);
-                    const newTotal = (Number(unitPrice) || 0) * newQuantity;
-                    const { error: updateError } = await supabase
-                        .from("cart")
-                        .update({ quantity: newQuantity, total_price: newTotal, base_price: Number(unitPrice) || Number(price) || 0 })
-                        .eq("cart_id", cart.cart_id)
-                        .eq("user_id", userId);
-                    if (updateError) throw updateError;
-                    cartId = cart.cart_id;
-                    break;
-                }
-            }
-
-            if (!cartMatched) {
-                const unitPrice = (Number(price) || 0) + Object.values(selectedVariants).reduce((acc, val) => acc + (Number(val?.price) || 0), 0);
-                const totalPrice = (Number(unitPrice) || 0) * Number(quantity || 0);
-
-                const { data: cartData, error: cartError } = await supabase
-                    .from("cart")
-                    .insert([
-                        {
-                            user_id: userId,
-                            product_id: productId,
-                            quantity: quantity,
-                            base_price: Number(unitPrice) || Number(price) || 0,
-                            total_price: totalPrice,
-                        },
-                    ])
-                    .select("cart_id")
-                    .single();
-
-                if (cartError) throw cartError;
-                if (!cartData || !cartData.cart_id) throw new Error("Failed to retrieve cart_id after insertion");
-
-                cartId = cartData.cart_id;
+                // Delete existing variants and insert new ones
+                await supabase.from("cart_variants").delete().eq("cart_id", editingCartId).eq("user_id", userId);
 
                 const variantInserts = Object.entries(selectedVariants).map(([groupId, value]) => ({
-                    cart_id: cartId,
+                    cart_id: editingCartId,
                     user_id: userId,
                     cartvariant_id: value?.variant_value_id ?? value?.id ?? value,
                     price: Number(value?.price) || 0,
@@ -336,16 +375,130 @@ const ProductBox = () => {
 
                 if (variantInserts.length > 0) {
                     const { error: variantsError } = await supabase.from("cart_variants").insert(variantInserts);
-                    if (variantsError) {
-                        await supabase.from("cart").delete().eq("cart_id", cartId).eq("user_id", userId);
-                        throw variantsError;
+                    if (variantsError) throw variantsError;
+                }
+
+                cartId = editingCartId;
+            } else {
+                // Original logic for adding new items
+                const { data: existingCarts, error: checkError } = await supabase
+                    .from("cart")
+                    .select("cart_id, quantity, total_price")
+                    .eq("user_id", userId)
+                    .eq("product_id", productId);
+
+                if (checkError) throw checkError;
+
+                let cartMatched = false;
+
+                for (const cart of existingCarts || []) {
+                    const { data: cartVariants, error: varError } = await supabase
+                        .from("cart_variants")
+                        .select("cartvariant_id, cart_id")
+                        .eq("cart_id", cart.cart_id)
+                        .eq("user_id", userId);
+
+                    if (varError) throw varError;
+
+                    const existingVarSet = new Set((cartVariants || []).map((v) => `${v.cartvariant_id}`));
+                    const selectedVarSet = new Set(Object.values(selectedVariants || {}).map((val) => `${val?.variant_value_id ?? val?.id ?? val}`));
+
+                    if (existingVarSet.size === selectedVarSet.size && [...existingVarSet].every((v) => selectedVarSet.has(v))) {
+                        cartMatched = true;
+                        const newQuantity = (Number(cart.quantity) || 0) + Number(quantity || 0);
+                        const newTotal = (Number(unitPrice) || 0) * newQuantity;
+                        const { error: updateError } = await supabase
+                            .from("cart")
+                            .update({ quantity: newQuantity, total_price: newTotal, base_price: Number(unitPrice) || Number(price) || 0, route: location?.pathname || `/${slug}`, slug: slug || null })
+                            .eq("cart_id", cart.cart_id)
+                            .eq("user_id", userId);
+                        if (updateError) throw updateError;
+                        cartId = cart.cart_id;
+                        break;
+                    }
+                }
+
+                if (!cartMatched) {
+                    const { data: cartData, error: cartError } = await supabase
+                        .from("cart")
+                        .insert([
+                            {
+                                user_id: userId,
+                                product_id: productId,
+                                quantity: quantity,
+                                base_price: Number(unitPrice) || Number(price) || 0,
+                                total_price: totalPrice,
+                                route: location?.pathname || `/${slug}`,
+                                slug: slug || null,
+                            },
+                        ])
+                        .select("cart_id")
+                        .single();
+
+                    if (cartError) throw cartError;
+                    if (!cartData || !cartData.cart_id) throw new Error("Failed to retrieve cart_id after insertion");
+
+                    cartId = cartData.cart_id;
+
+                    const variantInserts = Object.entries(selectedVariants).map(([groupId, value]) => ({
+                        cart_id: cartId,
+                        user_id: userId,
+                        cartvariant_id: value?.variant_value_id ?? value?.id ?? value,
+                        price: Number(value?.price) || 0,
+                    }));
+
+                    if (variantInserts.length > 0) {
+                        const { error: variantsError } = await supabase.from("cart_variants").insert(variantInserts);
+                        if (variantsError) {
+                            await supabase.from("cart").delete().eq("cart_id", cartId).eq("user_id", userId);
+                            throw variantsError;
+                        }
                     }
                 }
             }
 
-            setCartSuccess("Item added to cart!");
-            setQuantity(1);
-            setTimeout(() => setCartSuccess(null), 3000);
+            if (fromCart) {
+                setCartSuccess("Cart updated!");
+                setTimeout(() => {
+                    navigate('/cart');
+                }, 1000);
+            } else {
+                setCartSuccess("Item added to cart!");
+                setTimeout(() => setCartSuccess(null), 3000);
+            }
+
+            // Dispatch a window-level event so UploadDesign (if mounted) can attach any pending uploads
+            window.dispatchEvent(new CustomEvent('cart-created', { detail: { cartId } }));
+
+            // Fallback: if uploadedFileMetas exists in this parent, try to attach by ids (try file_id and id columns)
+            try {
+                if (uploadedFileMetas && uploadedFileMetas.length > 0) {
+                    try {
+                        const { error: attachError1 } = await supabase
+                            .from('uploaded_files')
+                            .update({ cart_id: cartId })
+                            .in('file_id', uploadedFileMetas.map(m => m.file_id).filter(Boolean));
+                        if (attachError1) console.warn('Failed to attach by file_id:', attachError1);
+                    } catch (fb) {
+                        console.warn('Fallback attach by file_id failed:', fb);
+                    }
+                    try {
+                        const { error: attachError2 } = await supabase
+                            .from('uploaded_files')
+                            .update({ cart_id: cartId })
+                            .in('id', uploadedFileMetas.map(m => m.id).filter(Boolean));
+                        if (attachError2) console.warn('Failed to attach by id:', attachError2);
+                    } catch (fb) {
+                        console.warn('Fallback attach by id failed:', fb);
+                    }
+                }
+            } catch (e) {
+                console.warn('Failed to attach uploaded_files to cart row (Product-Box):', e);
+            }
+
+            // Reset UploadDesign to clear thumbnails while keeping the upload UI visible
+            try { setUploadResetKey(k => (k || 0) + 1); } catch (e) { /* no-op if reset key missing */ }
+            try { setShowUploadUI(true); } catch (e) { /* no-op if showUploadUI missing */ }
         } catch (err) {
             console.error("Error adding to cart - Details:", { message: err.message, code: err.code, details: err.details });
             if (err.code === "23505") {
@@ -353,6 +506,8 @@ const ProductBox = () => {
             } else {
                 setCartError("Failed to add to cart: " + (err.message || "Unknown error"));
             }
+        } finally {
+            setIsAdding(false);
         }
     };
 
@@ -505,6 +660,7 @@ const ProductBox = () => {
     };
 
     const [totalPrice, setTotalPrice] = useState(0);
+    const unitPrice = (Number(price) || 0) + Object.values(selectedVariants).reduce((acc, val) => acc + (Number(val?.price) || 0), 0);
 
     useEffect(() => {
         const base = (price || 0);
@@ -693,7 +849,15 @@ const ProductBox = () => {
 
                         <div className="mb-6">
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">UPLOAD DESIGN</div>
-                            <UploadDesign productId={productId} session={session} />
+                            <UploadDesign
+                                key={uploadResetKey}
+                                productId={productId}
+                                session={session}
+                                hidePreviews={!showUploadUI}
+                                isEditMode={fromCart && !!editingCartId}
+                                cartId={fromCart ? editingCartId : null}
+                                setUploadedFileMetas={setUploadedFileMetas}
+                            />
                         </div>
 
                         <div className="mb-6">
@@ -708,7 +872,7 @@ const ProductBox = () => {
 
                         {/* footer actions pinned at bottom */}
                         <div className="flex items-center gap-4 mt-4">
-                            <button type="button" onClick={handleAddToCart} className="bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0">{cartSuccess ? cartSuccess : 'ADD TO CART'}</button>
+                            <button type="button" onClick={handleAddToCart} className="bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0">{cartSuccess ? cartSuccess : (fromCart ? 'UPDATE CART' : 'ADD TO CART')}</button>
                             {cartError && <div className="text-red-600 text-sm ml-2">{cartError}</div>}
                             <button
                                 className="bg-white p-1.5 rounded-full shadow-md"

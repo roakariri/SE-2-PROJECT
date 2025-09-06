@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 
 const MockupToolPage = () => {
     const canvasElRef = useRef(null);
@@ -8,6 +9,14 @@ const MockupToolPage = () => {
     const [textValue, setTextValue] = useState("");
     const [canvasSize, setCanvasSize] = useState({ width: 500, height: 700 });
     const [recentUploads, setRecentUploads] = useState([]);
+    const location = useLocation();
+    const [fromCart, setFromCart] = useState(!!location.state?.fromCart);
+
+    useEffect(() => {
+        if (location.state?.fromCart) {
+            setFromCart(true);
+        }
+    }, [location.state]);
 
     useEffect(() => {
         const fabric = window.fabric;
@@ -371,7 +380,7 @@ const MockupToolPage = () => {
                         </div>
 
                         <div className="flex items-center gap-4">
-                            <button className="px-4 py-2 bg-[#ef7d66] text-black font-semibold rounded">ADD TO CART</button>
+                            <button className="px-4 py-2 bg-[#ef7d66] text-black font-semibold rounded">{fromCart ? 'UPDATE CART' : 'ADD TO CART'}</button>
                         </div>
                     </div>
                 </div>

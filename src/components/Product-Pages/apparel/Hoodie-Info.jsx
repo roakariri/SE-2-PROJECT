@@ -42,6 +42,8 @@ const Hoodie = () => {
     const [cartError, setCartError] = useState(null);
     const [cartSuccess, setCartSuccess] = useState(null);
     const [isAdding, setIsAdding] = useState(false);
+    const [showUploadUI, setShowUploadUI] = useState(true);
+    const [uploadResetKey, setUploadResetKey] = useState(0);
 
     const slug = location.pathname.split('/').filter(Boolean).pop();
 
@@ -650,7 +652,7 @@ const Hoodie = () => {
                                     route: location?.pathname || `/${slug}`,
                                     slug: slug || null,
                                 },
-                    ])
+                        ])
                     .select("cart_id")
                     .single();
 
@@ -674,23 +676,47 @@ const Hoodie = () => {
                     }
                 }
 
-                // Attach uploaded files to cart row if present
+                // Dispatch a window-level event so UploadDesign (if mounted) can attach any pending uploads
+                try {
+                    window.dispatchEvent(new CustomEvent('cart-created', { detail: { cartId } }));
+                } catch (e) { /* ignore */ }
+
+                // Fallback: if uploadedFileMetas exists in this parent, try to attach by ids (try file_id and id columns)
                 try {
                     if (uploadedFileMetas && uploadedFileMetas.length > 0) {
-                        const ids = uploadedFileMetas.map(m => m.id).filter(Boolean);
+                        const ids = uploadedFileMetas.map(m => m.id ?? m.file_id).filter(Boolean);
                         if (ids.length > 0) {
-                            const { data: updData, error: updErr } = await supabase.from('uploaded_files').update({ cart_id: cartId }).in('file_id', ids);
-                            if (updErr) console.warn('Failed to link uploaded_files:', updErr);
-                            else if ((updData?.length ?? 0) === 0) console.warn('No uploaded_files rows linked for ids:', ids);
+                            try {
+                                const tryFileId = await supabase.from('uploaded_files').update({ cart_id: cartId }).in('file_id', ids);
+                                if (tryFileId.error) console.warn('Hoodie: attach by file_id failed, will try id column:', tryFileId.error);
+                                else if ((tryFileId.data?.length ?? 0) === 0) console.warn('Hoodie: attach by file_id affected no rows, will try id column');
+                            } catch (e) { console.warn('Hoodie: unexpected error attaching by file_id', e); }
+
+                            try {
+                                const tryId = await supabase.from('uploaded_files').update({ cart_id: cartId }).in('id', ids);
+                                if (tryId.error) console.warn('Hoodie: attach by id failed:', tryId.error);
+                            } catch (e) { console.warn('Hoodie: unexpected error attaching by id', e); }
                         }
                     }
+
+                    // Also attempt fallback attach by user_id+product_id where cart_id IS NULL
+                    try {
+                        const userId2 = userId;
+                        let q = supabase.from('uploaded_files').update({ cart_id: cartId }).eq('user_id', userId2).is('cart_id', null);
+                        if (productId !== null && productId !== undefined) q = q.eq('product_id', productId);
+                        const { error: fallbackErr } = await q;
+                        if (fallbackErr) console.warn('Hoodie: fallback attach failed', fallbackErr);
+                    } catch (fb) { console.warn('Hoodie: fallback attach exception', fb); }
                 } catch (e) {
-                    console.warn('Failed to attach uploaded_files to cart row:', e);
+                    console.warn('Failed to attach uploaded_files to cart row (Hoodie):', e);
                 }
             }
 
             setCartSuccess("Item added to cart!");
             setQuantity(1);
+            // Reset UploadDesign to clear thumbnails while keeping the upload UI visible
+            try { setUploadResetKey(k => (k || 0) + 1); } catch (e) { /* no-op if reset key missing */ }
+            try { setShowUploadUI(true); } catch (e) { /* no-op if showUploadUI missing */ }
             setTimeout(() => setCartSuccess(null), 3000);
         } catch (err) {
             console.error("Error adding to cart - Details:", { message: err.message, code: err.code, details: err.details });
@@ -1184,7 +1210,15 @@ const Hoodie = () => {
 
                         <div className="mb-6">
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">UPLOAD DESIGN</div>
-                            <UploadDesign productId={productId} session={session} />
+                            <UploadDesign
+                                key={uploadResetKey}
+                                productId={productId}
+                                session={session}
+                                hidePreviews={!showUploadUI}
+                                isEditMode={fromCart && !!editingCartId}
+                                cartId={fromCart ? editingCartId : null}
+                                setUploadedFileMetas={setUploadedFileMetas}
+                            />
                         </div>
 
                         <div className="mb-6">

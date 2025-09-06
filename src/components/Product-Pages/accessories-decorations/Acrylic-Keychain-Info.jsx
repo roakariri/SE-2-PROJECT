@@ -40,6 +40,9 @@ const AcrylicKeychain = () => {
     const [width, setWidth] = useState(0.6);
     const [editingCartId, setEditingCartId] = useState(null);
     const [fromCart, setFromCart] = useState(false);
+    const [uploadedFileMetas, setUploadedFileMetas] = useState([]); // DB rows
+    const [uploadResetKey, setUploadResetKey] = useState(0);
+    const [showUploadUI, setShowUploadUI] = useState(true);
 
     const slug = location.pathname.split('/').filter(Boolean).pop();
 
@@ -756,6 +759,37 @@ const AcrylicKeychain = () => {
                     }
                 }
 
+                // Dispatch a window-level event so UploadDesign (if mounted) can attach any pending uploads
+                window.dispatchEvent(new CustomEvent('cart-created', { detail: { cartId: editingCartId } }));
+
+                // Fallback: if uploadedFileMetas exists in this parent, try to attach by ids (try file_id and id columns)
+                if (uploadedFileMetas && uploadedFileMetas.length > 0) {
+                    const ids = uploadedFileMetas.map(m => m.id ?? m.file_id).filter(Boolean);
+                    if (ids.length > 0) {
+                        try {
+                            // Try file_id column first
+                            let res1 = await supabase.from('uploaded_files').update({ cart_id: editingCartId }).in('file_id', ids);
+                            if (res1.error) {
+                                console.warn('[AcrylicKeychain] attach by file_id failed, trying id column:', res1.error);
+                                // Fallback to id column
+                                const res2 = await supabase.from('uploaded_files').update({ cart_id: editingCartId }).in('id', ids);
+                                if (res2.error) console.warn('[AcrylicKeychain] attach by id fallback failed:', res2.error);
+                                else if ((res2.data?.length ?? 0) === 0) console.warn('[AcrylicKeychain] attach: no rows linked for ids (file_id/id):', ids);
+                            } else if ((res1.data?.length ?? 0) === 0) {
+                                console.warn('[AcrylicKeychain] attach: no rows linked for file_id:', ids);
+                            } else {
+                                console.debug('[AcrylicKeychain] attached uploaded files by file_id:', res1.data?.length ?? 0);
+                            }
+                        } catch (err) {
+                            console.warn('[AcrylicKeychain] Failed to link uploaded_files by ids (both columns):', err);
+                        }
+                    }
+                }
+
+                // Reset UploadDesign to clear thumbnails while keeping the upload UI visible
+                setUploadResetKey(prev => prev + 1);
+                setShowUploadUI(false);
+
                 setCartSuccess("Cart item updated!");
                 setTimeout(() => setCartSuccess(null), 3000);
                 setIsAdding(false);
@@ -879,6 +913,37 @@ const AcrylicKeychain = () => {
                     throw dimErr;
                 }
             }
+
+            // Dispatch a window-level event so UploadDesign (if mounted) can attach any pending uploads
+            window.dispatchEvent(new CustomEvent('cart-created', { detail: { cartId } }));
+
+            // Fallback: if uploadedFileMetas exists in this parent, try to attach by ids (try file_id and id columns)
+            if (uploadedFileMetas && uploadedFileMetas.length > 0) {
+                const ids = uploadedFileMetas.map(m => m.id ?? m.file_id).filter(Boolean);
+                if (ids.length > 0) {
+                    try {
+                        // Try file_id column first
+                        let res1 = await supabase.from('uploaded_files').update({ cart_id: cartId }).in('file_id', ids);
+                        if (res1.error) {
+                            console.warn('[AcrylicKeychain] attach by file_id failed, trying id column:', res1.error);
+                            // Fallback to id column
+                            const res2 = await supabase.from('uploaded_files').update({ cart_id: cartId }).in('id', ids);
+                            if (res2.error) console.warn('[AcrylicKeychain] attach by id fallback failed:', res2.error);
+                            else if ((res2.data?.length ?? 0) === 0) console.warn('[AcrylicKeychain] attach: no rows linked for ids (file_id/id):', ids);
+                        } else if ((res1.data?.length ?? 0) === 0) {
+                            console.warn('[AcrylicKeychain] attach: no rows linked for file_id:', ids);
+                        } else {
+                            console.debug('[AcrylicKeychain] attached uploaded files by file_id:', res1.data?.length ?? 0);
+                        }
+                    } catch (err) {
+                        console.warn('[AcrylicKeychain] Failed to link uploaded_files by ids (both columns):', err);
+                    }
+                }
+            }
+
+            // Reset UploadDesign to clear thumbnails while keeping the upload UI visible
+            setUploadResetKey(prev => prev + 1);
+            setShowUploadUI(false);
 
             setCartSuccess("Item added to cart!");
             setQuantity(1);
@@ -1309,7 +1374,7 @@ const AcrylicKeychain = () => {
 
                         <div className="mb-6">
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">UPLOAD DESIGN</div>
-                            <UploadDesign productId={productId} session={session} />
+                            <UploadDesign key={uploadResetKey} productId={productId} session={session} hidePreviews={!showUploadUI} isEditMode={fromCart && !!editingCartId} cartId={fromCart ? editingCartId : null} setUploadedFileMetas={setUploadedFileMetas} />
                         </div>
 
                         <div className="mb-6">

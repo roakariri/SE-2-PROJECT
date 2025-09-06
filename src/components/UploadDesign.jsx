@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabaseClient';
 
-export default function UploadDesign({ productId, session }) {
+export default function UploadDesign({ productId, session, hidePreviews = false, isEditMode = false, cartId = null }) {
     const fileInputRef = useRef(null);
     const [uploading, setUploading] = useState(false);
     const [uploadedFiles, setUploadedFiles] = useState([]);
@@ -144,8 +144,10 @@ export default function UploadDesign({ productId, session }) {
         const urls = [];
         const objectUrls = [];
         uploadedFileMetas.forEach((m, i) => {
-            if (m && m.image_url && typeof m.file_type === 'string' && m.file_type.startsWith('image/')) urls[i] = m.image_url;
-            else if (uploadedFiles[i] && uploadedFiles[i].type && uploadedFiles[i].type.startsWith('image/')) {
+            // Prefer using a stored public image_url when present; don't depend on file_type being set
+            if (m && m.image_url) {
+                urls[i] = m.image_url;
+            } else if (uploadedFiles[i] && uploadedFiles[i].type && uploadedFiles[i].type.startsWith('image/')) {
                 const o = URL.createObjectURL(uploadedFiles[i]); objectUrls.push(o); urls[i] = o;
             } else urls[i] = null;
         });
@@ -154,11 +156,19 @@ export default function UploadDesign({ productId, session }) {
                 const o = URL.createObjectURL(uploadedFiles[i]); objectUrls.push(o); urls[i] = o;
             } else urls[i] = null;
         }
-        setUploadedPreviewUrls(urls);
-        return () => { for (const o of objectUrls) if (o) URL.revokeObjectURL(o); };
+    setUploadedPreviewUrls(urls);
+    console.debug('[UploadDesign] preview urls set', { urls, uploadedFileMetasLength: uploadedFileMetas.length, uploadedFilesLength: uploadedFiles.length });
+    return () => { for (const o of objectUrls) if (o) URL.revokeObjectURL(o); };
     }, [uploadedFileMetas, uploadedFiles]);
 
     useEffect(() => {
+        // Only fetch existing uploaded_files when explicitly in edit mode (navigated from cart).
+        if (!isEditMode) {
+            // clear any previously loaded metas when not editing
+            setUploadedFileMetas([]);
+            setUploadedFilePaths([]);
+            return;
+        }
         let isMounted = true;
         const fetchUploadedFiles = async () => {
             try {
@@ -169,14 +179,16 @@ export default function UploadDesign({ productId, session }) {
                     .from('uploaded_files')
                     .select('*')
                     .eq('user_id', userId);
-                // Only filter by product_id when we have a non-null value to avoid Rest filter errors
-                if (productId !== null && productId !== undefined) q = q.eq('product_id', productId);
+                // Prefer filtering by cart_id when provided (scopes uploads to a cart row), otherwise fall back to product_id
+                if (cartId !== null && cartId !== undefined) q = q.eq('cart_id', cartId);
+                else if (productId !== null && productId !== undefined) q = q.eq('product_id', productId);
                 const { data, error } = await q.order('uploaded_at', { ascending: false }).limit(5);
 
                 if (error) {
                     // Fallback: avoid product_id filter if productId is null/undefined
                     let fbQ = supabase.from('uploaded_files').select('*').eq('user_id', userId);
-                    if (productId !== null && productId !== undefined) fbQ = fbQ.eq('product_id', productId);
+                    if (cartId !== null && cartId !== undefined) fbQ = fbQ.eq('cart_id', cartId);
+                    else if (productId !== null && productId !== undefined) fbQ = fbQ.eq('product_id', productId);
                     const fallback = await fbQ.limit(5);
                     if (fallback.error) return;
                     if (!isMounted) return;
@@ -199,7 +211,69 @@ export default function UploadDesign({ productId, session }) {
         };
         fetchUploadedFiles();
         return () => { isMounted = false; };
-    }, [session, productId]);
+    }, [session, productId, isEditMode, cartId]);
+
+    // Listen for a window-level 'cart-created' event so we can attach existing uploaded_files to the new cart.
+    useEffect(() => {
+        const handler = async (e) => {
+            const cid = e?.detail?.cartId || e?.detail?.cart_id;
+            if (!cid) return;
+            try {
+                const userId = session?.user?.id ?? await getCurrentUserId();
+                if (!userId) return;
+
+                // Prefer updating by known file ids if we have them
+                const ids = (Array.isArray(uploadedFileMetas) ? uploadedFileMetas.map(m => m.file_id ?? m.id).filter(Boolean) : []);
+                if (ids.length > 0) {
+                    try {
+                        // Try updating by file_id column first
+                        const res1 = await supabase.from('uploaded_files').update({ cart_id: cid }).in('file_id', ids);
+                        if (res1.error) {
+                            console.warn('[UploadDesign] attach by file_id failed, trying id column:', res1.error);
+                        } else if ((res1.data?.length ?? 0) === 0) {
+                            // No rows affected; try id column as fallback
+                            const res2 = await supabase.from('uploaded_files').update({ cart_id: cid }).in('id', ids);
+                            if (res2.error) console.warn('[UploadDesign] attach by id fallback failed:', res2.error);
+                            else if ((res2.data?.length ?? 0) === 0) console.warn('[UploadDesign] attach: no rows linked for ids (file_id/id):', ids);
+                        }
+                    } catch (err) {
+                        console.warn('[UploadDesign] Failed to link uploaded_files by ids (both columns):', err);
+                    }
+                } else {
+                    // Fallback: update any uploaded_files for this user and product that have null cart_id
+                    try {
+                        let q = supabase.from('uploaded_files').update({ cart_id: cid }).eq('user_id', userId).is('cart_id', null);
+                        if (productId !== null && productId !== undefined) q = q.eq('product_id', productId);
+                        const { error: fallbackErr } = await q;
+                        if (fallbackErr) console.warn('[UploadDesign] Failed to link uploaded_files by fallback match:', fallbackErr);
+                    } catch (fbErr) {
+                        console.warn('[UploadDesign] fallback attach error', fbErr);
+                    }
+                }
+
+                // Refresh local uploaded files state after attaching
+                try {
+                    const userId2 = session?.user?.id ?? await getCurrentUserId();
+                    if (!userId2) return;
+                    let q2 = supabase.from('uploaded_files').select('*').eq('user_id', userId2);
+                    if (productId !== null && productId !== undefined) q2 = q2.eq('product_id', productId);
+                    const res = await q2.order('uploaded_at', { ascending: false }).limit(5);
+                    if (!res.error && Array.isArray(res.data) && res.data.length > 0) {
+                        const normalizedData = res.data.map(r => ({ ...r, id: r.file_id ?? r.id }));
+                        setUploadedFileMetas(normalizedData);
+                        setUploadedFilePaths([]);
+                    }
+                } catch (refetchErr) {
+                    console.warn('[UploadDesign] refetch after attach failed', refetchErr);
+                }
+            } catch (err) {
+                console.warn('[UploadDesign] cart-created handler error:', err);
+            }
+        };
+
+        window.addEventListener('cart-created', handler);
+        return () => window.removeEventListener('cart-created', handler);
+    }, [uploadedFileMetas, productId, session]);
 
     return (
         <div className="flex items-center gap-4">
@@ -211,7 +285,7 @@ export default function UploadDesign({ productId, session }) {
                     <span>{uploading ? 'UPLOADING...' : 'UPLOAD FILE'}</span>
                 </button>
 
-                {uploadedPreviewUrls && uploadedPreviewUrls.length > 0 && (
+                {!hidePreviews && uploadedPreviewUrls && uploadedPreviewUrls.length > 0 && (
                     <div className="flex gap-2">
                         {uploadedPreviewUrls.map((url, i) => (
                             <div key={i} className="relative">

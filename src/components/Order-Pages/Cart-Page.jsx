@@ -202,6 +202,32 @@ const CartPage = () => {
             }));
           }
 
+          // Fetch any uploaded design files associated with this cart row (scoped by cart_id)
+          let uploadedFilesForCart = [];
+          try {
+            const { data: files, error: filesErr } = await supabase.from('uploaded_files').select('*').eq('cart_id', it.cart_id);
+            if (!filesErr && Array.isArray(files) && files.length > 0) {
+              uploadedFilesForCart = files.map(f => ({ ...f, id: f.id ?? f.file_id, file_id: f.file_id ?? f.id }));
+            } else if (filesErr) {
+              // Fallback when cart_id column doesn't exist or other errors: match by user_id and product_id
+              console.debug('Fallback uploaded_files fetch for cart', it.cart_id, filesErr?.message || filesErr);
+              const userId = session?.user?.id;
+              if (userId) {
+                try {
+                  let fbQ = supabase.from('uploaded_files').select('*').eq('user_id', userId).order('uploaded_at', { ascending: false }).limit(10);
+                  const productIdForRow = it.product_id ?? prod.id;
+                  if (productIdForRow) fbQ = fbQ.eq('product_id', productIdForRow);
+                  const { data: fb, error: fbErr } = await fbQ;
+                  if (!fbErr && Array.isArray(fb) && fb.length > 0) uploadedFilesForCart = fb.map(f => ({ ...f, id: f.id ?? f.file_id, file_id: f.file_id ?? f.id }));
+                } catch (fbEx) {
+                  console.warn('Fallback uploaded_files query failed:', fbEx);
+                }
+              }
+            }
+          } catch (fetchErr) {
+            console.warn('Could not fetch uploaded_files for cart', it.cart_id, fetchErr);
+          }
+
           const dimensions = it.cart_dimensions || [];
           const original_total_price = Number(it.total_price) || null;
           // Adjust cart quantity if it exceeds inventory quantity
@@ -220,6 +246,7 @@ const CartPage = () => {
             inventory,
             quantity: adjustedQuantity,
             total_price: adjustedTotalPrice,
+            uploaded_files: uploadedFilesForCart,
           };
         })
       );
@@ -605,6 +632,23 @@ const CartPage = () => {
                             <p className="text-sm text-gray-600 font-dm-sans">Project Name: None</p>
                             {c.dimensions && c.dimensions.length > 0 && (
                               <p className="text-sm text-gray-600 font-dm-sans">Size: {`${c.dimensions[0].length || 0} x ${c.dimensions[0].width || 0}`} inches</p>
+                            )}
+                            {Array.isArray(c.uploaded_files) && c.uploaded_files.length > 0 && (
+                              <div className="mt-2 flex items-center gap-2">
+                                {c.uploaded_files.map((f, idx) => (
+                                  <div key={f.file_id || f.id || idx} className="flex items-center gap-2 border rounded px-2 py-1 bg-white">
+                                    <div className="w-10 h-10 overflow-hidden rounded bg-gray-100 flex items-center justify-center">
+                                      {f.image_url ? (
+                                        // image_url may be a public URL
+                                        <img src={f.image_url} alt={f.file_name || 'design'} className="w-full h-full object-cover" />
+                                      ) : (
+                                        <img src="/logo-icon/image.svg" alt="file" className="w-4 h-4" />
+                                      )}
+                                    </div>
+                                    <div className="text-xs text-gray-600 truncate max-w-[140px]">{f.file_name || 'uploaded design'}</div>
+                                  </div>
+                                ))}
+                              </div>
                             )}
                             {c.variants?.length > 0 && (
                               <div className="mt-1">
