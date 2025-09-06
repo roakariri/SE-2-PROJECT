@@ -3,21 +3,16 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "../../supabaseClient";
 import { UserAuth } from "../../context/AuthContext";
 
-// Map of hex → color name (from your solution)
+// Map of hex → color name
 const colorNames = {
   "#c40233": "Red",
   "#000000": "Black",
   "#ffffff": "White",
-  "#ede8d0" : "Beige",
+  "#ede8d0": "Beige",
   "#808080": "Gray",
   "#228b22": "Green",
   "#0000ff": "Blue",
-  "#ffd700" : "Yellow",
-  "#c40233": "Red",
-  "#000000": "Black",
-  "#ffffff": "White",
-  "#228b22": "Green",
-  "#ffd700": "Gold",
+  "#ffd700": "Yellow",
   "#c0c0c0": "Silver",
   "#ffc0cb": "Pink",
   "#4169e1": "Blue",
@@ -57,7 +52,8 @@ const CartPage = () => {
         return;
       }
 
-      const { data, error } = await supabase
+      // Fetch cart data
+      const { data: cartData, error: cartError } = await supabase
         .from("cart")
         .select(`
           cart_id,
@@ -77,6 +73,7 @@ const CartPage = () => {
             cart_variant_id,
             price,
             product_variant_values (
+              product_variant_value_id,
               price,
               variant_values (
                 value_name,
@@ -97,22 +94,21 @@ const CartPage = () => {
         .eq("user_id", userId)
         .order("cart_id", { ascending: true });
 
-      if (error) {
-        console.error("Error fetching cart:", error);
+      if (cartError) {
+        console.error("Error fetching cart:", cartError);
         setCarts([]);
         setLoading(false);
         return;
       }
 
-      console.log("Raw cart data from Supabase:", JSON.stringify(data, null, 2)); // Debug: Raw data
+      console.log("Raw cart data from Supabase:", JSON.stringify(cartData, null, 2));
 
       const formatted = await Promise.all(
-        data.map(async (it) => {
+        cartData.map(async (it) => {
           const prod = it.products || {};
           let img = prod.image_url || prod.image || null;
           if (img && typeof img === "string" && !img.startsWith("http")) {
             const key = img.startsWith("/") ? img.slice(1) : img;
-            // Copied bucket resolution logic from Favorites-Page.jsx
             const buckets = [
               'apparel-images',
               'accessories-images',
@@ -123,27 +119,21 @@ const CartPage = () => {
               '3d-prints-images',
             ];
 
-            // Try to find a bucket where the image actually exists by performing a HEAD request.
             let foundUrl = '/apparel-images/caps.png';
             for (const bucket of buckets) {
               try {
                 const { data } = supabase.storage.from(bucket).getPublicUrl(key);
                 if (data && data.publicUrl && !data.publicUrl.endsWith('/')) {
-                  try {
-                    const res = await fetch(data.publicUrl, { method: 'HEAD' });
-                    if (res.ok) {
-                      foundUrl = data.publicUrl;
-                      break;
-                    }
-                  } catch (e) {
-                    // ignore fetch errors and continue searching
+                  const res = await fetch(data.publicUrl, { method: 'HEAD' });
+                  if (res.ok) {
+                    foundUrl = data.publicUrl;
+                    break;
                   }
                 }
               } catch (e) {
-                // ignore storage errors and continue
+                // ignore errors and continue
               }
             }
-
             prod.image_url = foundUrl;
           }
 
@@ -151,9 +141,7 @@ const CartPage = () => {
             const pvv = cv.product_variant_values;
             if (!pvv) return [];
 
-            // Normalize into array (from your solution)
             const values = Array.isArray(pvv) ? pvv : [pvv];
-
             return values.map((val) => {
               const valueName = val.variant_values?.value_name;
               const groupName = val.variant_values?.variant_groups?.name;
@@ -167,24 +155,72 @@ const CartPage = () => {
                   valueName,
                   normalizedValue,
                   displayValue,
-                }); // Debug: Color mapping
+                });
               }
 
               return {
                 group: groupName || "Unknown",
                 value: displayValue,
                 price: cv.price ?? val.price ?? 0,
+                product_variant_value_id: val.product_variant_value_id,
               };
             });
           });
 
-          console.log(`Processed variants for cart_id ${it.cart_id}:`, JSON.stringify(variants, null, 2)); // Debug: Processed variants
-          // Attach any cart_dimensions rows to the item as `dimensions` for easier consumption in the UI
+          console.log(`Processed variants for cart_id ${it.cart_id}:`, JSON.stringify(variants, null, 2));
+
+          // Fetch inventory data using the get_cart_inventory RPC
+          let inventory = { quantity: 0, low_stock_limit: 0, combination_id: null };
+          try {
+            const { data: inventoryData, error: inventoryError } = await supabase
+              .rpc('get_cart_inventory', { p_cart_id: it.cart_id });
+
+            if (inventoryError) {
+              console.warn(`Error fetching inventory for cart ${it.cart_id}:`, inventoryError);
+              setInputErrors((p) => ({
+                ...p,
+                [it.cart_id]: "Unable to fetch stock information. Item may be unavailable.",
+              }));
+            } else if (inventoryData && inventoryData.length > 0) {
+              inventory = {
+                quantity: Number(inventoryData[0].out_quantity) || 0,
+                low_stock_limit: Number(inventoryData[0].out_low_stock_limit) || 0,
+                combination_id: inventoryData[0].out_combination_id,
+              };
+            } else {
+              console.warn(`No inventory data found for cart ${it.cart_id}`);
+              setInputErrors((p) => ({
+                ...p,
+                [it.cart_id]: "Item out of stock or unavailable.",
+              }));
+            }
+          } catch (err) {
+            console.warn(`Exception fetching inventory for cart ${it.cart_id}:`, err);
+            setInputErrors((p) => ({
+              ...p,
+              [it.cart_id]: "Unable to fetch stock information. Item may be unavailable.",
+            }));
+          }
+
           const dimensions = it.cart_dimensions || [];
-          // preserve the original total price as loaded from the server so
-          // manual edits that set quantity to 1 can restore the original total
           const original_total_price = Number(it.total_price) || null;
-          return { ...it, product: prod, variants, dimensions, original_total_price };
+          // Adjust cart quantity if it exceeds inventory quantity
+          const adjustedQuantity = Math.min(Number(it.quantity) || 1, inventory.quantity);
+          const unitPrice = Number(it.base_price) || (Number(it.total_price) || 0) / (Number(it.quantity) || 1);
+          const adjustedTotalPrice = adjustedQuantity === 1 
+            ? (Number(it.base_price) || (original_total_price != null ? original_total_price : unitPrice)) 
+            : unitPrice * adjustedQuantity;
+
+          return { 
+            ...it, 
+            product: prod, 
+            variants, 
+            dimensions, 
+            original_total_price,
+            inventory,
+            quantity: adjustedQuantity,
+            total_price: adjustedTotalPrice,
+          };
         })
       );
 
@@ -246,17 +282,46 @@ const CartPage = () => {
 
     const prev = carts.find((x) => x.cart_id === id);
     const currentQty = Number(prev?.quantity) || 1;
-    const newQty = Math.min(100, Math.max(1, currentQty + delta));
-    const prevQty = Number(prev?.quantity) || 1;
-    // Prefer base_price (unit price) first, fallback to total_price/quantity when base_price is missing or invalid
-    let unitPrice = Number(prev?.base_price);
-    if (!unitPrice || isNaN(unitPrice)) unitPrice = (Number(prev?.total_price) || 0) / (prevQty || 1);
-  const newTotal = (newQty === 1) ? (Number(prev?.base_price) || (prev?.original_total_price != null ? Number(prev.original_total_price) : unitPrice * newQty)) : unitPrice * newQty;
+    const maxQty = Number(prev?.inventory?.quantity) || 0;
 
-  setCarts((p) => p.map((x) => (x.cart_id === id ? { ...x, quantity: newQty, total_price: newTotal } : x)));
+    if (maxQty === 0) {
+      setInputErrors((p) => ({
+        ...p,
+        [id]: "Item is out of stock.",
+      }));
+      setActionLoadingIds((p) => {
+        const copy = { ...p };
+        delete copy[id];
+        return copy;
+      });
+      return;
+    }
+
+    const newQty = Math.min(maxQty, Math.max(1, currentQty + delta));
+
+    if (newQty === currentQty && delta > 0) {
+      setInputErrors((p) => ({
+        ...p,
+        [id]: `Only ${maxQty} items available in stock.`,
+      }));
+      setActionLoadingIds((p) => {
+        const copy = { ...p };
+        delete copy[id];
+        return copy;
+      });
+      return;
+    }
+
+    let unitPrice = Number(prev?.base_price);
+    if (!unitPrice || isNaN(unitPrice)) unitPrice = (Number(prev?.total_price) || 0) / (currentQty || 1);
+    const newTotal = (newQty === 1) 
+      ? (Number(prev?.base_price) || (prev?.original_total_price != null ? Number(prev.original_total_price) : unitPrice * newQty)) 
+      : unitPrice * newQty;
+
+    setCarts((p) => p.map((x) => (x.cart_id === id ? { ...x, quantity: newQty, total_price: newTotal } : x)));
 
     try {
-  const updatePayload = { quantity: newQty, total_price: newTotal };
+      const updatePayload = { quantity: newQty, total_price: newTotal };
       const { error } = await supabase
         .from("cart")
         .update(updatePayload)
@@ -265,6 +330,11 @@ const CartPage = () => {
         setCarts((p) => p.map((x) => (x.cart_id === id ? { ...x, quantity: prev?.quantity, total_price: prev?.total_price } : x)));
         throw error;
       }
+      setInputErrors((p) => {
+        const copy = { ...p };
+        delete copy[id];
+        return copy;
+      });
     } catch (err) {
       console.error("Failed updating quantity:", err);
     } finally {
@@ -279,30 +349,55 @@ const CartPage = () => {
   const updateQuantityAbsolute = async (cartId, rawValue) => {
     const prev = carts.find((x) => x.cart_id === cartId);
     const prevQty = Number(prev?.quantity) || 1;
-  const raw = Math.floor(Number(rawValue) || 1);
-  const parsed = raw > 100 ? 1 : Math.min(100, Math.max(1, raw));
+    const maxQty = Number(prev?.inventory?.quantity) || 0;
+    const raw = Math.floor(Number(rawValue) || 1);
+    const parsed = Math.min(maxQty, Math.max(1, raw));
+
+    if (maxQty === 0) {
+      setInputErrors((p) => ({
+        ...p,
+        [cartId]: "Item is out of stock.",
+      }));
+      setCarts((p) => p.map((x) => (x.cart_id === cartId ? { ...x, quantity: prevQty, total_price: prev?.total_price } : x)));
+      return;
+    }
+
+    if (raw > maxQty) {
+      setInputErrors((p) => ({
+        ...p,
+        [cartId]: `Only ${maxQty} items available in stock.`,
+      }));
+      setCarts((p) => p.map((x) => (x.cart_id === cartId ? { ...x, quantity: prevQty, total_price: prev?.total_price } : x)));
+      return;
+    }
+
     if (parsed === prevQty) {
-    let unitPrice = Number(prev?.base_price);
-    if (!unitPrice || isNaN(unitPrice)) unitPrice = (Number(prev?.total_price) || 0) / (prevQty || 1);
-  const normalizedTotal = (parsed === 1)
-    ? (Number(prev?.base_price) || (prev?.original_total_price != null ? Number(prev.original_total_price) : unitPrice * parsed))
-    : unitPrice * parsed;
-  setCarts((p) => p.map((x) => (x.cart_id === cartId ? { ...x, quantity: parsed, total_price: normalizedTotal } : x)));
+      let unitPrice = Number(prev?.base_price);
+      if (!unitPrice || isNaN(unitPrice)) unitPrice = (Number(prev?.total_price) || 0) / (prevQty || 1);
+      const normalizedTotal = (parsed === 1)
+        ? (Number(prev?.base_price) || (prev?.original_total_price != null ? Number(prev.original_total_price) : unitPrice * parsed))
+        : unitPrice * parsed;
+      setCarts((p) => p.map((x) => (x.cart_id === cartId ? { ...x, quantity: parsed, total_price: normalizedTotal } : x)));
+      setInputErrors((p) => {
+        const copy = { ...p };
+        delete copy[cartId];
+        return copy;
+      });
       return;
     }
 
     setActionLoadingIds((p) => ({ ...p, [cartId]: true }));
 
-  let unitPrice = Number(prev?.base_price);
-  if (!unitPrice || isNaN(unitPrice)) unitPrice = (Number(prev?.total_price) || 0) / (prevQty || 1);
-  const newTotal = (parsed === 1)
-    ? (Number(prev?.base_price) || (prev?.original_total_price != null ? Number(prev.original_total_price) : unitPrice * parsed))
-    : unitPrice * parsed;
+    let unitPrice = Number(prev?.base_price);
+    if (!unitPrice || isNaN(unitPrice)) unitPrice = (Number(prev?.total_price) || 0) / (prevQty || 1);
+    const newTotal = (parsed === 1)
+      ? (Number(prev?.base_price) || (prev?.original_total_price != null ? Number(prev.original_total_price) : unitPrice * parsed))
+      : unitPrice * parsed;
 
-  setCarts((p) => p.map((x) => (x.cart_id === cartId ? { ...x, quantity: parsed, total_price: newTotal } : x)));
+    setCarts((p) => p.map((x) => (x.cart_id === cartId ? { ...x, quantity: parsed, total_price: newTotal } : x)));
 
     try {
-  const updatePayload = { quantity: parsed, total_price: newTotal };
+      const updatePayload = { quantity: parsed, total_price: newTotal };
       const { error } = await supabase
         .from("cart")
         .update(updatePayload)
@@ -330,13 +425,10 @@ const CartPage = () => {
   const deleteCart = async (id) => {
     setActionLoadingIds((p) => ({ ...p, [id]: true }));
     try {
-      // Attempt to remove any uploaded files associated with this cart row (if uploaded_files.cart_id exists)
       try {
-        // Try to fetch by cart_id first
         const { data: files, error: fetchFilesErr } = await supabase.from('uploaded_files').select('*').eq('cart_id', id);
         let resolvedFiles = files;
         if (fetchFilesErr) {
-          // If the column doesn't exist (42703), fall back to querying by user_id and product_id
           if (String(fetchFilesErr.message || '').toLowerCase().includes('does not exist') || String(fetchFilesErr.code) === '42703') {
             console.debug('uploaded_files.cart_id column missing, falling back to user_id/product_id lookup');
             const cartRow = carts.find(x => x.cart_id === id);
@@ -348,9 +440,6 @@ const CartPage = () => {
               const { data: fb, error: fbErr } = await fallbackQuery;
               if (fbErr) console.warn('Fallback uploaded_files query failed:', fbErr);
               resolvedFiles = fb || [];
-            } else {
-              console.warn('Cannot fallback to uploaded_files by user/product because user or cart row is missing');
-              resolvedFiles = [];
             }
           } else {
             console.warn('Failed fetching uploaded_files for cart:', fetchFilesErr);
@@ -359,12 +448,10 @@ const CartPage = () => {
         }
 
         if (Array.isArray(resolvedFiles) && resolvedFiles.length > 0) {
-          // Normalize records to have both id and file_id keys for downstream consistency
           const normFiles = resolvedFiles.map(f => ({ ...f, id: f.id ?? f.file_id, file_id: f.file_id ?? f.id }));
           console.debug('Found uploaded_files for cart, attempting removal:', normFiles.map(f => ({ file_id: f.file_id, file_name: f.file_name, image_url: f.image_url })));
           const ids = normFiles.map(f => f.file_id).filter(Boolean);
 
-          // Attempt to delete storage objects first (best-effort)
           for (const f of normFiles) {
             try {
               if (f.image_url && typeof f.image_url === 'string') {
@@ -375,10 +462,6 @@ const CartPage = () => {
                   const bucketIndex = segments.indexOf('product-files');
                   if (bucketIndex !== -1 && segments.length > bucketIndex + 1) {
                     path = segments.slice(bucketIndex + 1).join('/');
-                  } else {
-                    const marker = '/product-files/';
-                    const idx = f.image_url.indexOf(marker);
-                    if (idx !== -1) path = f.image_url.slice(idx + marker.length);
                   }
                 } catch (e) {
                   const marker = '/product-files/';
@@ -387,15 +470,9 @@ const CartPage = () => {
                 }
 
                 if (path) {
-                  try {
-                    const { error: removeErr } = await supabase.storage.from('product-files').remove([path]);
-                    if (removeErr) console.warn('Failed to remove storage object for uploaded file', { path, removeErr });
-                    else console.debug('Removed storage object for uploaded file', { path });
-                  } catch (e) {
-                    console.warn('Exception while removing storage object for uploaded file', e);
-                  }
-                } else {
-                  console.debug('Could not determine storage path for uploaded file, skipping storage deletion', { id: f.id, image_url: f.image_url });
+                  const { error: removeErr } = await supabase.storage.from('product-files').remove([path]);
+                  if (removeErr) console.warn('Failed to remove storage object for uploaded file', { path, removeErr });
+                  else console.debug('Removed storage object for uploaded file', { path });
                 }
               }
             } catch (e) {
@@ -403,7 +480,6 @@ const CartPage = () => {
             }
           }
 
-          // Delete DB rows in a single batch call. Prefer to scope deletion to the current user.
           if (ids.length > 0) {
             try {
               const userId = session?.user?.id;
@@ -440,7 +516,6 @@ const CartPage = () => {
   };
 
   const editCart = (cart) => {
-    // Prefer route/slug stored on the cart row, then product object, then fallback to product id path
     const routeFromRow = cart.route || cart.slug;
     const prodRoute = cart.product?.route || cart.product?.slug;
     const route = routeFromRow || prodRoute;
@@ -450,8 +525,6 @@ const CartPage = () => {
     } else {
       path = `/product/${cart.product_id}`;
     }
-
-    // Pass the cart row so the product page can prefill selections and update the existing cart item
     navigate(path, { state: { fromCart: true, cartRow: cart } });
   };
 
@@ -512,7 +585,7 @@ const CartPage = () => {
                     console.log(`Cart ${c.cart_id} color variant selected for UI:`, {
                       colorVariant: colorVariant || "None",
                       displayValue: colorVariant ? colorVariant.value : "—",
-                    }); // Debug: UI color selection
+                    });
                     return (
                       <div key={c.cart_id} className="grid grid-cols-12 gap-4 items-center py-6">
                         <div className="col-span-6 flex items-start gap-4">
@@ -533,20 +606,19 @@ const CartPage = () => {
                             {c.dimensions && c.dimensions.length > 0 && (
                               <p className="text-sm text-gray-600 font-dm-sans">Size: {`${c.dimensions[0].length || 0} x ${c.dimensions[0].width || 0}`} inches</p>
                             )}
-                            <p className="text-sm text-gray-600 font-dm-sans">
-                             
-                            </p>
                             {c.variants?.length > 0 && (
                               <div className="mt-1">
-                                {c.variants
-                              
-                                  .map((v, i) => (
-                                    <p key={i} className="text-sm text-gray-600 font-dm-sans">
-                                      {v.group}: {v.value}
-                                      
-                                    </p>
-                                  ))}
+                                {c.variants.map((v, i) => (
+                                  <p key={i} className="text-sm text-gray-600 font-dm-sans">
+                                    {v.group}: {v.value}
+                                  </p>
+                                ))}
                               </div>
+                            )}
+                            {c.inventory?.quantity <= c.inventory?.low_stock_limit && c.inventory?.quantity > 0 && (
+                              <p className="text-sm text-red-600 font-dm-sans mt-1">
+                                Low stock: Only {c.inventory.quantity} left
+                              </p>
                             )}
                             {inputErrors[c.cart_id] && (
                               <div className="mt-2">
@@ -555,22 +627,17 @@ const CartPage = () => {
                             )}
                           </div>
                         </div>
-                        
 
-                        {/*base price*/}
                         <div className="col-span-2 text-center">
                           <p className="font-semibold font-dm-sans text-gray-500">₱{(Number(c.base_price) || 0).toFixed(2)}</p>
                         </div>
-
-
-                        {/*quantity */}
 
                         <div className="col-span-2 text-center">
                           <div className="inline-flex items-center border rounded">
                             <button
                               className="px-3 py-1 bg-white text-black border disabled:opacity-50"
                               onClick={() => updateQuantity(c, -1)}
-                              disabled={actionLoadingIds[c.cart_id]}
+                              disabled={actionLoadingIds[c.cart_id] || (c.inventory?.quantity || 0) === 0}
                             >
                               -
                             </button>
@@ -578,12 +645,11 @@ const CartPage = () => {
                               <input
                                 type="number"
                                 min={1}
-                                max={100}
+                                max={c.inventory?.quantity || 0}
                                 value={c.quantity}
                                 className="w-16 text-center px-2 py-1 outline-none"
                                 onChange={(e) => {
                                   const v = e.target.value;
-                                  // Track whether we need to persist a forced reset to 1
                                   let shouldPersistResetToOne = false;
                                   setCarts((prev) =>
                                     prev.map((x) => {
@@ -591,21 +657,19 @@ const CartPage = () => {
                                       const prevQty = Number(x.quantity) || 1;
                                       let unitPrice = (Number(x.total_price) || 0) / (prevQty || 1);
                                       if (!unitPrice || isNaN(unitPrice)) unitPrice = Number(x.base_price) || 0;
+                                      const maxQty = Number(x.inventory?.quantity) || 0;
                                       const parsed = Number(v);
                                       if (!isNaN(parsed)) {
-                                        if (parsed > 100) {
-                                          // Immediately reset to quantity=1 when user types >100
+                                        if (parsed > maxQty || maxQty === 0) {
                                           const restoredTotal = (Number(x.base_price) || (x.original_total_price != null ? Number(x.original_total_price) : 0));
-                                          setInputErrors((p) => {
-                                            const copy = { ...p };
-                                            delete copy[c.cart_id];
-                                            return copy;
-                                          });
+                                          setInputErrors((p) => ({
+                                            ...p,
+                                            [c.cart_id]: maxQty === 0 ? "Item is out of stock." : `Only ${maxQty} items available in stock.`,
+                                          }));
                                           shouldPersistResetToOne = true;
                                           return { ...x, quantity: 1, total_price: restoredTotal };
                                         }
                                         const bounded = Math.max(1, Math.floor(parsed));
-                                        // when quantity is 1 prefer base_price, then original_total_price as fallback
                                         if (bounded === 1) {
                                           const restored = Number(x.base_price) || (x.original_total_price != null ? Number(x.original_total_price) : unitPrice);
                                           setInputErrors((p) => {
@@ -627,7 +691,6 @@ const CartPage = () => {
                                     })
                                   );
                                   if (shouldPersistResetToOne) {
-                                    // Persist the forced reset to 1 to the database
                                     updateQuantityAbsolute(c.cart_id, '1');
                                   }
                                 }}
@@ -644,23 +707,21 @@ const CartPage = () => {
                                     e.currentTarget.blur();
                                   }
                                 }}
-                                disabled={actionLoadingIds[c.cart_id]}
+                                disabled={actionLoadingIds[c.cart_id] || (c.inventory?.quantity || 0) === 0}
                               />
                             </div>
                             <button
                               className="px-3 py-1 bg-white text-black border disabled:opacity-50"
                               onClick={() => updateQuantity(c, +1)}
-                              disabled={actionLoadingIds[c.cart_id]}
+                              disabled={actionLoadingIds[c.cart_id] || (c.inventory?.quantity || 0) === 0}
                             >
                               +
                             </button>
                           </div>
                         </div>
-                        
 
-                        {/*total price*/}
-                        <div className="col-span-2 text-right font dm-sans text-black font-semibold">
-                          {inputErrors[c.cart_id] ? "" : `₱${(Number(c.total_price) || 0).toFixed(2)}`}
+                        <div className="col-span-2 text-right font-dm-sans text-black font-semibold">
+                          ₱{(Number(c.total_price) || 0).toFixed(2)}
                         </div>
 
                         <div className="col-span-12 flex justify-end gap-3 mt-2">
@@ -717,4 +778,4 @@ const CartPage = () => {
   );
 };
 
-export default CartPage; 
+export default CartPage;

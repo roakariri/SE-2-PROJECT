@@ -50,7 +50,7 @@ const LandingPage = () => {
                     href="/signin"
                     onClick={e => {
                         e.preventDefault();
-                        navigate("/signin");
+                        navigate("/accessories-decorations/mug");
                     }}
                     className="underline text-black not-italic phone:text-base tablet:text-lg laptop:text-lg hover:text-black"
                 >
@@ -69,7 +69,7 @@ const LandingPage = () => {
                     href="/signin"
                     onClick={e => {
                         e.preventDefault();
-                        navigate("/signin");
+                        navigate("/apparel/cap");
                     }}
                     className="underline text-black not-italic phone:text-base tablet:text-lg laptop:text-lg hover:text-black"
                 >

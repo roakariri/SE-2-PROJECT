@@ -31,6 +31,7 @@ const ToteBag = () => {
     const [quantity, setQuantity] = useState(1);
     const [variantGroups, setVariantGroups] = useState([]);
     const [selectedVariants, setSelectedVariants] = useState({});
+    const [stockInfo, setStockInfo] = useState(null);
     const [fromCart, setFromCart] = useState(false);
     const [editingCartId, setEditingCartId] = useState(null);
     const [printingRow, setPrintingRow] = useState(null);
@@ -253,6 +254,50 @@ const ToteBag = () => {
             return updated;
         });
     }, [variantGroups]);
+
+    // Fetch stock info based on selected variants (same logic as in Cap-Info)
+    useEffect(() => {
+        const fetchStockInfo = async () => {
+            if (!productId || !variantGroups.length) {
+                setStockInfo(null);
+                return;
+            }
+
+            const variantIds = Object.values(selectedVariants).map(v => v.id).filter(Boolean);
+            if (variantIds.length !== variantGroups.length) {
+                setStockInfo(null);
+                return;
+            }
+
+            const sortedVariantIds = [...variantIds].sort((a, b) => a - b);
+
+            const { data: combinations, error: combError } = await supabase
+                .from('product_variant_combinations')
+                .select('combination_id, variants')
+                .eq('product_id', productId);
+
+            if (combError) { setStockInfo(null); return; }
+
+            const match = (combinations || []).find(row => {
+                if (!row.variants || row.variants.length !== sortedVariantIds.length) return false;
+                const a = [...row.variants].sort((x, y) => x - y);
+                return a.every((v, i) => v === sortedVariantIds[i]);
+            });
+
+            if (!match) { setStockInfo(null); return; }
+
+            const { data: inventory, error: invError } = await supabase
+                .from('inventory')
+                .select('quantity, low_stock_limit')
+                .eq('combination_id', match.combination_id)
+                .eq('status', 'in_stock')
+                .single();
+
+            if (invError || !inventory) { setStockInfo(null); return; }
+            setStockInfo(inventory);
+        };
+        fetchStockInfo();
+    }, [productId, selectedVariants, variantGroups]);
 
     // Resolve imageKey to a public URL (robust: accepts full urls, leading slashes, and tries common buckets)
     useEffect(() => {
@@ -883,10 +928,24 @@ const ToteBag = () => {
 
                         <div className="flex items-center gap-3 mb-4" aria-hidden />
 
-                        <div className="text-3xl text-[#EF7D66] font-bold mb-4">
+                                <div className="text-3xl text-[#EF7D66] font-bold mb-4">
                             {loading ? "" : `₱${totalPrice.toFixed(2)}`}
                             <p className="italic text-[12px]">Shipping calculated at checkout.</p>
                         </div>
+                        <div className="mt-2 text-sm">
+                            {variantGroups.length === 0 || Object.keys(selectedVariants).length !== variantGroups.length ? (
+                                <span className="text-gray-500">Select all variants to see stock.</span>
+                            ) : stockInfo === null ? (
+                                <span className="text font-semibold">Checking stocks.</span>
+                            ) : stockInfo.quantity > 0 ? (
+                                <span className="text-green-700 font-semibold">Stock: {stockInfo.quantity}</span>
+                            ) : (
+                                <span className="text-red-600 font-semibold">Out of stock</span>
+                            )}
+                        </div>
+                        {stockInfo && stockInfo.low_stock_limit && stockInfo.quantity > 0 && stockInfo.quantity <= stockInfo.low_stock_limit && (
+                            <div className="text-xs text-yellow-600 mt-1">Hurry! Only {stockInfo.quantity} left in stock.</div>
+                        )}
                         <hr className="mb-6" />
 
                         <div className="mb-6">
@@ -1032,10 +1091,12 @@ const ToteBag = () => {
                                 <input
                                     type="number"
                                     min={1}
+                                    max={stockInfo?.quantity || undefined}
                                     value={quantity}
                                     onChange={(e) => {
                                         const v = Number(e.target.value);
-                                        setQuantity(isNaN(v) || v < 1 ? 1 : v);
+                                        const maxStock = stockInfo?.quantity || Infinity;
+                                        setQuantity(isNaN(v) || v < 1 ? 1 : Math.min(v, maxStock));
                                     }}
                                     onKeyDown={(e) => {
                                         if (e.key === 'Enter') e.currentTarget.blur();
@@ -1043,7 +1104,7 @@ const ToteBag = () => {
                                     className="w-20 text-center px-2 text-black outline-none"
                                     aria-label="Quantity input"
                                 />
-                                <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={incrementQuantity} aria-label="Increase quantity">+</button>
+                                <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={incrementQuantity} aria-label="Increase quantity" disabled={quantity >= (stockInfo?.quantity || Infinity)}>+</button>
                             </div>
                         </div>
 

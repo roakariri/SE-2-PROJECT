@@ -1190,15 +1190,40 @@ const Cap= () => {
                                     {techniqueGroup.values.map(val => {
                                         const isSelected = selectedVariants[techniqueGroup.id]?.id === val.id;
                                         if (techniqueGroup.input_type === 'color') {
-                                            // keep color swatches small but centered within the grid cell
+                                            // color swatches should match the same square shape and checked UI as the main COLOR row
+                                            const isHexColorTech = typeof val.value === 'string' && val.value.startsWith('#') && val.value.length === 7;
+                                            const bgTech = isHexColorTech ? val.value : '#000000';
+
+                                            const getLuminanceTech = (hex) => {
+                                                try {
+                                                    const r = parseInt(hex.slice(1,3), 16) / 255;
+                                                    const g = parseInt(hex.slice(3,5), 16) / 255;
+                                                    const b = parseInt(hex.slice(5,7), 16) / 255;
+                                                    const srgb = [r, g, b].map((c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)));
+                                                    return 0.2126 * srgb[0] + 0.7152 * srgb[1] + 0.0722 * srgb[2];
+                                                } catch (e) {
+                                                    return 0;
+                                                }
+                                            };
+
+                                            const lumTech = isHexColorTech ? getLuminanceTech(bgTech) : 0;
+
                                             return (
-                                                <div key={val.id} className="flex items-center justify-center" onClick={() => selectVariant(techniqueGroup.id, val)}>
-                                                    <div
-                                                        className={`w-8 h-8 rounded-full cursor-pointer ${isSelected ? 'ring-2 ring-blue-500' : 'ring-1 ring-gray-300'}`}
-                                                        style={{ backgroundColor: val.value }}
-                                                        title={`${val.name} ${val.price > 0 ? `(+₱${val.price.toFixed(2)})` : ''}`}
-                                                    />
-                                                </div>
+                                                <button key={val.id} type="button" onClick={() => selectVariant(techniqueGroup.id, val)}
+                                                    title={`${val.name} ${val.price > 0 ? `(+₱${val.price.toFixed(2)})` : ''}`}
+                                                    className={`relative w-8 h-8 rounded-none cursor-pointer flex items-center justify-center ${isSelected ? 'ring-2 ring-blue-500' : 'ring-1 ring-gray-300'}`}
+                                                    style={{ backgroundColor: bgTech }}
+                                                    aria-pressed={isSelected}
+                                                >
+                                                    {isSelected && (
+                                                        <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                                            <span className="w-5 h-5 rounded-none" style={{ backgroundColor: lumTech > 0.6 ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.95)' }} />
+                                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="w-3 h-3 absolute" aria-hidden>
+                                                                <path d="M20 6L9 17l-5-5" fill="none" stroke={lumTech > 0.6 ? '#fff' : '#111'} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                                                            </svg>
+                                                        </span>
+                                                    )}
+                                                </button>
                                             );
                                         } else {
                                             return (
@@ -1224,15 +1249,50 @@ const Cap= () => {
                                 <div className="flex items-center gap-3">
                                     {colorGroup.values.map(val => {
                                         const isSelected = selectedVariants[colorGroup.id]?.id === val.id;
-                                        const isHexColor = val.value.startsWith('#') && val.value.length === 7;
+                                        const isHexColor = typeof val.value === 'string' && val.value.startsWith('#') && val.value.length === 7;
+                                        const bg = isHexColor ? val.value : '#000000';
+
+                                        // compute simple relative luminance to decide check color for contrast
+                                        const getLuminance = (hex) => {
+                                            try {
+                                                const r = parseInt(hex.slice(1,3), 16) / 255;
+                                                const g = parseInt(hex.slice(3,5), 16) / 255;
+                                                const b = parseInt(hex.slice(5,7), 16) / 255;
+                                                const srgb = [r, g, b].map((c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)));
+                                                return 0.2126 * srgb[0] + 0.7152 * srgb[1] + 0.0722 * srgb[2];
+                                            } catch (e) {
+                                                return 0;
+                                            }
+                                        };
+
+                                        const lum = isHexColor ? getLuminance(bg) : 0;
+                                        const checkColor = lum > 0.6 ? '#111111' : '#ffffff';
+
                                         return (
-                                            <div
+                                            <button
                                                 key={val.id}
-                                                className={`w-8 h-8 rounded cursor-pointer ${isSelected ? 'ring-2 ring-blue-500' : 'ring-1 ring-gray-300'}`}
-                                                style={{ backgroundColor: isHexColor ? val.value : '#000000' }}
+                                                type="button"
                                                 onClick={() => selectVariant(colorGroup.id, val)}
                                                 title={`${val.name} ${val.price > 0 ? `(+₱${val.price.toFixed(2)})` : ''}`}
-                                            />
+                                                className={`relative w-10 h-10 rounded-none cursor-pointer flex items-center justify-center focus:outline-none ${isSelected ? 'ring-2 ring-gray-300' : 'ring-1 ring-gray-300'}`}
+                                                style={{ backgroundColor: bg }}
+                                                aria-pressed={isSelected}
+                                            >
+                                                {isSelected && (
+                                                    <span className="absolute inset-0 flex items-center justify-center pointer-events-none ">
+                                                        {/* small contrasting badge behind the check for readability */}
+                                                        <span
+                                                            className="w-5 h-5 rounded-none"
+                                                           
+                                                        />
+                                                        <img
+                                                            src={lum > 0.6 ? '/logo-icon/black-check.svg' : '/logo-icon/white-check.svg'}
+                                                            alt="selected"
+                                                            className="w-5 h-5 absolute "
+                                                        />
+                                                    </span>
+                                                )}
+                                            </button>
                                         );
                                     })}
                                 </div>

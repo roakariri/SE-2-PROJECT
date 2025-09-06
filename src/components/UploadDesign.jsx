@@ -165,16 +165,19 @@ export default function UploadDesign({ productId, session }) {
                 const userId = session?.user?.id ?? await getCurrentUserId();
                 if (!userId) return;
 
-                const { data, error } = await supabase
+                let q = supabase
                     .from('uploaded_files')
                     .select('*')
-                    .eq('user_id', userId)
-                    .eq('product_id', productId)
-                    .order('uploaded_at', { ascending: false })
-                    .limit(5);
+                    .eq('user_id', userId);
+                // Only filter by product_id when we have a non-null value to avoid Rest filter errors
+                if (productId !== null && productId !== undefined) q = q.eq('product_id', productId);
+                const { data, error } = await q.order('uploaded_at', { ascending: false }).limit(5);
 
                 if (error) {
-                    const fallback = await supabase.from('uploaded_files').select('*').eq('user_id', userId).eq('product_id', productId).limit(5);
+                    // Fallback: avoid product_id filter if productId is null/undefined
+                    let fbQ = supabase.from('uploaded_files').select('*').eq('user_id', userId);
+                    if (productId !== null && productId !== undefined) fbQ = fbQ.eq('product_id', productId);
+                    const fallback = await fbQ.limit(5);
                     if (fallback.error) return;
                     if (!isMounted) return;
                     if (Array.isArray(fallback.data) && fallback.data.length > 0) {

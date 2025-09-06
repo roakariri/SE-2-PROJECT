@@ -31,6 +31,7 @@ const Hoodie = () => {
     const [quantity, setQuantity] = useState(1);
     const [variantGroups, setVariantGroups] = useState([]);
     const [selectedVariants, setSelectedVariants] = useState({});
+    const [stockInfo, setStockInfo] = useState(null);
     const [uploading, setUploading] = useState(false);
     const [uploadedFiles, setUploadedFiles] = useState([]); // local File objects
     const [uploadedFileMetas, setUploadedFileMetas] = useState([]); // DB rows
@@ -88,6 +89,39 @@ const Hoodie = () => {
         fetchProduct();
         return () => { isMounted = false; };
     }, [slug]);
+
+    // Fetch stock info based on selected variants (copied from Cap-Info)
+    useEffect(() => {
+        const fetchStockInfo = async () => {
+            if (!productId || !variantGroups.length) {
+                setStockInfo(null);
+                return;
+            }
+            const variantIds = Object.values(selectedVariants).map(v => v.id).filter(Boolean);
+            if (variantIds.length !== variantGroups.length) { setStockInfo(null); return; }
+            const sortedVariantIds = [...variantIds].sort((a, b) => a - b);
+            const { data: combinations, error: combError } = await supabase
+                .from('product_variant_combinations')
+                .select('combination_id, variants')
+                .eq('product_id', productId);
+            if (combError) { setStockInfo(null); return; }
+            const match = (combinations || []).find(row => {
+                if (!row.variants || row.variants.length !== sortedVariantIds.length) return false;
+                const a = [...row.variants].sort((x, y) => x - y);
+                return a.every((v, i) => v === sortedVariantIds[i]);
+            });
+            if (!match) { setStockInfo(null); return; }
+            const { data: inventory, error: invError } = await supabase
+                .from('inventory')
+                .select('quantity, low_stock_limit')
+                .eq('combination_id', match.combination_id)
+                .eq('status', 'in_stock')
+                .single();
+            if (invError || !inventory) { setStockInfo(null); return; }
+            setStockInfo(inventory);
+        };
+        fetchStockInfo();
+    }, [productId, selectedVariants, variantGroups]);
 
     // Fetch variants with nested joins
     useEffect(() => {
@@ -993,6 +1027,20 @@ const Hoodie = () => {
                             {loading ? "" : `₱${totalPrice.toFixed(2)}`}
                             <p className="italic text-black text-[12px]">Shipping calculated at checkout.</p>
                         </div>
+                        <div className="mt-2 text-sm">
+                            {variantGroups.length === 0 || Object.keys(selectedVariants).length !== variantGroups.length ? (
+                                <span className="text-gray-500">Select all variants to see stock.</span>
+                            ) : stockInfo === null ? (
+                                <span className="text font-semibold">Checking stocks.</span>
+                            ) : stockInfo.quantity > 0 ? (
+                                <span className="text-green-700 font-semibold">Stock: {stockInfo.quantity}</span>
+                            ) : (
+                                <span className="text-red-600 font-semibold">Out of stock</span>
+                            )}
+                        </div>
+                        {stockInfo && stockInfo.low_stock_limit && stockInfo.quantity > 0 && stockInfo.quantity <= stockInfo.low_stock_limit && (
+                            <div className="text-xs text-yellow-600 mt-1">Hurry! Only {stockInfo.quantity} left in stock.</div>
+                        )}
                         <hr className="mb-6" />
 
                         {/* scrollable content area */}
@@ -1077,21 +1125,57 @@ const Hoodie = () => {
                             )}
                         </div>
 
-                        <div className="mb-6">
+                        {/* COLOR (from variant groups) */}
+                         <div className="mb-6">
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">COLOR</div>
                             {colorGroup && (
                                 <div className="flex items-center gap-3">
                                     {colorGroup.values.map(val => {
                                         const isSelected = selectedVariants[colorGroup.id]?.id === val.id;
-                                        const isHexColor = val.value.startsWith('#') && val.value.length === 7;
+                                        const isHexColor = typeof val.value === 'string' && val.value.startsWith('#') && val.value.length === 7;
+                                        const bg = isHexColor ? val.value : '#000000';
+
+                                        // compute simple relative luminance to decide check color for contrast
+                                        const getLuminance = (hex) => {
+                                            try {
+                                                const r = parseInt(hex.slice(1,3), 16) / 255;
+                                                const g = parseInt(hex.slice(3,5), 16) / 255;
+                                                const b = parseInt(hex.slice(5,7), 16) / 255;
+                                                const srgb = [r, g, b].map((c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)));
+                                                return 0.2126 * srgb[0] + 0.7152 * srgb[1] + 0.0722 * srgb[2];
+                                            } catch (e) {
+                                                return 0;
+                                            }
+                                        };
+
+                                        const lum = isHexColor ? getLuminance(bg) : 0;
+                                        const checkColor = lum > 0.6 ? '#111111' : '#ffffff';
+
                                         return (
-                                            <div
+                                            <button
                                                 key={val.id}
-                                                className={`w-8 h-8 rounded cursor-pointer ${isSelected ? 'ring-2 ring-blue-500' : 'ring-1 ring-gray-300'}`}
-                                                style={{ backgroundColor: isHexColor ? val.value : '#000000' }}
+                                                type="button"
                                                 onClick={() => selectVariant(colorGroup.id, val)}
                                                 title={`${val.name} ${val.price > 0 ? `(+₱${val.price.toFixed(2)})` : ''}`}
-                                            />
+                                                className={`relative w-10 h-10 rounded-none cursor-pointer flex items-center justify-center focus:outline-none ${isSelected ? 'ring-2 ring-gray-300' : 'ring-1 ring-gray-300'}`}
+                                                style={{ backgroundColor: bg }}
+                                                aria-pressed={isSelected}
+                                            >
+                                                {isSelected && (
+                                                    <span className="absolute inset-0 flex items-center justify-center pointer-events-none ">
+                                                        {/* small contrasting badge behind the check for readability */}
+                                                        <span
+                                                            className="w-5 h-5 rounded-none"
+                                                           
+                                                        />
+                                                        <img
+                                                            src={lum > 0.6 ? '/logo-icon/black-check.svg' : '/logo-icon/white-check.svg'}
+                                                            alt="selected"
+                                                            className="w-5 h-5 absolute "
+                                                        />
+                                                    </span>
+                                                )}
+                                            </button>
                                         );
                                     })}
                                 </div>
@@ -1110,10 +1194,12 @@ const Hoodie = () => {
                                 <input
                                     type="number"
                                     min={1}
+                                    max={stockInfo?.quantity || undefined}
                                     value={quantity}
                                     onChange={(e) => {
                                         const v = Number(e.target.value);
-                                        setQuantity(isNaN(v) || v < 1 ? 1 : v);
+                                        const maxStock = stockInfo?.quantity || Infinity;
+                                        setQuantity(isNaN(v) || v < 1 ? 1 : Math.min(v, maxStock));
                                     }}
                                     onKeyDown={(e) => {
                                         if (e.key === 'Enter') e.currentTarget.blur();
@@ -1121,7 +1207,7 @@ const Hoodie = () => {
                                     className="w-20 text-center px-2 text-black outline-none"
                                     aria-label="Quantity input"
                                 />
-                                <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={incrementQuantity} aria-label="Increase quantity">+</button>
+                                <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={incrementQuantity} aria-label="Increase quantity" disabled={quantity >= (stockInfo?.quantity || Infinity)}>+</button>
                             </div>
                         </div>
 

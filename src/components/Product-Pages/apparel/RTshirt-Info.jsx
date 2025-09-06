@@ -968,21 +968,57 @@ const RTshirt = () => {
                             )}
                         </div>
 
-                        <div className="mb-6">
+                        {/* COLOR (from variant groups) */}
+                         <div className="mb-6">
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">COLOR</div>
                             {colorGroup && (
                                 <div className="flex items-center gap-3">
                                     {colorGroup.values.map(val => {
                                         const isSelected = selectedVariants[colorGroup.id]?.id === val.id;
-                                        const isHexColor = val.value.startsWith('#') && val.value.length === 7;
+                                        const isHexColor = typeof val.value === 'string' && val.value.startsWith('#') && val.value.length === 7;
+                                        const bg = isHexColor ? val.value : '#000000';
+
+                                        // compute simple relative luminance to decide check color for contrast
+                                        const getLuminance = (hex) => {
+                                            try {
+                                                const r = parseInt(hex.slice(1,3), 16) / 255;
+                                                const g = parseInt(hex.slice(3,5), 16) / 255;
+                                                const b = parseInt(hex.slice(5,7), 16) / 255;
+                                                const srgb = [r, g, b].map((c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)));
+                                                return 0.2126 * srgb[0] + 0.7152 * srgb[1] + 0.0722 * srgb[2];
+                                            } catch (e) {
+                                                return 0;
+                                            }
+                                        };
+
+                                        const lum = isHexColor ? getLuminance(bg) : 0;
+                                        const checkColor = lum > 0.6 ? '#111111' : '#ffffff';
+
                                         return (
-                                            <div
+                                            <button
                                                 key={val.id}
-                                                className={`w-8 h-8 rounded cursor-pointer ${isSelected ? 'ring-2 ring-blue-500' : 'ring-1 ring-gray-300'}`}
-                                                style={{ backgroundColor: isHexColor ? val.value : '#000000' }}
+                                                type="button"
                                                 onClick={() => selectVariant(colorGroup.id, val)}
                                                 title={`${val.name} ${val.price > 0 ? `(+₱${val.price.toFixed(2)})` : ''}`}
-                                            />
+                                                className={`relative w-10 h-10 rounded-none cursor-pointer flex items-center justify-center focus:outline-none ${isSelected ? 'ring-2 ring-gray-300' : 'ring-1 ring-gray-300'}`}
+                                                style={{ backgroundColor: bg }}
+                                                aria-pressed={isSelected}
+                                            >
+                                                {isSelected && (
+                                                    <span className="absolute inset-0 flex items-center justify-center pointer-events-none ">
+                                                        {/* small contrasting badge behind the check for readability */}
+                                                        <span
+                                                            className="w-5 h-5 rounded-none"
+                                                           
+                                                        />
+                                                        <img
+                                                            src={lum > 0.6 ? '/logo-icon/black-check.svg' : '/logo-icon/white-check.svg'}
+                                                            alt="selected"
+                                                            className="w-5 h-5 absolute "
+                                                        />
+                                                    </span>
+                                                )}
+                                            </button>
                                         );
                                     })}
                                 </div>

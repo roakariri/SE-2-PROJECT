@@ -33,7 +33,7 @@ const HomePage = () => {
                     onClick={async e => {
                         e.preventDefault();
                         const { data: { session } } = await supabase.auth.getSession();
-                        navigate(session ? "/product" : "/signin");
+                        navigate(session ? "/accessories-decorations/mug" : "/signin");
                     }}
                     className="underline text-black not-italic phone:text-base tablet:text-lg laptop:text-lg hover:text-black"
                 >
@@ -53,7 +53,7 @@ const HomePage = () => {
                     onClick={async e => {
                         e.preventDefault();
                         const { data: { session } } = await supabase.auth.getSession();
-                        navigate(session ? "/product" : "/signin");
+                        navigate(session ? "/apparel/cap" : "/signin");
                     }}
                     className="underline text-black not-italic phone:text-base tablet:text-lg laptop:text-lg hover:text-black"
                 >
@@ -199,8 +199,8 @@ const HomePage = () => {
               </button>
             </div>
           </div>
-          {/* Banners */}
-          <div className="flex flex-col justify-between items-center border rounded-[4px] bg-cover bg-center text-center text-white border-white laptop:w-[290px] laptop:h-[360px] bigscreen:w-[290px] bigscreen:h-[360px] relative" style={{ backgroundImage: 'url("/images/banners1.png")' }}>
+          {/* Clothing Banners */}
+          <div className="flex flex-col justify-between items-center border rounded-[4px] bg-cover bg-center text-center text-white border-white laptop:w-[290px] laptop:h-[360px] bigscreen:w-[290px] bigscreen:h-[360px] relative" style={{ backgroundImage: 'url("/images/clothing-banner.png")' }}>
             <div className="flex flex-1 items-center justify-center w-full h-full">
               <p className="laptop:text-[46px] font-bold text-white font-dm-sans drop-shadow-lg bigscreen:text-[46px] bigscreen:text-center">CLOTHING BANNERS</p>
             </div>

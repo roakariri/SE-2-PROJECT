@@ -14,13 +14,8 @@ const DEFAULT_AVATAR = "/logo-icon/profile-icon.svg";
 const AccountPage = () => {
     // Use imported PH_CITIES_BY_PROVINCE from './province.js'
 
-    const [activeTab, setActiveTab] = React.useState(() => {
-        try {
-            return localStorage.getItem('accountActiveTab') || 'homebase';
-        } catch (err) {
-            return 'homebase';
-        }
-    });
+    // Always default to 'homebase' on a fresh load/refresh. URL query/hash can override.
+    const [activeTab, setActiveTab] = React.useState(() => 'homebase');
     const navigate = useNavigate();
     const location = useLocation();
     const { signOut } = UserAuth();
@@ -108,6 +103,10 @@ const AccountPage = () => {
     const [addresses, setAddresses] = React.useState([]);
     const [addressSuccessMsg, setAddressSuccessMsg] = React.useState("");
     const [addressErrorMsg, setAddressErrorMsg] = React.useState("");
+    const [addressFirstNameError, setAddressFirstNameError] = React.useState("");
+    const [addressLastNameError, setAddressLastNameError] = React.useState("");
+    const [editingAddressId, setEditingAddressId] = React.useState(null);
+    const [addressStreetError, setAddressStreetError] = React.useState("");
     const [showAddressEditor, setShowAddressEditor] = React.useState(false);
 
     // Fetch user, profile, and addresses
@@ -187,27 +186,10 @@ const AccountPage = () => {
         fetchUserAndProfile();
     }, [fetchUserAndProfile]);
 
-    // If the URL includes a query like ?tab=orders or a hash #orders, prefer that
-    // over the stored activeTab. This allows other pages to deep-link into account sections.
-    React.useEffect(() => {
-        try {
-            const params = new URLSearchParams(location.search);
-            const tabFromQuery = params.get('tab');
-            const hash = (location.hash || '').replace('#', '');
-            if (tabFromQuery && ['homebase', 'orders', 'profile'].includes(tabFromQuery)) {
-                setActiveTab(tabFromQuery);
-                try { localStorage.setItem('accountActiveTab', tabFromQuery); } catch(e) {}
-                return;
-            }
-            if (hash && ['homebase', 'orders', 'profile'].includes(hash)) {
-                setActiveTab(hash);
-                try { localStorage.setItem('accountActiveTab', hash); } catch(e) {}
-                return;
-            }
-        } catch (err) {
-            // ignore malformed URLs
-        }
-    }, [location.search, location.hash]);
+    // Note: we intentionally do not read tab from URL on initial load so refresh
+    // always lands on the 'homebase' tab. Deep-links via URL were previously
+    // supported but caused refreshes to persist a non-home tab; this was changed
+    // to ensure a consistent home-first UX.
 
     // Listen for auth state changes (sign in / user update) and refresh profile so
     // display name shows immediately after account creation or update.
@@ -464,7 +446,9 @@ const AccountPage = () => {
     };
 
     const handleFirstNameChange = (e) => {
-        const val = e.target.value;
+        // strip digits so user cannot enter numbers
+        const raw = e.target.value;
+        const val = String(raw).replace(/[0-9]/g, '');
         setFirstName(val);
         if (val === "") {
             setFirstNameError("");
@@ -478,7 +462,9 @@ const AccountPage = () => {
     };
 
     const handleLastNameChange = (e) => {
-        const val = e.target.value;
+        // strip digits so user cannot enter numbers
+        const raw = e.target.value;
+        const val = String(raw).replace(/[0-9]/g, '');
         setLastName(val);
         if (val === "") {
             setLastNameError("");
@@ -601,10 +587,27 @@ const AccountPage = () => {
     };
 
     const handleAddressChange = (e) => {
-        const { name, value, type, checked } = e.target;
+        // Support both real events and synthetic objects passed in (see postal_code/phone handlers)
+        const target = e?.target || e || {};
+        const { name, value, type, checked } = target;
+
+        let newValue = type === "checkbox" ? checked : value;
+
+        // For address name fields, strip digits so user cannot enter numbers
+        if (name === 'first_name' || name === 'last_name') {
+            const raw = String(value || '');
+            const hadDigits = /[0-9]/.test(raw);
+            newValue = raw.replace(/[0-9]/g, '');
+            if (name === 'first_name') {
+                setAddressFirstNameError(hadDigits ? 'Numbers are not allowed in the First Name.' : '');
+            } else {
+                setAddressLastNameError(hadDigits ? 'Numbers are not allowed in the Last Name.' : '');
+            }
+        }
+
         setAddressForm((prev) => ({
             ...prev,
-            [name]: type === "checkbox" ? checked : value,
+            [name]: newValue,
         }));
     };
 
@@ -615,12 +618,20 @@ const AccountPage = () => {
         setAddressErrorMsg("");
 
         // Validate required fields: ensure all address fields are present
+        // Note: 'last_name' (surname) is optional per UX requirement
         const requiredFields = [
-            'first_name', 'last_name', 'street_address', 'province', 'city', 'postal_code', 'phone_number', 'label'
+            'first_name', 'street_address', 'province', 'city', 'postal_code', 'phone_number', 'label'
         ];
         const missing = requiredFields.filter(f => !addressForm[f] || (typeof addressForm[f] === 'string' && addressForm[f].trim() === ''));
         if (missing.length > 0) {
             setAddressErrorMsg('Please fill in all required address fields.');
+            return;
+        }
+
+        // enforce street address min length
+        if (String(addressForm.street_address || '').trim().length > 0 && String(addressForm.street_address || '').trim().length < 5) {
+            setAddressStreetError('Please enter at least 5 characters.');
+            setAddressErrorMsg('Please fix the highlighted fields before saving.');
             return;
         }
 
@@ -637,30 +648,60 @@ const AccountPage = () => {
                 .eq("user_id", session.user.id);
         }
 
-        // If editing, keep the same address_id, else generate new
-        const isEditing = !!addressForm.address_id;
+        // Choose which address_id to use for upsert:
+        // prefer explicit editingAddressId (set when Edit was clicked),
+        // otherwise use addressForm.address_id if present, else generate new
+        const addressIdToUse = editingAddressId ?? addressForm.address_id ?? uuidv4();
         const upsertData = {
             ...addressForm,
             user_id: session.user.id,
-            address_id: isEditing ? addressForm.address_id : uuidv4(),
+            address_id: addressIdToUse,
         };
 
-        const { error } = await supabase
-            .from("addresses")
-            .upsert(upsertData, { onConflict: ['address_id'] });
+        // If we are editing an existing address, perform an update.
+        // Otherwise, perform an insert. This avoids accidentally creating a new row
+        // during edit which could trigger server-side checks (like max addresses).
+        if (editingAddressId || addressForm.address_id) {
+            const idToUpdate = addressIdToUse;
+            const { error: updateError } = await supabase
+                .from('addresses')
+                .update(upsertData)
+                .eq('address_id', idToUpdate)
+                .eq('user_id', session.user.id);
 
-        if (error) {
-            console.error("Error saving address:", error.message);
-            if (error.message.includes("addresses_label_check")) {
-                setAddressErrorMsg("Invalid address label. Please select 'Home' or 'Work'.");
-            } else {
-                setAddressErrorMsg(`Error saving address: ${error.message}`);
+            if (updateError) {
+                console.error('Error updating address:', updateError.message);
+                if (updateError.message && updateError.message.includes('addresses_label_check')) {
+                    setAddressErrorMsg("Invalid address label. Please select 'Home' or 'Work'.");
+                } else {
+                    setAddressErrorMsg(`Error saving address: ${updateError.message || 'Unknown error'}`);
+                }
+                return;
             }
-            return;
+        } else {
+            const { error: insertError } = await supabase
+                .from('addresses')
+                .insert(upsertData);
+
+            if (insertError) {
+                console.error('Error inserting address:', insertError.message);
+                if (insertError.message && insertError.message.includes('addresses_label_check')) {
+                    setAddressErrorMsg("Invalid address label. Please select 'Home' or 'Work'.");
+                } else {
+                    setAddressErrorMsg(`Error saving address: ${insertError.message || 'Unknown error'}`);
+                }
+                return;
+            }
         }
 
         setAddressSuccessMsg("Address saved successfully!");
-        setAddressErrorMsg("");
+    setAddressErrorMsg("");
+    setAddressStreetError("");
+    // clear inline name errors after successful save
+    setAddressFirstNameError("");
+    setAddressLastNameError("");
+    // Clear editing state after save so subsequent Add creates new address
+    setEditingAddressId(null);
         setTimeout(() => setAddressSuccessMsg(""), 3000);
         fetchUserAndProfile();
         setShowAddressEditor(false);
@@ -682,19 +723,21 @@ const AccountPage = () => {
 
     const handleEditAddress = (address) => {
         setAddressForm(address);
+        // mark which address is being edited so save will update instead of creating new
+        setEditingAddressId(address.address_id || null);
         setProvinceInput(address.province || "");
         setAddressErrorMsg("");
+    // clear street error when opening editor
+    setAddressStreetError("");
+    // clear any inline name errors when opening the editor
+    setAddressFirstNameError("");
+    setAddressLastNameError("");
         setShowAddressEditor(true);
     };
 
-    // Keep active tab persisted so the selected nav stays grayed-out across reloads
+    // Set active tab; do not persist to localStorage so refresh always shows 'homebase'
     const handleSetActiveTab = (tab) => {
         setActiveTab(tab);
-        try {
-            localStorage.setItem('accountActiveTab', tab);
-        } catch (err) {
-            // ignore storage errors
-        }
     };
 
     const handleDeleteAddress = async (address_id) => {
@@ -1018,10 +1061,10 @@ const AccountPage = () => {
                                     {addressErrorMsg}
                                 </div>
                             )}
-                            <div className="w-full overflow-x-auto">
-                                <div className="grid semi-biggest:grid-cols-2 biggest:grid-cols-3 semi-biggest:w-[500px] semi-biggest:gap-10 auto-cols-max justify-center gap-4 min-w-max">
+                            <div className="w-full">
+                                <div className="flex flex-row gap-4 overflow-x-auto pb-4" style={{ WebkitOverflowScrolling: 'touch' }}>
                                     {addresses.map((address) => (
-                                        <div key={address.address_id} className="border p-5 w-[295px] border-black rounded flex flex-col justify-between min-h-[280px]">
+                                        <div key={address.address_id} className="flex-shrink-0 border p-5 w-[295px] border-black rounded flex flex-col justify-between min-h-[280px]">
                                             <p className="font-dm-sans font-bold">{address.first_name} {address.last_name}</p>
                                             <p className="font-dm-sans">{address.street_address}, {address.barangay},</p>
                                             <p className="font-dm-sans">{address.city}, {address.province}.</p>
@@ -1074,33 +1117,37 @@ const AccountPage = () => {
                                             </div>
                                         </div>
                                     ))}
-                                    <div className="ml-[40px] flex flex-col justify-center align-center">
-                                        <button
-                                            type="button"
-                                            className="border border-black rounded-full w-16 h-16 flex items-center justify-center bg-white hover:bg-[#f0f0f0] shadow-md"
-                                            aria-label="Add Address"
-                                            onClick={() => {
-                                                setAddressForm({
-                                                    first_name: "",
-                                                    last_name: "",
-                                                    street_address: "",
-                                                    province: "",
-                                                    city: "",
-                                                    postal_code: "",
-                                                    phone_number: "",
-                                                    label: "Home",
-                                                    is_default: false,
-                                                    address_id: undefined,
-                                                });
-                                                setProvinceInput("");
-                                                setAddressErrorMsg("");
-                                                setAddressSuccessMsg("");
-                                                setShowAddressEditor(true);
-                                            }}
-                                        >
-                                            <img src="/logo-icon/add-icon.svg" alt="Add" />
-                                        </button>
-                                    </div>
+                                    {addresses.length < 3 && (
+                                        <div className="ml-[40px] flex flex-col justify-center align-center">
+                                            <button
+                                                type="button"
+                                                className="border border-black rounded-full w-16 h-16 flex items-center justify-center bg-white hover:bg-[#f0f0f0] shadow-md"
+                                                aria-label="Add Address"
+                            onClick={() => {
+                                // starting a new address - clear editing state
+                                setEditingAddressId(null);
+                                setAddressForm({
+                                                        first_name: "",
+                                                        last_name: "",
+                                                        street_address: "",
+                                                        province: "",
+                                                        city: "",
+                                                        postal_code: "",
+                                                        phone_number: "",
+                                                        label: "Home",
+                                                        is_default: false,
+                                                        address_id: undefined,
+                                                    });
+                                                    setProvinceInput("");
+                                                    setAddressErrorMsg("");
+                                                    setAddressSuccessMsg("");
+                                                    setShowAddressEditor(true);
+                                                }}
+                                            >
+                                                <img src="/logo-icon/add-icon.svg" alt="Add" />
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 
@@ -1122,18 +1169,19 @@ const AccountPage = () => {
                                     <form onSubmit={handleAddressSubmit} className="w-full">
                                         <div className="grid grid-cols-2 gap-4 mt-2">
                                             <div>
-                                                <p className="text-[16px] mt-2 font-dm-sans">Name</p>
+                                                <p className="text-[16px] mt-2 font-dm-sans">First Name</p>
                                                 <input
                                                     type="text"
                                                     className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white"
-                                                    placeholder="Name"
+                                                    placeholder="First Name"
                                                     name="first_name"
                                                     value={addressForm.first_name}
                                                     onChange={handleAddressChange}
                                                 />
+                                                {addressFirstNameError && <p className="text-red-600 font-dm-sans text-sm mt-1">{addressFirstNameError}</p>}
                                             </div>
                                             <div>
-                                                <p className="text-[16px] mt-2 font-dm-sans">Surname</p>
+                                                <p className="text-[16px] mt-2 font-dm-sans">Last Name</p>
                                                 <input
                                                     type="text"
                                                     className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white"
@@ -1142,6 +1190,7 @@ const AccountPage = () => {
                                                     value={addressForm.last_name}
                                                     onChange={handleAddressChange}
                                                 />
+                                                {addressLastNameError && <p className="text-red-600 font-dm-sans text-sm mt-1">{addressLastNameError}</p>}
                                             </div>
                                         </div>
                                         <div className="mt-2">
@@ -1152,8 +1201,14 @@ const AccountPage = () => {
                                                 placeholder="Street Name/Building/House No."
                                                 name="street_address"
                                                 value={addressForm.street_address}
-                                                onChange={handleAddressChange}
+                                                onChange={(e) => {
+                                                    handleAddressChange(e);
+                                                    // validate min length client-side
+                                                    const val = String(e.target.value || '');
+                                                    setAddressStreetError(val.trim().length > 0 && val.trim().length < 5 ? 'Please enter at least 5 characters.' : '');
+                                                }}
                                             />
+                                            {addressStreetError && <p className="text-red-600 font-dm-sans text-sm mt-1">{addressStreetError}</p>}
                                         </div>
                                         <div className="grid grid-cols-2 gap-4 mt-2">
                                             {/* Province */}
@@ -1413,7 +1468,15 @@ const AccountPage = () => {
                                                 <span className="text-black font-dm-sans">Set as default address</span>
                                             </label>
                                         </div>
-                                        <div className="flex justify-end mt-6">
+                                        <div className="flex items-center justify-end mt-6 gap-4">
+                                            {addressErrorMsg ? (
+                                                <div className="text-red-600 font-dm-sans text-sm mr-2" role="alert" aria-live="polite">
+                                                    {addressErrorMsg}
+                                                </div>
+                                            ) : (
+                                                // keep spacing consistent when there's no error
+                                                <div style={{ minWidth: 0 }} />
+                                            )}
                                             <button
                                                 type="submit"
                                                 className="bg-[#3B5B92] text-white font-bold font-dm-sans px-6 py-2 rounded-md hover:bg-[#2a4370] focus:outline-none focus:ring-0"
