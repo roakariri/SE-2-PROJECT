@@ -606,7 +606,47 @@ const Hoodie = () => {
             let cartId;
             let cartMatched = false;
 
-            for (const cart of existingCarts || []) {
+            // If editing a specific cart item, update it directly
+            if (fromCart && editingCartId) {
+                cartMatched = true;
+                const newQuantity = Number(quantity || 0);
+                const newTotal = (Number(unitPrice) || 0) * newQuantity;
+                const { error: updateError } = await supabase
+                    .from("cart")
+                    .update({
+                        quantity: newQuantity,
+                        total_price: newTotal,
+                        base_price: Number(unitPrice) || Number(price) || 0,
+                        route: location?.pathname || `/${slug}`,
+                        slug: slug || null,
+                    })
+                    .eq("cart_id", editingCartId)
+                    .eq("user_id", userId);
+                if (updateError) throw updateError;
+                cartId = editingCartId;
+
+                // Update cart variants for the editing cart
+                // First, remove existing variants
+                await supabase.from("cart_variants").delete().eq("cart_id", editingCartId).eq("user_id", userId);
+
+                // Insert new variants
+                const variantInserts = Object.entries(selectedVariants).map(([groupId, value]) => ({
+                    cart_id: editingCartId,
+                    user_id: userId,
+                    cartvariant_id: value?.variant_value_id ?? value?.id ?? value,
+                    price: Number(value?.price) || 0,
+                }));
+
+                if (variantInserts.length > 0) {
+                    const { error: variantsError } = await supabase.from("cart_variants").insert(variantInserts);
+                    if (variantsError) throw variantsError;
+                }
+
+                // Dispatch cart-created event to associate uploaded files with the cart
+                window.dispatchEvent(new CustomEvent('cart-created', { detail: { cartId: editingCartId } }));
+            } else {
+                // Check if there's an existing cart with the same variants (for new additions)
+                for (const cart of existingCarts || []) {
                 const { data: cartVariants, error: varError } = await supabase
                     .from("cart_variants")
                     .select("cartvariant_id, cart_id")
@@ -620,7 +660,7 @@ const Hoodie = () => {
 
                 if (existingVarSet.size === selectedVarSet.size && [...existingVarSet].every((v) => selectedVarSet.has(v))) {
                     cartMatched = true;
-                    const newQuantity = (Number(cart.quantity) || 0) + Number(quantity || 0);
+                    const newQuantity = Number(quantity || 0);
                     const newTotal = (Number(unitPrice) || 0) * newQuantity;
                     const { error: updateError } = await supabase
                         .from("cart")
@@ -638,6 +678,7 @@ const Hoodie = () => {
                     break;
                 }
             }
+            } // Close the else block
 
             if (!cartMatched) {
                 const { data: cartData, error: cartError } = await supabase
@@ -712,12 +753,22 @@ const Hoodie = () => {
                 }
             }
 
-            setCartSuccess("Item added to cart!");
-            setQuantity(1);
-            // Reset UploadDesign to clear thumbnails while keeping the upload UI visible
-            try { setUploadResetKey(k => (k || 0) + 1); } catch (e) { /* no-op if reset key missing */ }
-            try { setShowUploadUI(true); } catch (e) { /* no-op if showUploadUI missing */ }
-            setTimeout(() => setCartSuccess(null), 3000);
+            if (fromCart && editingCartId) {
+                // If editing, navigate back to cart
+                setCartSuccess("Cart item updated!");
+                setTimeout(() => {
+                    setCartSuccess(null);
+                    navigate('/cart');
+                }, 1500);
+            } else {
+                // If adding new item, stay on page
+                setCartSuccess("Item added to cart!");
+                setQuantity(1);
+                // Reset UploadDesign to clear thumbnails while keeping the upload UI visible
+                try { setUploadResetKey(k => (k || 0) + 1); } catch (e) { /* no-op if reset key missing */ }
+                try { setShowUploadUI(true); } catch (e) { /* no-op if showUploadUI missing */ }
+                setTimeout(() => setCartSuccess(null), 3000);
+            }
         } catch (err) {
             console.error("Error adding to cart - Details:", { message: err.message, code: err.code, details: err.details });
             if (err.code === "23505") {

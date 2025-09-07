@@ -245,6 +245,36 @@ const ToteBag = () => {
         restore();
     }, [fromCart, editingCartId]);
 
+    // Load existing uploaded files when editing cart item
+    useEffect(() => {
+        const loadExistingUploads = async () => {
+            if (!fromCart || !editingCartId || !session?.user?.id) return;
+            try {
+                const { data, error } = await supabase
+                    .from('uploaded_files')
+                    .select('*')
+                    .eq('user_id', session.user.id)
+                    .eq('cart_id', editingCartId)
+                    .order('uploaded_at', { ascending: false });
+                if (error) {
+                    console.warn('[EditCart] Failed to load existing uploads:', error);
+                    return;
+                }
+                if (data && data.length > 0) {
+                    const normalizedData = data.map(file => ({
+                        ...file,
+                        id: file.file_id ?? file.id
+                    }));
+                    setUploadedFileMetas(normalizedData);
+                    console.log('[EditCart] Loaded existing uploads:', normalizedData.length);
+                }
+            } catch (e) {
+                console.warn('[EditCart] Error loading existing uploads:', e);
+            }
+        };
+        loadExistingUploads();
+    }, [fromCart, editingCartId, session?.user?.id]);
+
     // Guarded default initialization (do not overwrite restored selections)
     useEffect(() => {
         if (!variantGroups || variantGroups.length === 0) return;
@@ -677,7 +707,7 @@ const ToteBag = () => {
 
                 if (existingVarSet.size === selectedVarSet.size && [...existingVarSet].every((v) => selectedVarSet.has(v))) {
                     cartMatched = true;
-                    const newQuantity = (Number(cart.quantity) || 0) + Number(quantity || 0);
+                    const newQuantity = Number(quantity || 0);
                     const newTotal = (Number(unitPrice) || 0) * newQuantity;
                     const { error: updateError } = await supabase
                         .from("cart")

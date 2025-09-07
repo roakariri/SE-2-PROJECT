@@ -642,6 +642,10 @@ const Sweatshirt = () => {
                     const { error: insErr } = await supabase.from('cart_variants').insert(variantInserts);
                     if (insErr) throw insErr;
                 }
+
+                // Dispatch cart-created event to associate uploaded files with the cart
+                window.dispatchEvent(new CustomEvent('cart-created', { detail: { cartId: editingCartId } }));
+
                 setCartSuccess('Cart item updated!');
                 setTimeout(() => setCartSuccess(null), 2500);
                 setIsAdding(false);
@@ -682,7 +686,7 @@ const Sweatshirt = () => {
 
                 if (existingVarSet.size === selectedVarSet.size && [...existingVarSet].every((v) => selectedVarSet.has(v))) {
                     cartMatched = true;
-                    const newQuantity = (Number(cart.quantity) || 0) + Number(quantity || 0);
+                    const newQuantity = Number(quantity || 0);
                     const newTotal = (Number(unitPrice) || 0) * newQuantity;
                     const { error: updateError } = await supabase
                         .from("cart")

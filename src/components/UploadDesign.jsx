@@ -78,6 +78,7 @@ export default function UploadDesign({ productId, session, hidePreviews = false,
                     .insert([{
                         user_id: userId,
                         product_id: productId ?? null,
+                        cart_id: cartId ?? null,
                         file_name: file.name,
                         image_url: publicUrl,
                         file_type: file.type,

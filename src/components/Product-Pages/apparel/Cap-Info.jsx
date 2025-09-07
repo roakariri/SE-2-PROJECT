@@ -35,6 +35,7 @@ const Cap= () => {
     const [fromCart, setFromCart] = useState(false);
     const [editingCartId, setEditingCartId] = useState(null);
     const [stockInfo, setStockInfo] = useState(null);
+    const [uploadedFileMetas, setUploadedFileMetas] = useState([]);
 
     const slug = location.pathname.split('/').filter(Boolean).pop();
 
@@ -227,6 +228,41 @@ const Cap= () => {
         };
         restore();
     }, [fromCart, editingCartId]);
+
+    // Load existing uploaded files when editing
+    useEffect(() => {
+        const loadExistingUploads = async () => {
+            if (!fromCart || !editingCartId || !session?.user?.id) return;
+
+            try {
+                const { data, error } = await supabase
+                    .from('uploaded_files')
+                    .select('*')
+                    .eq('user_id', session.user.id)
+                    .eq('cart_id', editingCartId)
+                    .order('uploaded_at', { ascending: false });
+
+                if (error) {
+                    console.warn('[EditCart] Failed to load existing uploads:', error);
+                    return;
+                }
+
+                if (data && data.length > 0) {
+                    // Normalize the data format
+                    const normalizedData = data.map(file => ({
+                        ...file,
+                        id: file.file_id ?? file.id
+                    }));
+                    setUploadedFileMetas(normalizedData);
+                    console.log('[EditCart] Loaded existing uploads:', normalizedData.length);
+                }
+            } catch (e) {
+                console.warn('[EditCart] Error loading existing uploads:', e);
+            }
+        };
+
+        loadExistingUploads();
+    }, [fromCart, editingCartId, session?.user?.id]);
 
     // Guarded defaults
     useEffect(() => {
@@ -687,6 +723,8 @@ const Cap= () => {
                     }
                 } catch (e) { console.warn('[EditCart] Cap attach files failed', e); }
                 setCartSuccess('Cart item updated!');
+                // Dispatch event to attach any newly uploaded files to the cart
+                window.dispatchEvent(new CustomEvent('cart-created', { detail: { cartId: editingCartId } }));
                 setTimeout(() => setCartSuccess(null), 2500);
                 setIsAdding(false);
                 navigate('/cart');
@@ -827,6 +865,8 @@ const Cap= () => {
             }
 
             setCartSuccess("Item added to cart!");
+            // Dispatch event to attach any newly uploaded files to the cart
+            window.dispatchEvent(new CustomEvent('cart-created', { detail: { cartId } }));
             setQuantity(1);
             // Reset UploadDesign to clear thumbnails while keeping the upload UI visible
             setUploadResetKey(k => (k || 0) + 1);
@@ -1399,7 +1439,7 @@ const Cap= () => {
                         {showUploadUI && (
                         <div className="mb-6">
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">UPLOAD DESIGN</div>
-                            <UploadDesign key={uploadResetKey} productId={productId} session={session} hidePreviews={!showUploadUI} isEditMode={fromCart && !!editingCartId} cartId={fromCart ? editingCartId : null} />
+                            <UploadDesign key={uploadResetKey} productId={productId} session={session} hidePreviews={!showUploadUI} isEditMode={fromCart && !!editingCartId} cartId={fromCart ? editingCartId : null} setUploadedFileMetas={setUploadedFileMetas} />
                         </div>
                         )}
 

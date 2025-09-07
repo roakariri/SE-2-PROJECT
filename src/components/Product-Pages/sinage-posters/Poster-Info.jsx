@@ -611,7 +611,7 @@ const Poster = () => {
 
                 if (existingVarSet.size === selectedVarSet.size && [...existingVarSet].every((v) => selectedVarSet.has(v))) {
                     cartMatched = true;
-                    const newQuantity = (Number(cart.quantity) || 0) + Number(quantity || 0);
+                    const newQuantity = Number(quantity || 0);
                     const newTotal = (Number(totalPrice) || 0);
                     const { error: updateError } = await supabase
                         .from("cart")
