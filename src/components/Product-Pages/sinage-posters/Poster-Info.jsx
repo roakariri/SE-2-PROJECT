@@ -40,8 +40,8 @@ const Poster = () => {
     const [showUploadUI, setShowUploadUI] = useState(true);
 
     // Cart editing state
-    const [fromCart, setFromCart] = useState(!!location.state?.fromCart);
-    const [editingCartId, setEditingCartId] = useState(location.state?.cartRow?.cart_id || null);
+    const [fromCart, setFromCart] = useState(false);
+    const [editingCartId, setEditingCartId] = useState(null);
 
     const slug = location.pathname.split('/').filter(Boolean).pop();
 
@@ -63,18 +63,18 @@ const Poster = () => {
         return null;
     };
 
-    // Build thumbnails array from available images
+    // Build thumbnails: 1) main product image as first thumb, 2) poster-black/white/beige from signage-posters-images storage, 3) fallbacks
     const buildThumbnails = async () => {
         const results = [];
 
-        // first thumbnail: main product image
+        // first thumbnail: ensure poster.png is always first
         results.push('/signages & posters/poster.png');
 
         // desired variant thumbnails
-        const desired = ['poster-1', 'poster-2', 'poster-3'];
+        const desired = ['poster-black', 'poster-white', 'poster-beige'];
         for (const name of desired) {
             if (results.length >= 4) break;
-            const url = await tryGetPublic('sinage-posters-images', name);
+            const url = await tryGetPublic('signage-posters-images', name);
             if (url) results.push(url);
         }
 
@@ -86,7 +86,7 @@ const Poster = () => {
             const extras = [base + '-1', base + '-2', base + '-3'];
             for (const cand of extras) {
                 if (results.length >= 4) break;
-                const url = await tryGetPublic('sinage-posters-images', cand);
+                const url = await tryGetPublic('signage-posters-images', cand);
                 if (url) results.push(url);
             }
         }
@@ -127,8 +127,11 @@ const Poster = () => {
     // Cart editing state
     useEffect(() => {
         if (location.state?.fromCart && location.state?.cartRow) {
+            const cartRow = location.state.cartRow;
             setFromCart(true);
-            setEditingCartId(location.state.cartRow.cart_id);
+            setEditingCartId(cartRow.cart_id);
+            if (cartRow.quantity) setQuantity(Number(cartRow.quantity) || 1);
+            setShowUploadUI(true);
         }
     }, [location.state]);
 
@@ -303,19 +306,9 @@ const Poster = () => {
     useEffect(() => {
         let isMounted = true;
         const resolveImage = async () => {
-            // If imageKey is not provided, prefer the sinage-posters-images bucket's retractable-banner.png
+            // If imageKey is not provided, use the default poster
             if (!imageKey) {
-                try {
-                    const { data } = supabase.storage.from('sinage-posters-images').getPublicUrl('retractable-banner.png');
-                    const url = data?.publicUrl;
-                    if (url && !url.endsWith('/')) {
-                        if (isMounted) setImageSrc(url);
-                        return;
-                    }
-                } catch (err) {
-                    // ignore and fall back to defaults
-                }
-                if (isMounted) setImageSrc('/logo-icon/logo.png');
+                if (isMounted) setImageSrc('/signages & posters/poster.png');
                 return;
             }
 
@@ -323,18 +316,18 @@ const Poster = () => {
             try {
                 if (/^https?:\/\//i.test(imageKey) || imageKey.startsWith('/')) {
                     if (isMounted) setImageSrc(imageKey);
-                    console.debug('[ShakerKeychain] using provided imageKey as src', { imageKey });
+                    console.debug('[Poster] using provided imageKey as src', { imageKey });
                     return;
                 }
 
                 const cleanKey = String(imageKey).replace(/^\/+/, ''); // remove leading slash(es)
 
-                // Try buckets in order; include sinage-posters-images first for retractable banners
-                const bucketsToTry = ['sinage-posters-images', 'accessoriesdecorations-images', 'apparel-images', '3d-prints-images', 'product-images', 'images', 'public'];
+                // Try buckets in the same order used elsewhere for signage -> accessories -> apparel fallback
+                const bucketsToTry = ['signage-posters-images', 'accessoriesdecorations-images', 'apparel-images', '3d-prints-images', 'product-images', 'images', 'public'];
                 for (const bucket of bucketsToTry) {
                     try {
                         const { data, error } = supabase.storage.from(bucket).getPublicUrl(cleanKey);
-                        console.debug('[ShakerKeychain] getPublicUrl attempt', { bucket, cleanKey, data, error });
+                        console.debug('[Poster] getPublicUrl attempt', { bucket, cleanKey, data, error });
                         if (error) continue; // try next bucket
                         const url = data?.publicUrl || data?.publicURL || null;
                         // Supabase returns a publicUrl that ends with '/' when the object isn't found.
@@ -343,17 +336,17 @@ const Poster = () => {
                             return;
                         }
                     } catch (err) {
-                        console.warn('[ShakerKeychain] bucket attempt failed', { bucket, err });
+                        console.warn('[Poster] bucket attempt failed', { bucket, err });
                         // continue trying other buckets
                     }
                 }
 
                 // Last-resort fallback to local public asset
-                if (isMounted) setImageSrc('/logo-icon/logo.png');
-                console.warn('[ShakerKeychain] could not resolve imageKey to a public URL, using fallback', { imageKey });
+                if (isMounted) setImageSrc('/signages & posters/poster.png');
+                console.warn('[Poster] could not resolve imageKey to a public URL, using fallback', { imageKey });
             } catch (err) {
                 console.error('Error resolving image public URL:', err);
-                if (isMounted) setImageSrc('/logo-icon/logo.png');
+                if (isMounted) setImageSrc('/signages & posters/poster.png');
             }
         };
         resolveImage();
@@ -522,10 +515,13 @@ const Poster = () => {
     };
 
     const [totalPrice, setTotalPrice] = useState(0);
+    const [unitPrice, setUnitPrice] = useState(0);
     useEffect(() => {
         const base = (price || 0);
         const variantPrice = Object.values(selectedVariants).reduce((acc, val) => acc + (val?.price || 0), 0);
-        setTotalPrice((base + variantPrice) * (quantity || 1));
+        const calculatedUnitPrice = base + variantPrice;
+        setUnitPrice(calculatedUnitPrice);
+        setTotalPrice(calculatedUnitPrice * (quantity || 1));
     }, [price, selectedVariants, quantity]);
 
     // Add to Cart logic (from ToteBag)
@@ -668,6 +664,14 @@ const Poster = () => {
 
             setCartSuccess("Item added to cart!");
             setQuantity(1);
+            // Reset upload state after successful cart addition
+            setUploadedFileMetas([]);
+            setUploadResetKey(prev => prev + 1);
+            setShowUploadUI(true);
+            
+            // Dispatch cart-created event to associate uploaded files with the cart
+            window.dispatchEvent(new CustomEvent('cart-created', { detail: { cartId } }));
+            
             setTimeout(() => setCartSuccess(null), 3000);
         } catch (err) {
             console.error("Error adding to cart - Details:", { message: err.message, code: err.code, details: err.details });
@@ -983,18 +987,7 @@ const Poster = () => {
 
                         <div className="mb-6">
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">UPLOAD DESIGN</div>
-                            <UploadDesign 
-                                productId={productId} 
-                                session={session} 
-                                uploadedFileMetas={uploadedFileMetas}
-                                setUploadedFileMetas={setUploadedFileMetas}
-                                uploadResetKey={uploadResetKey}
-                                setUploadResetKey={setUploadResetKey}
-                                showUploadUI={showUploadUI}
-                                setShowUploadUI={setShowUploadUI}
-                                isEditMode={fromCart && !!editingCartId}
-                                cartId={fromCart ? editingCartId : null}
-                            />
+                            <UploadDesign key={uploadResetKey} productId={productId} session={session} hidePreviews={!showUploadUI} isEditMode={fromCart && !!editingCartId} cartId={fromCart ? editingCartId : null} />
                         </div>
 
                         <div className="mb-6">

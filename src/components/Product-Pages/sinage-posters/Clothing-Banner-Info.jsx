@@ -40,12 +40,24 @@ const ClothingBanner = () => {
     const [showUploadUI, setShowUploadUI] = useState(true);
 
     // Cart editing state
-    const [fromCart, setFromCart] = useState(!!location.state?.fromCart);
-    const [editingCartId, setEditingCartId] = useState(location.state?.cartRow?.cart_id || null);
+    const [fromCart, setFromCart] = useState(false);
+    const [editingCartId, setEditingCartId] = useState(null);
 
     const slug = location.pathname.split('/').filter(Boolean).pop();
 
-    // Build thumbnails: 1) main product image as first thumb, 2) variants from accessories-images storage, 3) fallbacks
+    // Initialize currentCartId for upload association
+    useEffect(() => {
+        if (location.state?.fromCart && location.state?.cartRow) {
+            const cartRow = location.state.cartRow;
+            setFromCart(true);
+            setEditingCartId(cartRow.cart_id);
+            if (cartRow.quantity) setQuantity(Number(cartRow.quantity) || 1);
+            setShowUploadUI(true);
+        }
+    }, [location.state]);
+
+    // Build thumbnails: 1) main product image as first thumb, 2) clothing-banner-black/white/beige from signage-posters-images storage, 3) fallbacks
+    // Build thumbnails: 1) main product image as first thumb, 2) caps-black/white/beige from apparel-images storage, 3) fallbacks
     useEffect(() => {
         let isMounted = true;
         const tryGetPublic = async (bucket, keyBase) => {
@@ -68,97 +80,54 @@ const ClothingBanner = () => {
         const buildThumbnails = async () => {
             const results = [];
 
-            // first thumbnail: main product image
-            if (imageKey) {
-                // Use the same image resolution logic as the main product image
-                const cleanKey = String(imageKey).replace(/^\/+/, '');
-                const bucketsToTry = ['sinage-posters-images', 'accessoriesdecorations-images', 'apparel-images', '3d-prints-images', 'product-images', 'images', 'public'];
-                for (const bucket of bucketsToTry) {
-                    try {
-                        const { data, error } = supabase.storage.from(bucket).getPublicUrl(cleanKey);
-                        if (error) continue;
-                        const url = data?.publicUrl || data?.publicURL || null;
-                        if (url && !url.endsWith('/')) {
-                            results.push(url);
-                            break;
-                        }
-                    } catch (err) {
-                        // continue trying other buckets
-                    }
-                }
+            // first thumbnail: ensure clothing-banner.png is always first
+            results.push('/signages & posters/clothing-banner.png');
+
+            // desired variant thumbnails
+            const desired = ['clothing-banner-black', 'clothing-banner-white', 'clothing-banner-beige'];
+            for (const name of desired) {
+                if (results.length >= 4) break;
+                const url = await tryGetPublic('signage-posters-images', name);
+                if (url) results.push(url);
             }
 
-            // If we couldn't get the main product image, use fallback
-            if (results.length === 0) {
-                try {
-                    const { data } = supabase.storage.from('sinage-posters-images').getPublicUrl('clothing-banner.png');
-                    const url = data?.publicUrl;
-                    if (url && !url.endsWith('/')) {
-                        results.push(url);
-                    } else {
-                        results.push('/logo-icon/logo.png');
-                    }
-                } catch (err) {
-                    results.push('/logo-icon/logo.png');
-                }
-            }
-
-            // Add additional thumbnails based on the main image (variations)
-            if (imageKey && results.length > 0) {
-                const cleanKey = String(imageKey).replace(/^\/+/, '');
-                const m = cleanKey.match(/(.+?)\.(png|jpg|jpeg|webp|gif)$/i);
-                const base = m ? m[1] : cleanKey;
-                
-                // Try to get variations of the main image
-                const variations = [`${base}-1`, `${base}-2`, `${base}-3`];
-                const bucketsToTry = ['sinage-posters-images', 'accessoriesdecorations-images', 'apparel-images', '3d-prints-images', 'product-images', 'images', 'public'];
-                
-                for (const variation of variations) {
+            // if still short, try deriving from imageKey variants (numbered suffixes)
+            if (results.length < 4 && imageKey) {
+                const key = imageKey.toString().replace(/^\/+/, '');
+                const m = key.match(/(.+?)\.(png|jpg|jpeg|webp|gif)$/i);
+                const base = m ? m[1] : key;
+                const extras = [base + '-1', base + '-2', base + '-3'];
+                for (const cand of extras) {
                     if (results.length >= 4) break;
-                    for (const bucket of bucketsToTry) {
-                        try {
-                            const { data, error } = supabase.storage.from(bucket).getPublicUrl(variation + (m ? '.' + m[2] : '.png'));
-                            if (error) continue;
-                            const url = data?.publicUrl || data?.publicURL || null;
-                            if (url && !url.endsWith('/')) {
-                                results.push(url);
-                                break;
-                            }
-                        } catch (err) {
-                            // continue
-                        }
-                    }
+                    const url = await tryGetPublic('signage-posters-images', cand);
+                    if (url) results.push(url);
                 }
             }
 
-            // Fill remaining slots with the main image or fallbacks
-            while (results.length < 4) {
-                if (results.length === 0) {
-                    results.push('/logo-icon/logo.png');
-                } else {
-                    results.push(results[0]); // Duplicate the main image
-                }
+            // last-resort local fallbacks
+            const fallbacks = ['/signages & posters/clothing-banner.png', '/signages & posters/clothing-banner-1.png', '/signages & posters/clothing-banner-2.png', '/logo-icon/logo.png'];
+            for (const f of fallbacks) {
+                if (results.length >= 4) break;
+                try {
+                    const r = await fetch(f, { method: 'HEAD' });
+                    if (r.ok) results.push(f);
+                } catch (e) { /* ignore */ }
             }
+
+            if (!isMounted) return;
 
             // Deduplicate while preserving order
             const seen = new Set();
             const ordered = [];
             for (const u of results) {
                 if (!u) continue;
-                if (!seen.has(u)) { 
-                    seen.add(u); 
-                    ordered.push(u); 
-                }
+                if (!seen.has(u)) { seen.add(u); ordered.push(u); }
             }
 
             let padded = ordered.slice(0, 4);
-            while (padded.length < 4) {
-                padded.push(padded[0] || '/logo-icon/logo.png');
-            }
+            while (padded.length < 4) padded.push(undefined);
 
             setThumbnails(padded);
-
-            if (!isMounted) return;
 
             // Preserve the user's clicked thumbnail when possible. If the previous active index
             // still points to a valid thumbnail, keep it. Otherwise choose the first available
@@ -174,13 +143,6 @@ const ClothingBanner = () => {
         return () => { isMounted = false; };
     }, [imageKey, imageSrc]);
 
-    // Cart editing state
-    useEffect(() => {
-        if (location.state?.fromCart && location.state?.cartRow) {
-            setFromCart(true);
-            setEditingCartId(location.state.cartRow.cart_id);
-        }
-    }, [location.state]);
 
     useEffect(() => {
         let isMounted = true;
@@ -212,11 +174,14 @@ const ClothingBanner = () => {
                     console.error('Error fetching product:', error.message || error);
                 } else if (data) {
                     console.log('Fetched product data:', data);
+                    console.log('Product image_url field:', data.image_url);
+                    console.log('Product image_url type:', typeof data.image_url);
                     setProductId(data.id ?? null);
                     setProductName(data.name || "");
                     setPrice(data.starting_price ?? null);
-                    setImageKey(data.image_url || "");
-                    console.log('Set imageKey to:', data.image_url || "");
+                    const newImageKey = data.image_url || "";
+                    console.log('Setting imageKey to:', newImageKey);
+                    setImageKey(newImageKey);
                 }
             } catch (err) {
                 if (!isMounted) return;
@@ -348,11 +313,16 @@ const ClothingBanner = () => {
     useEffect(() => {
         let isMounted = true;
         const resolveImage = async () => {
-            console.log('Resolving image for imageKey:', imageKey);
-            // If imageKey is not provided, prefer the sinage-posters-images bucket's clothing-banner.png
+            console.log('Starting image resolution for imageKey:', imageKey);
+            // If imageKey is not provided, use the default clothing banner
+            if (!imageKey) {
+                if (isMounted) setImageSrc('/signages & posters/clothing-banner.png');
+                return;
+            }
+            // If imageKey is not provided, prefer the signage-posters-images bucket's clothing-banner.png
             if (!imageKey) {
                 try {
-                    const { data } = supabase.storage.from('sinage-posters-images').getPublicUrl('clothing-banner.png');
+                    const { data } = supabase.storage.from('signage-posters-images').getPublicUrl('clothing-banner.png');
                     const url = data?.publicUrl;
                     if (url && !url.endsWith('/')) {
                         if (isMounted) setImageSrc(url);
@@ -375,8 +345,8 @@ const ClothingBanner = () => {
 
                 const cleanKey = String(imageKey).replace(/^\/+/, ''); // remove leading slash(es)
 
-                // Try buckets in order; include sinage-posters-images first for retractable banners
-                const bucketsToTry = ['sinage-posters-images', 'accessoriesdecorations-images', 'apparel-images', '3d-prints-images', 'product-images', 'images', 'public'];
+                // Try buckets in the same order used elsewhere for signage -> accessories -> apparel fallback
+                const bucketsToTry = ['signage-posters-images', 'accessoriesdecorations-images', 'apparel-images', '3d-prints-images', 'product-images', 'images', 'public'];
                 for (const bucket of bucketsToTry) {
                     try {
                         const { data, error } = supabase.storage.from(bucket).getPublicUrl(cleanKey);
@@ -396,11 +366,11 @@ const ClothingBanner = () => {
                 }
 
                 // Last-resort fallback to local public asset
-                if (isMounted) setImageSrc('/logo-icon/logo.png');
+                if (isMounted) setImageSrc('/signages & posters/clothing-banner.png');
                 console.warn('[ClothingBanner] could not resolve imageKey to a public URL, using fallback', { imageKey });
             } catch (err) {
                 console.error('Error resolving image public URL:', err);
-                if (isMounted) setImageSrc('/logo-icon/logo.png');
+                if (isMounted) setImageSrc('/signages & posters/clothing-banner.png');
             }
         };
         resolveImage();
@@ -569,10 +539,13 @@ const ClothingBanner = () => {
     };
 
     const [totalPrice, setTotalPrice] = useState(0);
+    const [unitPrice, setUnitPrice] = useState(0);
     useEffect(() => {
         const base = (price || 0);
         const variantPrice = Object.values(selectedVariants).reduce((acc, val) => acc + (val?.price || 0), 0);
-        setTotalPrice((base + variantPrice) * (quantity || 1));
+        const calculatedUnitPrice = base + variantPrice;
+        setUnitPrice(calculatedUnitPrice);
+        setTotalPrice(calculatedUnitPrice * (quantity || 1));
     }, [price, selectedVariants, quantity]);
 
     // Add to Cart logic (from ToteBag)
@@ -667,8 +640,8 @@ const ClothingBanner = () => {
                         const { error: updateError } = await supabase
                             .from("cart")
                             .update({ quantity: newQuantity, total_price: newTotal, base_price: Number(unitPrice) || Number(price) || 0, route: location?.pathname || `/${slug}`, slug: slug || null })
-                        .eq("cart_id", cart.cart_id)
-                        .eq("user_id", userId);
+                            .eq("cart_id", cart.cart_id)
+                            .eq("user_id", userId);
                     if (updateError) throw updateError;
                     cartId = cart.cart_id;
                     break;
@@ -683,7 +656,7 @@ const ClothingBanner = () => {
                             user_id: userId,
                             product_id: productId,
                             quantity: quantity,
-                                base_price: Number(unitPrice) || Number(price) || 0,
+                            base_price: Number(unitPrice) || Number(price) || 0,
                             total_price: totalPrice,
                             route: location?.pathname || `/${slug}`,
                             slug: slug || null,
@@ -715,6 +688,14 @@ const ClothingBanner = () => {
 
             setCartSuccess("Item added to cart!");
             setQuantity(1);
+            // Reset upload state after successful cart addition
+            setUploadedFileMetas([]);
+            setUploadResetKey(prev => prev + 1);
+            setShowUploadUI(true);
+            
+            // Dispatch cart-created event to associate uploaded files with the cart
+            window.dispatchEvent(new CustomEvent('cart-created', { detail: { cartId } }));
+            
             setTimeout(() => setCartSuccess(null), 3000);
         } catch (err) {
             console.error("Error adding to cart - Details:", { message: err.message, code: err.code, details: err.details });
@@ -997,7 +978,7 @@ const ClothingBanner = () => {
 
                         <div className="mb-6">
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">UPLOAD DESIGN</div>
-                            <UploadDesign productId={productId} session={session} />
+                            <UploadDesign key={uploadResetKey} productId={productId} session={session} hidePreviews={!showUploadUI} isEditMode={fromCart && !!editingCartId} cartId={fromCart ? editingCartId : null} />
                         </div>
 
                         <div className="mb-6">
@@ -1013,18 +994,7 @@ const ClothingBanner = () => {
 
                         {/* footer actions pinned at bottom */}
                         <div className="flex items-center gap-4 mt-4">
-                            <UploadDesign 
-                                productId={productId} 
-                                session={session} 
-                                uploadedFileMetas={uploadedFileMetas}
-                                setUploadedFileMetas={setUploadedFileMetas}
-                                uploadResetKey={uploadResetKey}
-                                setUploadResetKey={setUploadResetKey}
-                                showUploadUI={showUploadUI}
-                                setShowUploadUI={setShowUploadUI}
-                                isEditMode={fromCart && !!editingCartId}
-                                cartId={fromCart ? editingCartId : null}
-                            />
+                            
                             <button type="button" onClick={handleAddToCart} className="bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0">{cartSuccess ? cartSuccess : (fromCart ? 'UPDATE CART' : 'ADD TO CART')}</button>
                             {cartError && <div className="text-red-600 text-sm ml-2">{cartError}</div>}
                             <button
