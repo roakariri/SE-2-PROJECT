@@ -4,6 +4,7 @@ import ForgotPassword from "./components/visitor/ForgotPassword";
 import ResetConfirmation from "./components/visitor/ResetConfirmation";
 import Signup from "./components/visitor/Signup";
 import Signin from "./components/visitor/Signin";
+import Admin from "./Admin";
 
 
 import ResetPassword from "./components/visitor/ResetPassword";
@@ -87,6 +88,7 @@ import Deals from "./Deals";
   //Mug
   import Mug from "./Mug"
 
+
 //Sinage and Posters
   //Custom Poster
   import Poster from "./Poster"
@@ -131,6 +133,10 @@ import StampSeal from "./Stamp-Seal";
 
 //check put 
   import Checkout from "./Checkout";
+
+
+
+
 
 
 export const router = createBrowserRouter([
@@ -319,7 +325,14 @@ export const router = createBrowserRouter([
   //checkout 
   {path: "/checkout", element: <Checkout />},
 
+
+
+//Admin
+  {path: "/Admin", element: <Admin />},
+
 ]);
+
+
 
 
 
