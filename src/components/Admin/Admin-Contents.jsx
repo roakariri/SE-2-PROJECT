@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
 
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
+
 // Small color name map reused from Cart page for hex -> friendly name
 const colorNames = {
     "#c40233": "Red",
@@ -25,6 +27,96 @@ const normalizeHexCode = (value) => {
     return hexRegex.test(normalized) ? normalized : value;
 };
 
+// Resolve image key like Cap-Info: accept full URLs or plain keys, try a list of buckets
+// using getPublicUrl(cleanKey), and if the key already contains a bucket/path try that directly.
+const resolveImageKeyAsync = async (img) => {
+    if (!img) return null;
+    try {
+        const s = String(img).trim();
+        if (/^https?:\/\//i.test(s) || s.startsWith('/')) return s;
+
+        const cleanKey = s.replace(/^\/+/, '');
+
+        // Try a list of likely buckets (same order used in Cap-Info)
+    // Default bucket order (generic)
+    let bucketsToTry = ['accessoriesdecorations-images', 'apparel-images', '3d-prints-images', 'product-images', 'images', 'public'];
+        // If this product looks like apparel, prefer apparel-images first (matches product pages)
+        try {
+            const look = String((productName || productTypes?.name || category || '')).toLowerCase();
+            const apparelKeywords = ['apparel','shirt','t-shirt','tshirt','hoodie','sweatshirt','cap','hat','tote','bag','rtshirt','rounded_t-shirt','hoodie'];
+            const isApparel = apparelKeywords.some(k => look.includes(k)) || String(category || '').toLowerCase().includes('apparel');
+            if (isApparel) {
+                bucketsToTry = ['apparel-images', 'accessoriesdecorations-images', 'accessories-images', 'images', 'product-images', 'public'];
+            }
+        } catch (e) { /* ignore */ }
+
+        for (const bucket of bucketsToTry) {
+            try {
+                const { data, error } = supabase.storage.from(bucket).getPublicUrl(cleanKey);
+                // Supabase sometimes returns data.publicUrl or data.publicURL
+                const url = data?.publicUrl || data?.publicURL || null;
+                if (url && !String(url).endsWith('/')) return url;
+            } catch (e) {
+                // ignore and try next bucket
+            }
+        }
+
+        // If key looks like 'bucket/path/to/file.png', try using that bucket directly
+        const parts = cleanKey.split('/');
+        if (parts.length > 1) {
+            const bucket = parts.shift();
+            const path = parts.join('/');
+            try {
+                const { data, error } = supabase.storage.from(bucket).getPublicUrl(path);
+                const url = data?.publicUrl || data?.publicURL || null;
+                if (url && !String(url).endsWith('/')) return url;
+            } catch (e) {
+                // ignore
+            }
+        }
+
+        // Try signed URL for the most-likely bucket names (non-blocking)
+        for (const bucket of bucketsToTry) {
+            try {
+                const signed = await supabase.storage.from(bucket).createSignedUrl(cleanKey, 60);
+                const signedUrl = signed?.data?.signedUrl || signed?.signedUrl || null;
+                if (signedUrl) return signedUrl;
+            } catch (e) {
+                // ignore
+            }
+        }
+
+        // Fallback: return the original key so caller can synthesize a URL if desired
+        return cleanKey;
+    } catch (e) {
+        return null;
+    }
+};
+
+// Synchronous best-effort resolver used in render paths to avoid async/await.
+// It will return a publicUrl when possible (getPublicUrl is synchronous in the client).
+const resolveImageUrl = (img) => {
+    if (!img) return null;
+    try {
+        const s = String(img).trim();
+        if (s.startsWith('http://') || s.startsWith('https://')) return s;
+        const key = s.replace(/^\//, '');
+        const parts = key.split('/');
+        if (parts.length < 2) return s;
+        const bucket = parts.shift();
+        const path = parts.join('/');
+        try {
+            const res = supabase.storage.from(bucket).getPublicUrl(path);
+            const publicUrl = res?.data?.publicUrl || res?.publicUrl || null;
+            return publicUrl || s;
+        } catch (e) {
+            return s;
+        }
+    } catch (e) {
+        return null;
+    }
+};
+
 const StocksList = () => {
     const [rows, setRows] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -34,6 +126,7 @@ const StocksList = () => {
     const [categories, setCategories] = useState([]);
     const [selectedCategory, setSelectedCategory] = useState('All');
     const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
 
     useEffect(() => {
         let mounted = true;
@@ -149,7 +242,8 @@ const StocksList = () => {
                         }
                     }
 
-                    const mapped = data.map(inv => {
+                    const mapped = [];
+                    for (const inv of data) {
                         const combo = Array.isArray(inv.product_variant_combinations) ? inv.product_variant_combinations[0] : inv.product_variant_combinations;
                         const prod = combo?.products || combo?.product || (Array.isArray(combo?.products) ? combo.products[0] : null) || null;
                         const product = Array.isArray(prod) ? prod[0] : prod;
@@ -159,7 +253,48 @@ const StocksList = () => {
                         const category = productTypes?.product_categories?.name || productTypes?.name || '';
                         const category_id = productTypes?.category_id || productTypes?.product_categories?.id || null;
                         const price = product?.starting_price ?? product?.price ?? null;
-                        const image = product?.image_url || product?.image || null;
+                        const rawImageUrl = product?.image_url ?? null;
+                        const rawImage = rawImageUrl || product?.image || null;
+                        let resolvedFromImageUrl = null;
+                        try {
+                            resolvedFromImageUrl = rawImageUrl ? await resolveImageKeyAsync(rawImageUrl) : null;
+                        } catch (e) {
+                            resolvedFromImageUrl = rawImageUrl || null;
+                        }
+                        let image = null;
+                        try {
+                            image = rawImage ? await resolveImageKeyAsync(rawImage) : null;
+                        } catch (e) {
+                            image = rawImage || null;
+                        }
+
+                        // If resolution returned a non-http value (e.g. just "bucket/path.png"),
+                        // synthesize the public storage URL as a best-effort fallback.
+                        const buildPublicUrlFromKey = (key) => {
+                            if (!key) return null;
+                            try {
+                                const s = String(key).trim().replace(/^\//, '');
+                                if (s.startsWith('http://') || s.startsWith('https://')) return s;
+                                const parts = s.split('/');
+                                if (parts.length < 2) return null;
+                                const bucket = parts.shift();
+                                const path = parts.join('/');
+                                const base = SUPABASE_URL.replace(/\/$/, '');
+                                if (!base) return `/${bucket}/${path}`;
+                                return `${base}/storage/v1/object/public/${bucket}/${path}`;
+                            } catch (e) {
+                                return null;
+                            }
+                        };
+
+                        if ((!resolvedFromImageUrl || !(String(resolvedFromImageUrl).startsWith('http://') || String(resolvedFromImageUrl).startsWith('https://'))) && rawImageUrl) {
+                            const candidate = buildPublicUrlFromKey(rawImageUrl);
+                            if (candidate) resolvedFromImageUrl = candidate;
+                        }
+                        if ((!image || !(String(image).startsWith('http://') || String(image).startsWith('https://'))) && rawImage) {
+                            const candidate = buildPublicUrlFromKey(rawImage);
+                            if (candidate) image = candidate;
+                        }
 
                         const variantsArr = Array.isArray(combo?.variants) ? combo.variants : (combo?.variants != null ? [combo.variants] : []);
                         let variantPriceTotal = 0;
@@ -185,17 +320,17 @@ const StocksList = () => {
                         const basePrice = Number(price ?? 0);
                         const totalPrice = basePrice + variantPriceTotal;
 
-                        return {
+                        mapped.push({
                             inventory_id: inv.inventory_id,
                             combination_id: inv.combination_id,
                             quantity: inv.quantity,
                             low_stock_limit: inv.low_stock_limit,
                             status: inv.status,
                             updated_at: inv.updated_at,
-                            product: { id: product?.id, name: productName, category, category_id, price: totalPrice, image, basePrice },
+                            product: { id: product?.id, name: productName, category, category_id, price: totalPrice, image, image_url: resolvedFromImageUrl, image_key: rawImageUrl, basePrice },
                             variantDesc,
-                        };
-                    });
+                        });
+                    }
 
                     // If some rows lack a category name but have a category_id, fetch category names
                     const missingCatIds = Array.from(new Set((mapped || []).filter(m => (!m.product?.category || m.product.category === '') && m.product?.category_id).map(m => m.product.category_id)));
@@ -222,6 +357,13 @@ const StocksList = () => {
 
                     if (mounted) {
                         setRows(mapped);
+                        // Debug: log first few resolved image URLs so we can inspect why thumbnails are broken
+                        try {
+                            const sample = (mapped || []).slice(0, 12).map(m => ({ id: m.product?.id, name: m.product?.name, image_url: m.product?.image_url, image: m.product?.image }));
+                            console.debug('Stocks - resolved image samples', sample);
+                        } catch (e) {
+                            console.debug('Stocks - image sample debug failed', e);
+                        }
                         const cats = Array.from(new Set((mapped || []).map(r => r.product?.category).filter(Boolean)));
                         cats.sort();
                         setCategories(['All', ...cats]);
@@ -363,26 +505,43 @@ const StocksList = () => {
 
     if (loading) return <div className="text-gray-600">Loading inventory...</div>;
 
-    const filteredRows = selectedCategory && selectedCategory !== 'All' ? rows.filter(r => (r.product?.category || '') === selectedCategory) : rows;
+    let filteredRows = rows;
+    if (selectedCategory && selectedCategory !== 'All') {
+        filteredRows = filteredRows.filter(r => (r.product?.category || '') === selectedCategory);
+    }
+    if (searchQuery && String(searchQuery).trim() !== '') {
+        const q = String(searchQuery).trim().toLowerCase();
+        filteredRows = filteredRows.filter(r => (r.product?.name || '').toLowerCase().includes(q));
+    }
 
     return (
         <div>
             <div className="flex items-center justify-between mb-3">
                 <div />
                 <div className="relative">
-                    <button className="bg-white border px-3 py-1 rounded-md text-sm" onClick={() => setShowCategoryDropdown(s => !s)}>
+                    <button className="bg-[#2B4269] text-white border px-3 py-1 rounded-md text-sm" onClick={() => setShowCategoryDropdown(s => !s)}>
                         Category: {selectedCategory}
                     </button>
                     {showCategoryDropdown && (
                         <div className="absolute right-0 mt-1 bg-white border rounded shadow-md z-10 w-48">
                             {categories.map(cat => (
-                                <div key={cat} className={`px-3 py-2 hover:bg-gray-100 cursor-pointer ${cat === selectedCategory ? 'font-semibold' : ''}`} onClick={() => { setSelectedCategory(cat); setShowCategoryDropdown(false); }}>
+                                <div key={cat} className={`px-3 py-2 hover:bg-gray-100 bg-wh cursor-pointer ${cat === selectedCategory ? 'font-semibold' : ''}`} onClick={() => { setSelectedCategory(cat); setShowCategoryDropdown(false); }}>
                                     {cat}
                                 </div>
                             ))}
                         </div>
                     )}
                 </div>
+            </div>
+
+            <div className="mb-4 flex justify-end">
+                <input
+                    type="text"
+                    className="w-64 px-3 py-2 border rounded text-sm"
+                    placeholder="Search products by name..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                />
             </div>
 
             <div className="overflow-x-auto">
@@ -403,7 +562,27 @@ const StocksList = () => {
                         <tr key={r.inventory_id || r.combination_id} className="border-t">
                             <td className="px-4 py-3 align-top">
                                 <div className="flex items-center gap-3">
-                                    <img src={r.product?.image || '/apparel-images/caps.png'} alt="thumb" className="w-14 h-14 object-cover rounded" />
+                                    <img
+                                        src={(() => {
+                                            const key = r.product?.image_key || r.product?.image_url || r.product?.image;
+                                            if (!key) return '/apparel-images/caps.png';
+                                            const categoryName = (r.product?.category || '').toLowerCase();
+                                            try {
+                                                if (categoryName.includes('apparel')) return supabase.storage.from('apparel-images').getPublicUrl(key).data.publicUrl;
+                                                else if (categoryName.includes('accessories')) return supabase.storage.from('accessoriesdecorations-images').getPublicUrl(key).data.publicUrl;
+                                                else if (categoryName.includes('signage') || categoryName.includes('poster')) return supabase.storage.from('signage-posters-images').getPublicUrl(key).data.publicUrl;
+                                                else if (categoryName.includes('cards') || categoryName.includes('sticker')) return supabase.storage.from('cards-stickers-images').getPublicUrl(key).data.publicUrl;
+                                                else if (categoryName.includes('packaging')) return supabase.storage.from('packaging-images').getPublicUrl(key).data.publicUrl;
+                                                else if (categoryName.includes('3d print')) return supabase.storage.from('3d-prints-images').getPublicUrl(key).data.publicUrl;
+                                                else return supabase.storage.from('apparel-images').getPublicUrl(key).data.publicUrl;
+                                            } catch (e) {
+                                                return '/apparel-images/caps.png';
+                                            }
+                                        })()}
+                                        alt={r.product?.name || 'product'}
+                                        className="w-14 h-14 object-cover rounded"
+                                        onError={(e) => { try { e.currentTarget.src = '/apparel-images/caps.png'; } catch (ee) {} }}
+                                    />
                                     <div>
                                         <div className="text-gray-900 font-medium">{r.product?.name || '—'}</div>
                                         <div className="text-xs text-gray-500">{r.product?.id ? `TOTAL: ${r.quantity ?? '—'}` : ''}</div>
@@ -433,9 +612,31 @@ const StocksList = () => {
                                 {editingInventory && (editingInventory.inventory_id === r.inventory_id || editingInventory.combination_id === r.combination_id) ? (
                                     <div className="flex items-center gap-2">
                                         <div className="flex items-center border rounded-md overflow-hidden">
-                                            <button className="px-2" onClick={() => setEditQuantity(q => Math.max(0, q - 1))}>-</button>
-                                            <input className="w-16 text-center px-2" type="number" value={editQuantity} onChange={(e) => setEditQuantity(Number(e.target.value ?? 0))} />
-                                            <button className="px-2" onClick={() => setEditQuantity(q => q + 1)}>+</button>
+                                            <button className="px-2" onClick={() => setEditQuantity(q => {
+                                                const cur = Number(q) || 0;
+                                                return Math.max(0, cur - 1);
+                                            })}>-</button>
+                                            <input
+                                                className="w-16 text-center px-2"
+                                                type="number"
+                                                value={editQuantity}
+                                                onFocus={() => { if (editQuantity === 0) setEditQuantity(''); }}
+                                                onBlur={() => { if (editQuantity === '') setEditQuantity(0); }}
+                                                onChange={(e) => {
+                                                    const raw = e.target.value;
+                                                    // allow clearing the field so admin can type new number (prevents leading zeros)
+                                                    if (raw === '') { setEditQuantity(''); return; }
+                                                    const num = Number(raw);
+                                                    if (Number.isNaN(num)) return;
+                                                    // clamp to 0..20
+                                                    const clamped = Math.min(20, Math.max(0, Math.floor(num)));
+                                                    setEditQuantity(clamped);
+                                                }}
+                                            />
+                                            <button className="px-2" onClick={() => setEditQuantity(q => {
+                                                const cur = Number(q) || 0;
+                                                return Math.min(20, cur + 1);
+                                            })}>+</button>
                                         </div>
                                         <div className="flex items-center gap-2">
                                             <button
@@ -443,8 +644,10 @@ const StocksList = () => {
                                                 disabled={editLoading}
                                                 onClick={async () => {
                                                         try {
-                                                            setEditLoading(true);
-                                                            const updateData = { quantity: Number(editQuantity) };
+                                                                    setEditLoading(true);
+                                                                    // Ensure quantity is within allowed bounds 0..20
+                                                                    const sanitized = Math.min(20, Math.max(0, Number(editQuantity) || 0));
+                                                                    const updateData = { quantity: sanitized };
                                                             let upData = null;
                                                             let upErr = null;
                                                             const attempts = [];
@@ -571,8 +774,7 @@ const AdminContents = () => {
     return (
         <div className="flex-1 ml-[263px] p-8 bg-gray-50 min-h-screen">
             <div className="mb-6">
-                <h1 className="text-2xl font-bold text-gray-900">Admin • {selected}</h1>
-                <p className="text-gray-600 mt-1">Use the sidebar to switch sections. Content containers are shown in-page.</p>
+                <p className="text-[32px] font-bold font-dm-sans text-gray-900">{selected}</p>
             </div>
 
             <div>
@@ -581,9 +783,7 @@ const AdminContents = () => {
                     <p className="text-gray-700">Overview and quick stats go here.</p>
                 </div>
 
-                <div style={{ display: selected === 'Stocks' ? 'block' : 'none' }} className={`${containerClass} mt-6`}>
-                    <h2 className="text-lg font-semibold mb-3">Stocks</h2>
-                    <p className="text-gray-700 mb-4">Inventory and stock controls — fetched from the <code>inventory</code> table.</p>
+                <div style={{ display: selected === 'Stocks' ? 'block' : 'none' }} className={`${containerClass} mt-1`}>
                     <StocksList />
                 </div>
 
