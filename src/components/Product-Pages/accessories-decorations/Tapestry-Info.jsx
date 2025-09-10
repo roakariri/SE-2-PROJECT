@@ -29,6 +29,7 @@ const Tapestry = () => {
     const [quantity, setQuantity] = useState(1);
     const [variantGroups, setVariantGroups] = useState([]);
     const [selectedVariants, setSelectedVariants] = useState({});
+    const [stockInfo, setStockInfo] = useState(null);
     const [editingCartId, setEditingCartId] = useState(null);
     const [fromCart, setFromCart] = useState(false);
     const [uploadedFileMetas, setUploadedFileMetas] = useState([]); // DB rows
@@ -397,6 +398,51 @@ const Tapestry = () => {
             return updated;
         });
     }, [variantGroups]);
+
+    useEffect(() => {
+        const fetchStockInfo = async () => {
+            console.debug('[Stock][Tapestry] fetchStockInfo start', { productId, variantGroupsLen: variantGroups.length, selectedVariants });
+            if (!productId || !variantGroups.length) {
+                console.debug('[Stock][Tapestry] no productId or no variantGroups');
+                setStockInfo(null);
+                return;
+            }
+            const variantIds = Object.values(selectedVariants).map(v => v?.id).filter(Boolean);
+            console.debug('[Stock][Tapestry] variantIds computed', { variantIds });
+            if (variantIds.length !== variantGroups.length) {
+                console.debug('[Stock][Tapestry] not all variants selected', { variantIdsLen: variantIds.length, groups: variantGroups.length });
+                setStockInfo(null);
+                return;
+            }
+            const sortedVariantIds = [...variantIds].sort((a, b) => a - b);
+
+            const { data: combinations, error: combError } = await supabase
+                .from('product_variant_combinations')
+                .select('combination_id, variants')
+                .eq('product_id', productId);
+            console.debug('[Stock][Tapestry] fetched combinations', { combinationsLength: (combinations || []).length, combError });
+            if (combError) { console.debug('[Stock][Tapestry] combination query error', combError); setStockInfo(null); return; }
+
+            const match = (combinations || []).find(row => {
+                if (!row.variants || row.variants.length !== sortedVariantIds.length) return false;
+                const a = [...row.variants].sort((x, y) => x - y);
+                return a.every((v, i) => v === sortedVariantIds[i]);
+            });
+            console.debug('[Stock][Tapestry] match result', { match });
+            if (!match) { console.debug('[Stock][Tapestry] no match found'); setStockInfo(null); return; }
+
+            const { data: inventory, error: invError } = await supabase
+                .from('inventory')
+                .select('quantity, low_stock_limit')
+                .eq('combination_id', match.combination_id)
+                .eq('status', 'in_stock')
+                .single();
+            console.debug('[Stock][Tapestry] inventory query result', { inventory, invError });
+            if (invError || !inventory) { console.debug('[Stock][Tapestry] no inventory or error', invError); setStockInfo(null); return; }
+            setStockInfo(inventory);
+        };
+        fetchStockInfo();
+    }, [productId, variantGroups, selectedVariants]);
 
     // Resolve imageKey to a public URL (robust: accepts full urls, leading slashes, and tries common buckets)
     useEffect(() => {
@@ -1036,6 +1082,17 @@ const Tapestry = () => {
                         <div className="text-3xl text-[#EF7D66] font-bold mb-4">
                             {loading ? "" : `₱${totalPrice.toFixed(2)}`}
                             <p className="italic text-black text-[12px]">Shipping calculated at checkout.</p>
+                            <div className="mt-2 text-sm">
+                                {variantGroups.length === 0 || Object.keys(selectedVariants).length !== variantGroups.length ? (
+                                    <span className="text-gray-500">Select all variants to see stock.</span>
+                                ) : stockInfo === null ? (
+                                    <span className="text font-semibold">Checking stocks.</span>
+                                ) : stockInfo.quantity > 0 ? (
+                                    <span className="text-green-700 font-semibold">Stock: {stockInfo.quantity}</span>
+                                ) : (
+                                    <span className="text-red-600 font-semibold">Out of stock</span>
+                                )}
+                            </div>
                         </div>
                         <hr className="mb-6" />
 

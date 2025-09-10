@@ -40,6 +40,7 @@ const AcrylicKeychain = () => {
     const [width, setWidth] = useState(0.6);
     const [editingCartId, setEditingCartId] = useState(null);
     const [fromCart, setFromCart] = useState(false);
+    const [stockInfo, setStockInfo] = useState(null);
     const [uploadedFileMetas, setUploadedFileMetas] = useState([]); // DB rows
     const [uploadResetKey, setUploadResetKey] = useState(0);
     const [showUploadUI, setShowUploadUI] = useState(true);
@@ -189,6 +190,52 @@ const AcrylicKeychain = () => {
             return updated;
         });
     }, [variantGroups]);
+
+    // Fetch stock info based on selected variants (copied from Cap-Info)
+    useEffect(() => {
+        const fetchStockInfo = async () => {
+            console.debug('[Stock][AcrylicKeychain] fetchStockInfo start', { productId, variantGroupsLen: variantGroups.length, selectedVariants });
+            if (!productId || !variantGroups.length) {
+                console.debug('[Stock][AcrylicKeychain] no productId or no variantGroups');
+                setStockInfo(null);
+                return;
+            }
+            const variantIds = Object.values(selectedVariants).map(v => v?.id).filter(Boolean);
+            console.debug('[Stock][AcrylicKeychain] variantIds computed', { variantIds });
+            if (variantIds.length !== variantGroups.length) {
+                console.debug('[Stock][AcrylicKeychain] not all variants selected', { variantIdsLen: variantIds.length, groups: variantGroups.length });
+                setStockInfo(null);
+                return;
+            }
+            const sortedVariantIds = [...variantIds].sort((a, b) => a - b);
+
+            const { data: combinations, error: combError } = await supabase
+                .from('product_variant_combinations')
+                .select('combination_id, variants')
+                .eq('product_id', productId);
+            console.debug('[Stock][AcrylicKeychain] fetched combinations', { combinationsLength: (combinations || []).length, combError });
+            if (combError) { console.debug('[Stock][AcrylicKeychain] combination query error', combError); setStockInfo(null); return; }
+
+            const match = (combinations || []).find(row => {
+                if (!row.variants || row.variants.length !== sortedVariantIds.length) return false;
+                const a = [...row.variants].sort((x, y) => x - y);
+                return a.every((v, i) => v === sortedVariantIds[i]);
+            });
+            console.debug('[Stock][AcrylicKeychain] match result', { match });
+            if (!match) { console.debug('[Stock][AcrylicKeychain] no match found'); setStockInfo(null); return; }
+
+            const { data: inventory, error: invError } = await supabase
+                .from('inventory')
+                .select('quantity, low_stock_limit')
+                .eq('combination_id', match.combination_id)
+                .eq('status', 'in_stock')
+                .single();
+            console.debug('[Stock][AcrylicKeychain] inventory query result', { inventory, invError });
+            if (invError || !inventory) { console.debug('[Stock][AcrylicKeychain] no inventory or error', invError); setStockInfo(null); return; }
+            setStockInfo(inventory);
+        };
+        fetchStockInfo();
+    }, [productId, selectedVariants, variantGroups]);
 
     // derive accessories row (e.g., Hook Clasp / ACCESSORY / CLAMP) from variantGroups
     useEffect(() => {
@@ -1217,8 +1264,34 @@ const AcrylicKeychain = () => {
                         <div className="text-3xl text-[#EF7D66] font-bold mb-4">
                             {loading ? "" : `₱${totalPrice.toFixed(2)}`}
                             <p className="italic text-[12px]">Shipping calculated at checkout.</p>
+                            <div className="mt-2 text-sm">
+                                {variantGroups.length === 0 || Object.keys(selectedVariants).length !== variantGroups.length ? (
+                                    <span className="text-gray-500">Select all variants to see stock.</span>
+                                ) : stockInfo === null ? (
+                                    <span className="text font-semibold">Checking stocks.</span>
+                                ) : stockInfo.quantity > 0 ? (
+                                    <span className="text-green-700 font-semibold">Stock: {stockInfo.quantity}</span>
+                                ) : (
+                                    <span className="text-red-600 font-semibold">Out of stock</span>
+                                )}
+                            </div>
                         </div>
                         <hr className="mb-6" />
+
+                        <div className="mt-2 text-sm">
+                            {variantGroups.length === 0 || Object.keys(selectedVariants).length !== variantGroups.length ? (
+                                <span className="text-gray-500">Select all variants to see stock.</span>
+                            ) : stockInfo === null ? (
+                                <span className="text font-semibold">Checking stocks.</span>
+                            ) : stockInfo.quantity > 0 ? (
+                                <span className="text-green-700 font-semibold">Stock: {stockInfo.quantity}</span>
+                            ) : (
+                                <span className="text-red-600 font-semibold">Out of stock</span>
+                            )}
+                        </div>
+                        {stockInfo && stockInfo.low_stock_limit && stockInfo.quantity > 0 && stockInfo.quantity <= stockInfo.low_stock_limit && (
+                            <div className="text-xs text-yellow-600 mt-1">Hurry! Only {stockInfo.quantity} left in stock.</div>
+                        )}
 
                         {/* PRINTING (from variant groups) */}
                         <div className="mb-6">
@@ -1381,8 +1454,21 @@ const AcrylicKeychain = () => {
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">QUANTITY</div>
                             <div className="inline-flex items-center border border-black rounded">
                                 <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={decrementQuantity} aria-label="Decrease quantity" disabled={quantity <= 1}>-</button>
-                                <div className="px-4 text-black" aria-live="polite">{quantity}</div>
-                                <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={incrementQuantity} aria-label="Increase quantity">+</button>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={stockInfo?.quantity || undefined}
+                                    value={quantity}
+                                    onChange={(e) => {
+                                        const v = Number(e.target.value);
+                                        const maxStock = stockInfo?.quantity || Infinity;
+                                        setQuantity(isNaN(v) || v < 1 ? 1 : Math.min(v, maxStock));
+                                    }}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                                    className="w-20 text-center px-2 text-black outline-none"
+                                    aria-label="Quantity input"
+                                />
+                                <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={incrementQuantity} aria-label="Increase quantity" disabled={quantity >= (stockInfo?.quantity || Infinity)}>+</button>
                             </div>
                         </div>
 
