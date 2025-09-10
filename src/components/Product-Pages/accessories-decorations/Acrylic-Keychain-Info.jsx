@@ -1278,21 +1278,7 @@ const AcrylicKeychain = () => {
                         </div>
                         <hr className="mb-6" />
 
-                        <div className="mt-2 text-sm">
-                            {variantGroups.length === 0 || Object.keys(selectedVariants).length !== variantGroups.length ? (
-                                <span className="text-gray-500">Select all variants to see stock.</span>
-                            ) : stockInfo === null ? (
-                                <span className="text font-semibold">Checking stocks.</span>
-                            ) : stockInfo.quantity > 0 ? (
-                                <span className="text-green-700 font-semibold">Stock: {stockInfo.quantity}</span>
-                            ) : (
-                                <span className="text-red-600 font-semibold">Out of stock</span>
-                            )}
-                        </div>
-                        {stockInfo && stockInfo.low_stock_limit && stockInfo.quantity > 0 && stockInfo.quantity <= stockInfo.low_stock_limit && (
-                            <div className="text-xs text-yellow-600 mt-1">Hurry! Only {stockInfo.quantity} left in stock.</div>
-                        )}
-
+                      
                         {/* PRINTING (from variant groups) */}
                         <div className="mb-6">
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">PRINTING</div>
