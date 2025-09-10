@@ -75,7 +75,7 @@ const AccessoriesCatalog = () => {
       } else {
         // Only show products whose type's category is 'Accessories & Documentation'
         const accessoriesProducts = data.filter(product =>
-          product.product_types?.product_categories?.name === 'Accessories & Documentation'
+          product.product_types?.product_categories?.name === 'Accessories & Decorations'
         );
         setProducts(accessoriesProducts);
         setFilteredProducts(accessoriesProducts);
