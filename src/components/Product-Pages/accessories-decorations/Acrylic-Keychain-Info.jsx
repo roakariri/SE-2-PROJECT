@@ -200,7 +200,8 @@ const AcrylicKeychain = () => {
                 setStockInfo(null);
                 return;
             }
-            const variantIds = Object.values(selectedVariants).map(v => v?.id).filter(Boolean);
+            // Only consider real variant groups when building IDs
+            const variantIds = (variantGroups || []).map(g => selectedVariants[g.id]?.id).filter(Boolean);
             console.debug('[Stock][AcrylicKeychain] variantIds computed', { variantIds });
             if (variantIds.length !== variantGroups.length) {
                 console.debug('[Stock][AcrylicKeychain] not all variants selected', { variantIdsLen: variantIds.length, groups: variantGroups.length });
@@ -1265,7 +1266,7 @@ const AcrylicKeychain = () => {
                             {loading ? "" : `₱${totalPrice.toFixed(2)}`}
                             <p className="italic text-[12px]">Shipping calculated at checkout.</p>
                             <div className="mt-2 text-sm">
-                                {variantGroups.length === 0 || Object.keys(selectedVariants).length !== variantGroups.length ? (
+                                {variantGroups.length === 0 || (variantGroups || []).some(g => !selectedVariants[g.id]) ? (
                                     <span className="text-gray-500">Select all variants to see stock.</span>
                                 ) : stockInfo === null ? (
                                     <span className="text font-semibold">Checking stocks.</span>

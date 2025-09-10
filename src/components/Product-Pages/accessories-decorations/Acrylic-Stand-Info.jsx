@@ -152,7 +152,9 @@ const Acrylicstand = () => {
                         vMap[String(groupId)] = {
                             id: pv.product_variant_value_id,
                             cart_variant_id: cv.cart_variant_id,
-                            variant_value_id: pv.product_variant_value_id,
+                            // use the true variant_value_id for matching
+                            variant_value_id: vv.variant_value_id,
+                            product_variant_value_id: pv.product_variant_value_id,
                             name: vv.value_name,
                             value: vv.value_name,
                             price: Number(cv.price ?? pv.price ?? 0)
@@ -229,6 +231,8 @@ const Acrylicstand = () => {
                         if (!groupEntry.values.some(v => v.id === pvv.product_variant_value_id)) {
                             groupEntry.values.push({
                                 id: pvv.product_variant_value_id,
+                                product_variant_value_id: pvv.product_variant_value_id,
+                                variant_value_id: vv.variant_value_id,
                                 name: vv.value_name || '',
                                 value: vv.value_name || '', // Using value_name as value
                                 price: pvv.price ?? 0,
@@ -266,48 +270,75 @@ const Acrylicstand = () => {
     }, [variantGroups]);
 
     useEffect(() => {
+        let isMounted = true;
         const fetchStockInfo = async () => {
-            console.debug('[Stock][AcrylicStand] fetchStockInfo start', { productId, variantGroupsLen: variantGroups.length, selectedVariants });
-            if (!productId || !variantGroups.length) {
-                console.debug('[Stock][AcrylicStand] no productId or no variantGroups');
-                setStockInfo(null);
-                return;
+            console.log('[Stock][AcrylicStand] start', { productId, variantGroupsLen: variantGroups.length, selectedVariants });
+            if (!productId) return;
+            if (!variantGroups || variantGroups.length === 0) return;
+            const selectedCount = variantGroups.filter(g => !!selectedVariants[g.id]).length;
+            if (selectedCount !== variantGroups.length) { if (isMounted) setStockInfo(null); return; }
+            try {
+                const selectedValuesFromGroups = variantGroups.map(g => selectedVariants[g.id]).filter(Boolean);
+                const selectedValueIds = selectedValuesFromGroups.map(v => Number(v?.variant_value_id)).filter(Boolean).sort((a,b)=>a-b);
+                const selectedPVVIds = selectedValuesFromGroups.map(v => Number(v?.product_variant_value_id ?? v?.id)).filter(Boolean).sort((a,b)=>a-b);
+                console.log('[Stock][AcrylicStand] selectedIds', { selectedValueIds, selectedPVVIds });
+
+                let combos = null; let comboError = null;
+                let resp = await supabase
+                    .from('product_variant_combinations')
+                    .select('combination_id, variants, variant_value_ids')
+                    .eq('product_id', productId);
+                if (resp.error) {
+                    console.log('[Stock][AcrylicStand] combos first select failed, falling back to variants-only', resp.error);
+                    const resp2 = await supabase
+                        .from('product_variant_combinations')
+                        .select('combination_id, variants')
+                        .eq('product_id', productId);
+                    combos = resp2.data; comboError = resp2.error;
+                } else {
+                    combos = resp.data; comboError = resp.error;
+                }
+                console.log('[Stock][AcrylicStand] combos fetched', { combosLen: (combos || []).length, comboError });
+                if (comboError || !combos) { if (isMounted) setStockInfo({ quantity: 0 }); return; }
+
+                const match = combos.find(c => {
+                    const vvids = (Array.isArray(c.variant_value_ids) ? c.variant_value_ids : []).map(Number).filter(Boolean).sort((a,b)=>a-b);
+                    const variants = (Array.isArray(c.variants) ? c.variants : []).map(Number).filter(Boolean).sort((a,b)=>a-b);
+                    const vvMatch = selectedValueIds.length > 0 && vvids.length === selectedValueIds.length && vvids.every((v,i)=>v === selectedValueIds[i]);
+                    if (vvMatch) return true;
+                    const varMatch = selectedPVVIds.length > 0 && variants.length === selectedPVVIds.length && variants.every((v,i)=>v === selectedPVVIds[i]);
+                    return varMatch;
+                });
+                console.log('[Stock][AcrylicStand] match', { match });
+                if (!match || !match.combination_id) { if (isMounted) setStockInfo({ quantity: 0 }); return; }
+
+                const { data: inv, error: invError } = await supabase
+                    .from('inventory')
+                    .select('inventory_id, quantity, low_stock_limit')
+                    .eq('combination_id', match.combination_id)
+                    .eq('status', 'in_stock')
+                    .single();
+                console.log('[Stock][AcrylicStand] inventory', { inv, invError });
+                if (invError || !inv) {
+                    const { data: invList, error: invAnyErr } = await supabase
+                        .from('inventory')
+                        .select('inventory_id, quantity, low_stock_limit, status')
+                        .eq('combination_id', match.combination_id)
+                        .order('inventory_id', { ascending: false })
+                        .limit(1);
+                    const inv2 = Array.isArray(invList) ? invList[0] : null;
+                    console.log('[Stock][AcrylicStand] inventory fallback', { inv2, invAnyErr });
+                    if (isMounted) setStockInfo(inv2 || { quantity: 0 });
+                    return;
+                }
+                if (isMounted) setStockInfo(inv);
+            } catch (err) {
+                console.error('Error fetching stock info [AcrylicStand]:', err);
+                if (isMounted) setStockInfo({ quantity: 0 });
             }
-            const variantIds = Object.values(selectedVariants).map(v => v?.id).filter(Boolean);
-            console.debug('[Stock][AcrylicStand] variantIds computed', { variantIds });
-            if (variantIds.length !== variantGroups.length) {
-                console.debug('[Stock][AcrylicStand] not all variants selected', { variantIdsLen: variantIds.length, groups: variantGroups.length });
-                setStockInfo(null);
-                return;
-            }
-            const sortedVariantIds = [...variantIds].sort((a, b) => a - b);
-
-            const { data: combinations, error: combError } = await supabase
-                .from('product_variant_combinations')
-                .select('combination_id, variants')
-                .eq('product_id', productId);
-            console.debug('[Stock][AcrylicStand] fetched combinations', { combinationsLength: (combinations || []).length, combError });
-            if (combError) { console.debug('[Stock][AcrylicStand] combination query error', combError); setStockInfo(null); return; }
-
-            const match = (combinations || []).find(row => {
-                if (!row.variants || row.variants.length !== sortedVariantIds.length) return false;
-                const a = [...row.variants].sort((x, y) => x - y);
-                return a.every((v, i) => v === sortedVariantIds[i]);
-            });
-            console.debug('[Stock][AcrylicStand] match result', { match });
-            if (!match) { console.debug('[Stock][AcrylicStand] no match found'); setStockInfo(null); return; }
-
-            const { data: inventory, error: invError } = await supabase
-                .from('inventory')
-                .select('quantity, low_stock_limit')
-                .eq('combination_id', match.combination_id)
-                .eq('status', 'in_stock')
-                .single();
-            console.debug('[Stock][AcrylicStand] inventory query result', { inventory, invError });
-            if (invError || !inventory) { console.debug('[Stock][AcrylicStand] no inventory or error', invError); setStockInfo(null); return; }
-            setStockInfo(inventory);
         };
         fetchStockInfo();
+        return () => { isMounted = false; };
     }, [productId, variantGroups, selectedVariants]);
 
     // Resolve imageKey to a public URL (robust: accepts full urls, leading slashes, and tries common buckets)
@@ -591,7 +622,8 @@ const Acrylicstand = () => {
 
                 if (!isMounted) return;
                 if (error) {
-                    console.warn('[Cap-Info] reviews query error:', error.message || error);
+                    // Reviews table may not exist; ignore to reduce console noise
+                    // console.warn('[Cap-Info] reviews query error:', error.message || error);
                     setReviewsAvailable(false);
                     setReviewsCount(0);
                     setAverageRating(null);
@@ -1305,7 +1337,7 @@ const Acrylicstand = () => {
                             {loading ? "" : `₱${totalPrice.toFixed(2)}`}
                             <p className="italic text-[12px]">Shipping calculated at checkout.</p>
                             <div className="mt-2 text-sm">
-                                {variantGroups.length === 0 || Object.keys(selectedVariants).length !== variantGroups.length ? (
+                                {variantGroups.length === 0 || variantGroups.some(g => !selectedVariants[g.id]) ? (
                                     <span className="text-gray-500">Select all variants to see stock.</span>
                                 ) : stockInfo === null ? (
                                     <span className="text font-semibold">Checking stocks.</span>

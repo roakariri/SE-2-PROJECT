@@ -85,47 +85,6 @@ const ButtonPin = () => {
         fetchProduct();
         return () => { isMounted = false; };
     }, [slug]);
-                const fetchStockInfo = async () => {
-                    console.debug('[Stock][Mug] fetchStockInfo start', { productId, variantGroupsLen: variantGroups.length, selectedVariants });
-                    if (!productId || !variantGroups.length) {
-                        console.debug('[Stock][Mug] no productId or no variantGroups');
-                        setStockInfo(null);
-                        return;
-                    }
-                    const variantIds = Object.values(selectedVariants).map(v => v?.id).filter(Boolean);
-                    console.debug('[Stock][Mug] variantIds computed', { variantIds });
-                    if (variantIds.length !== variantGroups.length) {
-                        console.debug('[Stock][Mug] not all variants selected', { variantIdsLen: variantIds.length, groups: variantGroups.length });
-                        setStockInfo(null);
-                        return;
-                    }
-                    const sortedVariantIds = [...variantIds].sort((a, b) => a - b);
-
-                    const { data: combinations, error: combError } = await supabase
-                        .from('product_variant_combinations')
-                        .select('combination_id, variants')
-                        .eq('product_id', productId);
-                    console.debug('[Stock][Mug] fetched combinations', { combinationsLength: (combinations || []).length, combError });
-                    if (combError) { console.debug('[Stock][Mug] combination query error', combError); setStockInfo(null); return; }
-
-                    const match = (combinations || []).find(row => {
-                        if (!row.variants || row.variants.length !== sortedVariantIds.length) return false;
-                        const a = [...row.variants].sort((x, y) => x - y);
-                        return a.every((v, i) => v === sortedVariantIds[i]);
-                    });
-                    console.debug('[Stock][Mug] match result', { match });
-                    if (!match) { console.debug('[Stock][Mug] no match found'); setStockInfo(null); return; }
-
-                    const { data: inventory, error: invError } = await supabase
-                        .from('inventory')
-                        .select('quantity, low_stock_limit')
-                        .eq('combination_id', match.combination_id)
-                        .eq('status', 'in_stock')
-                        .single();
-                    console.debug('[Stock][Mug] inventory query result', { inventory, invError });
-                    if (invError || !inventory) { console.debug('[Stock][Mug] no inventory or error', invError); setStockInfo(null); return; }
-                    setStockInfo(inventory);
-                };
     // Handle cart editing state
     useEffect(() => {
         if (location.state?.fromCart && location.state?.cartRow) {
@@ -180,7 +139,8 @@ const ButtonPin = () => {
                         vMap[String(groupId)] = {
                             id: pv.product_variant_value_id,
                             cart_variant_id: cv.cart_variant_id,
-                            variant_value_id: pv.product_variant_value_id,
+                            // use the true variant_value_id, not the product_variant_value_id
+                            variant_value_id: vv.variant_value_id,
                             name: vv.value_name,
                             value: vv.value_name,
                             price: Number(cv.price ?? pv.price ?? 0)
@@ -294,26 +254,50 @@ const ButtonPin = () => {
     useEffect(() => {
         let isMounted = true;
         const fetchStockInfo = async () => {
-            console.debug('[Stock][Mug] start', { productId, variantGroupsLen: variantGroups.length, selectedVariants });
+            console.log('[Stock][Mug] start', { productId, variantGroupsLen: variantGroups.length, selectedVariants });
             if (!productId) { console.debug('[Stock][Mug] no productId'); return; }
             if (!variantGroups || variantGroups.length === 0) { console.debug('[Stock][Mug] no variantGroups'); return; }
             if (Object.keys(selectedVariants).length !== variantGroups.length) { console.debug('[Stock][Mug] not all selected'); if (isMounted) setStockInfo(null); return; }
             try {
-                const selectedIds = Object.values(selectedVariants).map(v => Number(v?.id ?? v?.product_variant_value_id ?? v?.variant_value_id)).filter(Boolean).sort((a,b) => a-b);
-                console.debug('[Stock][Mug] selectedIds', { selectedIds });
-                const { data: combos, error: comboError } = await supabase
+                // Build both sets: true variant_value_ids and product_variant_value_ids
+                const selectedValueIds = Object.values(selectedVariants)
+                    .map(v => Number(v?.variant_value_id))
+                    .filter(Boolean)
+                    .sort((a,b) => a-b);
+                const selectedPVVIds = Object.values(selectedVariants)
+                    .map(v => Number(v?.product_variant_value_id ?? v?.id))
+                    .filter(Boolean)
+                    .sort((a,b) => a-b);
+                console.log('[Stock][Mug] selectedIds', { selectedValueIds, selectedPVVIds });
+
+                // Query combinations; fallback if variant_value_ids is not a valid column
+                let combos = null; let comboError = null;
+                let resp = await supabase
                     .from('product_variant_combinations')
                     .select('combination_id, variants, variant_value_ids')
                     .eq('product_id', productId);
-                console.debug('[Stock][Mug] combos fetched', { combosLen: (combos || []).length, comboError });
+                if (resp.error) {
+                    console.log('[Stock][Mug] combos first select failed, falling back to variants-only', resp.error);
+                    const resp2 = await supabase
+                        .from('product_variant_combinations')
+                        .select('combination_id, variants')
+                        .eq('product_id', productId);
+                    combos = resp2.data; comboError = resp2.error;
+                } else {
+                    combos = resp.data; comboError = resp.error;
+                }
+                console.log('[Stock][Mug] combos fetched', { combosLen: (combos || []).length, comboError });
                 if (comboError || !combos) { if (isMounted) setStockInfo({ quantity: 0 }); return; }
 
                 const match = combos.find(c => {
-                    const raw = c.variant_value_ids ?? c.variants ?? [];
-                    const ids = (Array.isArray(raw) ? raw : []).map(Number).filter(Boolean).sort((a,b) => a-b);
-                    return ids.length === selectedIds.length && ids.every((v,i) => v === selectedIds[i]);
+                    const vvids = (Array.isArray(c.variant_value_ids) ? c.variant_value_ids : []).map(Number).filter(Boolean).sort((a,b)=>a-b);
+                    const variants = (Array.isArray(c.variants) ? c.variants : []).map(Number).filter(Boolean).sort((a,b)=>a-b);
+                    const vvMatch = selectedValueIds.length > 0 && vvids.length === selectedValueIds.length && vvids.every((v,i)=>v === selectedValueIds[i]);
+                    if (vvMatch) return true;
+                    const varMatch = selectedPVVIds.length > 0 && variants.length === selectedPVVIds.length && variants.every((v,i)=>v === selectedPVVIds[i]);
+                    return varMatch;
                 });
-                console.debug('[Stock][Mug] match', { match });
+                console.log('[Stock][Mug] match', { match });
                 if (!match || !match.combination_id) { if (isMounted) setStockInfo({ quantity: 0 }); return; }
 
                 const { data: inv, error: invError } = await supabase
@@ -322,12 +306,24 @@ const ButtonPin = () => {
                     .eq('combination_id', match.combination_id)
                     .eq('status', 'in_stock')
                     .single();
-                console.debug('[Stock][Mug] inventory', { inv, invError });
-                if (invError || !inv) { if (isMounted) setStockInfo({ quantity: 0 }); return; }
+                console.log('[Stock][Mug] inventory', { inv, invError });
+                if (invError || !inv) {
+                    // Fallback: query without status filter and pick most recent
+                    const { data: invList, error: invAnyErr } = await supabase
+                        .from('inventory')
+                        .select('inventory_id, quantity, low_stock_limit, status')
+                        .eq('combination_id', match.combination_id)
+                        .order('inventory_id', { ascending: false })
+                        .limit(1);
+                    const inv2 = Array.isArray(invList) ? invList[0] : null;
+                    console.log('[Stock][Mug] inventory fallback', { inv2, invAnyErr });
+                    if (isMounted) setStockInfo(inv2 || { quantity: 0 });
+                    return;
+                }
                 if (isMounted) setStockInfo(inv);
             } catch (err) {
                 console.error('Error fetching stock info [Mug]:', err);
-                if (isMounted) setStockInfo(null);
+                if (isMounted) setStockInfo({ quantity: 0 });
             }
         };
         fetchStockInfo();
@@ -354,11 +350,11 @@ const ButtonPin = () => {
                 const cleanKey = String(imageKey).replace(/^\/+/, ''); // remove leading slash(es)
 
                 // Try buckets in the same order used elsewhere for accessories -> apparel fallback
-                const bucketsToTry = ['accessoriesdecorations-images', 'apparel-images', '3d-prints-images', 'product-images', 'images', 'public'];
+        const bucketsToTry = ['accessoriesdecorations-images', 'accessories-images', 'apparel-images', '3d-prints-images', 'product-images', 'images', 'public'];
                 for (const bucket of bucketsToTry) {
                     try {
-                        const { data, error } = supabase.storage.from(bucket).getPublicUrl(cleanKey);
-                        console.debug('[ShakerKeychain] getPublicUrl attempt', { bucket, cleanKey, data, error });
+            const { data, error } = supabase.storage.from(bucket).getPublicUrl(cleanKey);
+            console.debug('[Mug] getPublicUrl attempt', { bucket, cleanKey, data, error });
                         if (error) continue; // try next bucket
                         const url = data?.publicUrl || data?.publicURL || null;
                         // Supabase returns a publicUrl that ends with '/' when the object isn't found.
@@ -367,17 +363,17 @@ const ButtonPin = () => {
                             return;
                         }
                     } catch (err) {
-                        console.warn('[ShakerKeychain] bucket attempt failed', { bucket, err });
+            console.warn('[Mug] bucket attempt failed', { bucket, err });
                         // continue trying other buckets
                     }
                 }
 
                 // Last-resort fallback to local public asset
-                if (isMounted) setImageSrc('/apparel-images/caps.png');
-                console.warn('[ShakerKeychain] could not resolve imageKey to a public URL, using fallback', { imageKey });
+        if (isMounted) setImageSrc('/accessories-images/mugs.png');
+        console.warn('[Mug] could not resolve imageKey to a public URL, using fallback', { imageKey });
             } catch (err) {
                 console.error('Error resolving image public URL:', err);
-                if (isMounted) setImageSrc('/apparel-images/caps.png');
+        if (isMounted) setImageSrc('/accessories-images/mugs.png');
             }
         };
         resolveImage();
@@ -615,7 +611,8 @@ const ButtonPin = () => {
 
                 if (!isMounted) return;
                 if (error) {
-                    console.warn('[Cap-Info] reviews query error:', error.message || error);
+                    // Reviews table may not exist in some environments; ignore
+                    // console.warn('[Cap-Info] reviews query error:', error.message || error);
                     setReviewsAvailable(false);
                     setReviewsCount(0);
                     setAverageRating(null);
@@ -1236,7 +1233,7 @@ const ButtonPin = () => {
                             {loading ? "" : `₱${totalPrice.toFixed(2)}`}
                             <p className="italic text-[12px]">Shipping calculated at checkout.</p>
                             <div className="mt-2 text-sm">
-                                {variantGroups.length === 0 || Object.keys(selectedVariants).length !== variantGroups.length ? (
+                                {variantGroups.length === 0 || (variantGroups || []).some(g => !selectedVariants[g.id]) ? (
                                     <span className="text-gray-500">Select all variants to see stock.</span>
                                 ) : stockInfo === null ? (
                                     <span className="text font-semibold">Checking stocks.</span>
