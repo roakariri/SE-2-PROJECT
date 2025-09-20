@@ -33,6 +33,8 @@ const ClothingBanner = () => {
     const [selectedVariants, setSelectedVariants] = useState({});
     const [thumbnails, setThumbnails] = useState([]);
     const [activeThumb, setActiveThumb] = useState(0);
+    const [stockInfo, setStockInfo] = useState(null);
+    const headCacheRef = useRef(new Map());
 
     // upload design state (added for UploadDesign integration)
     const [uploadedFileMetas, setUploadedFileMetas] = useState([]); // DB rows
@@ -60,35 +62,44 @@ const ClothingBanner = () => {
     // Build thumbnails: 1) main product image as first thumb, 2) caps-black/white/beige from apparel-images storage, 3) fallbacks
     useEffect(() => {
         let isMounted = true;
-        const tryGetPublic = async (bucket, keyBase) => {
-            const exts = ['.png', '.jpg', '.jpeg', '.webp'];
-            for (const ext of exts) {
-                try {
-                    const { data } = supabase.storage.from(bucket).getPublicUrl(keyBase + ext);
-                    const url = data?.publicUrl;
-                    if (url && !url.endsWith('/')) {
-                        try {
-                            const head = await fetch(url, { method: 'HEAD' });
-                            if (head.ok) return url;
-                        } catch (e) { /* ignore */ }
-                    }
-                } catch (e) { /* ignore */ }
+        const headExists = async (url) => {
+            if (!url) return false;
+            const cache = headCacheRef.current;
+            if (cache.has(url)) return cache.get(url);
+            try {
+                const res = await fetch(url, { method: 'HEAD' });
+                const ok = !!res?.ok;
+                cache.set(url, ok);
+                return ok;
+            } catch {
+                cache.set(url, false);
+                return false;
             }
-            return null;
+        };
+
+        const tryGetPublic = async (bucket, keyBase) => {
+            const exts = ['.png', '.webp', '.jpg', '.jpeg'];
+            const candidates = exts.map(ext => {
+                const { data } = supabase.storage.from(bucket).getPublicUrl(keyBase + ext);
+                return data?.publicUrl;
+            }).filter(Boolean);
+            if (candidates.length === 0) return null;
+            const results = await Promise.all(candidates.map(u => headExists(u)));
+            const idx = results.findIndex(Boolean);
+            return idx >= 0 ? candidates[idx] : null;
         };
 
         const buildThumbnails = async () => {
             const results = [];
 
             // first thumbnail: ensure clothing-banner.png is always first
-            results.push('/signages & posters/clothing-banner.png');
+            results.push('/signages-posters/clothing-banner.png');
 
             // desired variant thumbnails
             const desired = ['clothing-banner-black', 'clothing-banner-white', 'clothing-banner-beige'];
-            for (const name of desired) {
-                if (results.length >= 4) break;
-                const url = await tryGetPublic('signage-posters-images', name);
-                if (url) results.push(url);
+            const desiredUrls = await Promise.all(desired.map(name => tryGetPublic('signage-posters-images', name)));
+            for (let i = 0; i < desired.length && results.length < 4; i++) {
+                if (desiredUrls[i]) results.push(desiredUrls[i]);
             }
 
             // if still short, try deriving from imageKey variants (numbered suffixes)
@@ -97,21 +108,19 @@ const ClothingBanner = () => {
                 const m = key.match(/(.+?)\.(png|jpg|jpeg|webp|gif)$/i);
                 const base = m ? m[1] : key;
                 const extras = [base + '-1', base + '-2', base + '-3'];
-                for (const cand of extras) {
-                    if (results.length >= 4) break;
-                    const url = await tryGetPublic('signage-posters-images', cand);
-                    if (url) results.push(url);
+                const extraUrls = await Promise.all(extras.map(cand => tryGetPublic('signage-posters-images', cand)));
+                for (let i = 0; i < extras.length && results.length < 4; i++) {
+                    if (extraUrls[i]) results.push(extraUrls[i]);
                 }
             }
 
             // last-resort local fallbacks
-            const fallbacks = ['/signages & posters/clothing-banner.png', '/signages & posters/clothing-banner-1.png', '/signages & posters/clothing-banner-2.png', '/logo-icon/logo.png'];
-            for (const f of fallbacks) {
-                if (results.length >= 4) break;
-                try {
-                    const r = await fetch(f, { method: 'HEAD' });
-                    if (r.ok) results.push(f);
-                } catch (e) { /* ignore */ }
+            const fallbacks = ['/signages-posters/clothing-banner.png', '/signages-posters/clothing-banner-1.png', '/signages-posters/clothing-banner-2.png', '/logo-icon/logo.png'];
+            if (results.length < 4) {
+                const okList = await Promise.all(fallbacks.map(u => headExists(u)));
+                for (let i = 0; i < fallbacks.length && results.length < 4; i++) {
+                    if (okList[i]) results.push(fallbacks[i]);
+                }
             }
 
             if (!isMounted) return;
@@ -309,6 +318,60 @@ const ClothingBanner = () => {
         setSelectedVariants(initial);
     }, [variantGroups]);
 
+    // Fetch stock info based on selected variants (subset-match + aggregate)
+    useEffect(() => {
+        const fetchStockInfo = async () => {
+            if (!productId || !variantGroups.length) {
+                setStockInfo(null);
+                return;
+            }
+
+            const variantIds = Object.values(selectedVariants)
+                .map(v => v?.id)
+                .filter(Boolean);
+
+            if (variantIds.length === 0) {
+                setStockInfo(null);
+                return;
+            }
+
+            const sortedVariantIds = [...variantIds].map(Number).sort((a, b) => a - b);
+
+            const { data: combinations, error: combError } = await supabase
+                .from('product_variant_combinations')
+                .select('combination_id, variants')
+                .eq('product_id', productId);
+
+            if (combError) { setStockInfo(null); return; }
+
+            const selectedSet = new Set(sortedVariantIds);
+            const candidates = (combinations || []).filter(row => Array.isArray(row.variants) && row.variants.length > 0 && row.variants.every(v => selectedSet.has(Number(v))));
+            const match = candidates.sort((a, b) => (b.variants?.length || 0) - (a.variants?.length || 0))[0];
+
+            if (!match) {
+                setStockInfo({ quantity: 0, low_stock_limit: 0 });
+                return;
+            }
+
+            const combinationIds = candidates.length > 0 ? candidates.map(c => c.combination_id) : [match.combination_id];
+            const { data: inventoryRows, error: invError } = await supabase
+                .from('inventory')
+                .select('quantity, low_stock_limit, combination_id')
+                .in('combination_id', combinationIds);
+
+            if (invError || !inventoryRows || inventoryRows.length === 0) {
+                setStockInfo({ quantity: 0, low_stock_limit: 0 });
+                return;
+            }
+
+            const totalQty = (inventoryRows || []).reduce((sum, r) => sum + (Number(r.quantity) || 0), 0);
+            const lowLimit = (inventoryRows && inventoryRows[0] && typeof inventoryRows[0].low_stock_limit === 'number') ? inventoryRows[0].low_stock_limit : 0;
+            setStockInfo({ quantity: totalQty, low_stock_limit: lowLimit });
+        };
+
+        fetchStockInfo();
+    }, [productId, selectedVariants, variantGroups]);
+
     // Resolve imageKey to a public URL (robust: accepts full urls, leading slashes, and tries common buckets)
     useEffect(() => {
         let isMounted = true;
@@ -316,7 +379,7 @@ const ClothingBanner = () => {
             console.log('Starting image resolution for imageKey:', imageKey);
             // If imageKey is not provided, use the default clothing banner
             if (!imageKey) {
-                if (isMounted) setImageSrc('/signages & posters/clothing-banner.png');
+                if (isMounted) setImageSrc('/signages-posters/clothing-banner.png');
                 return;
             }
             // If imageKey is not provided, prefer the signage-posters-images bucket's clothing-banner.png
@@ -366,11 +429,11 @@ const ClothingBanner = () => {
                 }
 
                 // Last-resort fallback to local public asset
-                if (isMounted) setImageSrc('/signages & posters/clothing-banner.png');
+                if (isMounted) setImageSrc('/signages-posters/clothing-banner.png');
                 console.warn('[ClothingBanner] could not resolve imageKey to a public URL, using fallback', { imageKey });
             } catch (err) {
                 console.error('Error resolving image public URL:', err);
-                if (isMounted) setImageSrc('/signages & posters/clothing-banner.png');
+                if (isMounted) setImageSrc('/signages-posters/clothing-banner.png');
             }
         };
         resolveImage();
@@ -838,6 +901,24 @@ const ClothingBanner = () => {
                         <div className="text-3xl text-[#EF7D66] font-bold mb-4">
                             {loading ? "" : `₱${totalPrice.toFixed(2)}`}
                             <p className="italic text-black text-[12px]">Shipping calculated at checkout.</p>
+                        </div>
+                        {/* Stock status (Cap-style) */}
+                        <div className="mb-2">
+                            {Object.values(selectedVariants).filter(v => v?.id).length > 0 ? (
+                                stockInfo ? (
+                                    stockInfo.quantity === 0 ? (
+                                        <span className="text-red-600 font-semibold">Out of Stocks</span>
+                                    ) : stockInfo.quantity <= 5 ? (
+                                        <span className="text-yellow-600 font-semibold">Low on Stocks: {stockInfo.quantity}</span>
+                                    ) : (
+                                        <span className="text-green-700 font-semibold">Stock: {stockInfo.quantity}</span>
+                                    )
+                                ) : (
+                                    <span className="text font-semibold">Checking stocks.</span>
+                                )
+                            ) : (
+                                <span className="text-gray-500">Select all variants to see stock.</span>
+                            )}
                         </div>
                         <hr className="mb-6" />
 

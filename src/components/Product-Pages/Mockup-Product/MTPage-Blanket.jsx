@@ -1,22 +1,44 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
+import { supabase } from "../../../supabaseClient";
+import { resolveProductImageUrl } from "./productImageResolver";
 
-const MockupToolPage = () => {
+const BlanketMockupToolPage = () => {
+    const navigate = useNavigate();
     const canvasElRef = useRef(null);
     const fileInputRef = useRef(null);
     const fabricCanvasRef = useRef(null);
     const [selectedObject, setSelectedObject] = useState(null);
     const [textValue, setTextValue] = useState("");
-    const [canvasSize, setCanvasSize] = useState({ width: 500, height: 700 });
+    const [canvasSize, setCanvasSize] = useState({ width: 560, height: 520 });
     const [recentUploads, setRecentUploads] = useState([]);
+    const [activeSide, setActiveSide] = useState('front');
+    const [zoomLevel, setZoomLevel] = useState(1);
+    const sideObjectsRef = useRef({ front: [], back: [] });
     const location = useLocation();
     const [fromCart, setFromCart] = useState(!!location.state?.fromCart);
+    const [productImageUrl, setProductImageUrl] = useState(null);
 
     useEffect(() => {
         if (location.state?.fromCart) {
             setFromCart(true);
         }
     }, [location.state]);
+
+    // Resolve product image from DB based on URL slug
+    useEffect(() => {
+        try {
+            const segments = window.location?.pathname?.split('/').filter(Boolean) || [];
+            const last = segments[segments.length - 1] || '';
+            const slugBase = last.endsWith('-mockuptool') ? last.replace(/-mockuptool$/, '') : last;
+            (async () => {
+                const { url } = await resolveProductImageUrl(supabase, slugBase);
+                setProductImageUrl(url);
+            })();
+        } catch {
+            setProductImageUrl(null);
+        }
+    }, []);
 
     useEffect(() => {
         const fabric = window.fabric;
@@ -33,28 +55,39 @@ const MockupToolPage = () => {
         });
         fabricCanvasRef.current = canvas;
 
-        // Load template as centered background cover
-        fabric.Image.fromURL("/apparel-images/front-t-shirt.png", (img) => {
-            if (!img) {
-                console.error("Failed to load t-shirt template image.");
-                return;
-            }
-            const imgWidth = img.width || img.naturalWidth || 1;
-            const imgHeight = img.height || img.naturalHeight || 1;
-            const scale = Math.max(canvas.width / imgWidth, canvas.height / imgHeight);
-            img.set({
-                originX: "center",
-                originY: "center",
-                left: canvas.width / 2,
-                top: canvas.height / 2,
-                scaleX: scale,
-                scaleY: scale,
-                selectable: false,
-                evented: false,
-            });
-            canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas));
-            canvas.renderAll();
-        });
+        // Helper to set background (front/back) as centered cover
+        const setBackgroundSide = (side) => {
+            const rawUrl = side === 'back'
+                ? '/mockup-images/Blanket-Back.png'
+                : '/mockup-images/Blanket-Front.png';
+            const url = encodeURI(rawUrl);
+            window.fabric.Image.fromURL(url, (img) => {
+                if (!img) {
+                    console.error("Failed to load blanket template image.");
+                    return;
+                }
+                const imgWidth = img.width || img.naturalWidth || 1;
+                const imgHeight = img.height || img.naturalHeight || 1;
+                const scale = Math.max(canvas.width / imgWidth, canvas.height / imgHeight);
+                img.set({
+                    originX: 'center',
+                    originY: 'center',
+                    left: canvas.width / 2,
+                    top: canvas.height / 2,
+                    scaleX: scale,
+                    scaleY: scale,
+                    selectable: false,
+                    evented: false,
+                });
+                canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas));
+                canvas.requestRenderAll();
+            }, { crossOrigin: 'anonymous' });
+        };
+
+        // expose helper for other handlers via ref and set initial
+        fabricCanvasRef.current.setBackgroundSide = setBackgroundSide;
+        setActiveSide('front');
+        setBackgroundSide('front');
 
         // selection events
         const onSelection = () => setSelectedObject(canvas.getActiveObject());
@@ -110,6 +143,11 @@ const MockupToolPage = () => {
                 img.setControlsVisibility({ mtr: true });
                 canvas.add(img).setActiveObject(img);
                 canvas.requestRenderAll();
+                // snapshot current side objects
+                try {
+                    const objects = canvas.getObjects().map(o => o.toObject(['recentSrc']));
+                    sideObjectsRef.current[activeSide] = objects;
+                } catch (_) {}
             }, { crossOrigin: 'anonymous' });
             // add the data URL to recent uploads (keep latest first, max 12)
             try {
@@ -138,6 +176,11 @@ const MockupToolPage = () => {
                 img.setControlsVisibility({ mtr: true });
                 canvas.add(img).setActiveObject(img);
                 canvas.requestRenderAll();
+                // snapshot current side objects
+                try {
+                    const objects = canvas.getObjects().map(o => o.toObject(['recentSrc']));
+                    sideObjectsRef.current[activeSide] = objects;
+                } catch (_) {}
             }, { crossOrigin: 'anonymous' });
         } catch (err) {
             console.error('Failed to add image from data URL', err);
@@ -208,6 +251,11 @@ const MockupToolPage = () => {
             canvas.remove(obj);
             canvas.discardActiveObject();
             canvas.requestRenderAll();
+            // snapshot after deletion
+            try {
+                const objects = canvas.getObjects().map(o => o.toObject(['recentSrc']));
+                sideObjectsRef.current[activeSide] = objects;
+            } catch (_) {}
         }
     };
 
@@ -234,12 +282,26 @@ const MockupToolPage = () => {
         }
     };
 
+    // Zoom canvas around the center using predefined levels
+    const applyZoom = (level) => {
+        const canvas = fabricCanvasRef.current;
+        if (!canvas) return;
+        const clamped = Math.max(0.5, Math.min(3, level));
+        const center = { x: canvas.getWidth() / 2, y: canvas.getHeight() / 2 };
+        canvas.zoomToPoint(center, clamped);
+        canvas.requestRenderAll();
+    };
+
     const resetCanvas = () => {
         const canvas = fabricCanvasRef.current;
         if (!canvas) return;
         canvas.clear();
-        // reload background
-        window.fabric.Image.fromURL('/apparel-images/front-t-shirt.png', (img) => {
+        // reload current side background
+        const rawUrl = activeSide === 'back'
+            ? '/mockup-images/Blanket-Back.png'
+            : '/mockup-images/Blanket-Front.png';
+        const url = encodeURI(rawUrl);
+        window.fabric.Image.fromURL(url, (img) => {
             const imgWidth = img.width || img.naturalWidth || 1;
             const imgHeight = img.height || img.naturalHeight || 1;
             const scale = Math.max(canvas.width / imgWidth, canvas.height / imgHeight);
@@ -247,6 +309,8 @@ const MockupToolPage = () => {
             canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas));
             canvas.requestRenderAll();
         });
+        // clear stored objects for this side
+        sideObjectsRef.current[activeSide] = [];
     };
 
     const downloadPNG = () => {
@@ -273,7 +337,7 @@ const MockupToolPage = () => {
                             src="/logo-icon/logo.png"
                             className="object-contain w-[120px] h-[32px] phone:w-[100px] phone:h-[28px] tablet:w-[140px] tablet:h-[40px] laptop:w-[220px] laptop:h-[80px] bigscreen:w-[220px] bigscreen:h-[80px] cursor-pointer"
                             alt="Logo"
-                            onClick={() => navigate("/HomePage")}
+                            onClick={() => navigate("/homepage")}
                             />
                         </div>
 
@@ -337,21 +401,14 @@ const MockupToolPage = () => {
                                 </div>
                             </div>
 
-                            <div className="mt-[20px]">
-                                <div className="font-semibold text-gray-700 mb-2">Color</div>
-                                <div className="flex gap-2">
-                                    <button className="w-8 h-8 rounded bg-white border" />
-                                    <button className="w-8 h-8 rounded bg-black border" />
-                                    <button className="w-8 h-8 rounded bg-gray-300 border" />
-                                </div>
-                            </div>
+                            
 
                         </div>
                     </div>
 
                     {/* Center mockup canvas area */}
                     <main className="flex-1 flex flex-col items-center">
-                        <div className="w-full bg-none  p-6 shadow-sm flex items-center justify-center" style={{ height: 520 }}>
+                        <div className="w-full bg-none  p-6  flex items-center justify-center" style={{ height: 520 }}>
                             <div className="relative">
                                 <canvas ref={canvasElRef} id="mockupCanvas" width={canvasSize.width} height={canvasSize.height} className="mx-auto bg-transparent" />
                                 {/* small zoom control on the right of canvas */}
@@ -361,21 +418,118 @@ const MockupToolPage = () => {
                     </main>
 
                     {/* Right vertical thumbnails */}
-                    <aside className="w-[80px] flex flex-col items-center gap-3">
-                        <div className="w-20 h-20 bg-white border rounded flex items-center justify-center">Front</div>
-                        <div className="w-20 h-20 bg-white border rounded flex items-center justify-center">Back</div>
-                        <div className="w-20 h-20 bg-white border rounded flex items-center justify-center">🔍</div>
+                    <aside className="w-[120px] flex flex-col items-center gap-3">
+                        <button
+                            type="button"
+                            aria-label="Front side"
+                            onClick={() => {
+                                const canvas = fabricCanvasRef.current;
+                                if (canvas) {
+                                    // save current side objects
+                                    try {
+                                        const objects = canvas.getObjects().map(o => o.toObject(['recentSrc']));
+                                        sideObjectsRef.current[activeSide] = objects;
+                                    } catch (_) {}
+                                    // remove all current objects (keep background will be re-set)
+                                    canvas.getObjects().forEach(o => canvas.remove(o));
+                                }
+                                setActiveSide('front');
+                                const setter = fabricCanvasRef.current && fabricCanvasRef.current.setBackgroundSide;
+                                if (setter) setter('front');
+                                // load stored front objects
+                                try {
+                                    const data = sideObjectsRef.current['front'] || [];
+                                    window.fabric.util.enlivenObjects(data, (objs) => {
+                                        const c = fabricCanvasRef.current;
+                                        if (!c) return;
+                                        objs.forEach(o => c.add(o));
+                                        c.requestRenderAll();
+                                    });
+                                } catch (_) {}
+                            }}
+                            className={`w-24 h-28 bg-white border rounded flex flex-col items-center justify-center overflow-hidden transition focus:outline-none ring-offset-2 ${activeSide==='front' ? 'ring-2 ring-[#27496d]' : 'hover:ring-1 hover:ring-gray-300'}`}
+                        >
+                            <img src="/mockup-images/Blanket-Front.png" alt="Front" className="w-full h-24 object-contain" />
+                            <span className="text-xs text-gray-700">Front</span>
+                        </button>
+
+                        <button
+                            type="button"
+                            aria-label="Back side"
+                            onClick={() => {
+                                const canvas = fabricCanvasRef.current;
+                                if (canvas) {
+                                    // save current side objects
+                                    try {
+                                        const objects = canvas.getObjects().map(o => o.toObject(['recentSrc']));
+                                        sideObjectsRef.current[activeSide] = objects;
+                                    } catch (_) {}
+                                    // remove all current objects
+                                    canvas.getObjects().forEach(o => canvas.remove(o));
+                                }
+                                setActiveSide('back');
+                                const setter = fabricCanvasRef.current && fabricCanvasRef.current.setBackgroundSide;
+                                if (setter) setter('back');
+                                // load stored back objects
+                                try {
+                                    const data = sideObjectsRef.current['back'] || [];
+                                    window.fabric.util.enlivenObjects(data, (objs) => {
+                                        const c = fabricCanvasRef.current;
+                                        if (!c) return;
+                                        objs.forEach(o => c.add(o));
+                                        c.requestRenderAll();
+                                    });
+                                } catch (_) {}
+                            }}
+                            className={`w-24 h-28 bg-white border rounded flex flex-col items-center justify-center overflow-hidden transition focus:outline-none ring-offset-2 ${activeSide==='back' ? 'ring-2 ring-[#27496d] ' : 'hover:ring-1 hover:ring-gray-300'}`}
+                        >
+                            <img src="/mockup-images/Blanket-Back.png" alt="Back" className="w-full h-24 object-contain" />
+                            <span className="text-xs text-gray-700">Back</span>
+                        </button>
+
+                        {/* Zoom controls styled like the mockup */}
+                        <button
+                            type="button"
+                            aria-label="Zoom"
+                            className="w-[82px] h-[43px] bg-white border-2 border-gray-300 rounded-xl flex items-center justify-center overflow-hidden transition focus:outline-none hover:border-gray-400 shadow-sm mt-2"
+                            onClick={() => {
+                                const levels = [1, 1.25, 1.5, 2];
+                                const idx = levels.indexOf(zoomLevel);
+                                const next = idx < levels.length - 1 ? levels[idx + 1] : levels[idx];
+                                if (next !== zoomLevel) {
+                                    setZoomLevel(next);
+                                    applyZoom(next);
+                                }
+                            }}
+                        >
+                            <img src="/logo-icon/zoom-in.svg" alt="Zoom in" className="w-6 h-6 object-contain opacity-80" />
+                        </button>
+
+                        <button
+                            type="button"
+                            aria-label="Zoom out"
+                            className="w-[82px] h-[43px] bg-white border-2 border-gray-300 rounded-xl flex items-center justify-center overflow-hidden transition focus:outline-none hover:border-gray-400 shadow-sm"
+                            onClick={() => {
+                                const levels = [1, 1.25, 1.5, 2];
+                                const idx = levels.indexOf(zoomLevel);
+                                const prev = idx <= 0 ? levels[0] : levels[idx - 1];
+                                setZoomLevel(prev);
+                                applyZoom(prev);
+                            }}
+                        >
+                            <img src="/logo-icon/zoom-out.svg" alt="Zoom out" className="w-6 h-6 object-contain opacity-80" />
+                        </button>
                     </aside>
                 </div>
 
-                {/* Footer sticky product bar */}
+                {/* Footer */}
                 <div className="fixed left-0 right-0 bottom-0 bg-white border-t shadow-inner">
                     <div className="max-w-[1200px] mx-auto flex items-center justify-between p-4">
                         <div className="flex items-center gap-4">
-                            <img src="/apparel-images/front-t-shirt.png" alt="product" className="w-14 h-14 object-cover rounded bg-transparent" />
+                            <img src={productImageUrl || "/accessories-images/blanket.png"} alt="product" className="w-14 h-14 object-cover rounded bg-transparent" onError={(e)=>{ e.currentTarget.src = "/accessories-images/blanket.png"; }} />
                             <div>
-                                <div className="font-semibold text-gray-800">Custom Rounded T-shirt</div>
-                                <div className="text-sm text-gray-600">Printing: Front-sided | Size: M | Material: 100% Cotton <span className="text-blue-600 underline">Change Customization</span></div>
+                                <div className="font-semibold text-gray-800">Custom Blanket</div>
+                                
                             </div>
                         </div>
 
@@ -389,4 +543,4 @@ const MockupToolPage = () => {
     );
 };
 
-export default MockupToolPage;
+export default BlanketMockupToolPage;

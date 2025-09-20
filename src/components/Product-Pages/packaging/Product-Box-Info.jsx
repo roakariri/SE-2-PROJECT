@@ -20,6 +20,8 @@ const ProductBox = () => {
     const [price, setPrice] = useState(null);
     const [imageKey, setImageKey] = useState("");
     const [imageSrc, setImageSrc] = useState("");
+    const [thumbnails, setThumbnails] = useState([]);
+    const [activeThumb, setActiveThumb] = useState(0);
     const [isFavorited, setIsFavorited] = useState(false);
     const [loading, setLoading] = useState(true);
     const [favLoading, setFavLoading] = useState(false);
@@ -29,6 +31,7 @@ const ProductBox = () => {
     const [quantity, setQuantity] = useState(1);
     const [variantGroups, setVariantGroups] = useState([]);
     const [selectedVariants, setSelectedVariants] = useState({});
+    const [stockInfo, setStockInfo] = useState(null);
     const [cartError, setCartError] = useState(null);
     const [cartSuccess, setCartSuccess] = useState(null);
 
@@ -181,6 +184,74 @@ const ProductBox = () => {
         setSelectedVariants(initial);
     }, [variantGroups]);
 
+    // Fetch stock info based on selected variants (Cap logic)
+    useEffect(() => {
+        const fetchStockInfo = async () => {
+            if (!productId || !variantGroups.length) {
+                setStockInfo(null);
+                return;
+            }
+            const variantIds = Object.values(selectedVariants)
+                .map(v => v?.id)
+                .filter(Boolean);
+
+            // Proceed when at least one relevant variant is selected (do not require all groups)
+            if (variantIds.length === 0) {
+                setStockInfo(null);
+                return;
+            }
+
+            // Coerce to numbers for reliable comparison
+            const sortedVariantIds = [...variantIds].map(n => Number(n)).sort((a, b) => a - b);
+
+            const { data: combinations, error: combError } = await supabase
+                .from('product_variant_combinations')
+                .select('combination_id, variants')
+                .eq('product_id', productId);
+
+            if (combError) {
+                setStockInfo(null);
+                return;
+            }
+
+            // Find all candidate combinations that are a subset of the selected variant IDs
+            const selectedSet = new Set(sortedVariantIds);
+            const candidates = (combinations || []).filter(row => Array.isArray(row.variants) && row.variants.length > 0 && row.variants.every(v => selectedSet.has(Number(v))));
+
+            if (!candidates || candidates.length === 0) {
+                setStockInfo({ quantity: 0, low_stock_limit: 0 });
+                return;
+            }
+
+            const combinationIds = candidates.map(c => c.combination_id);
+            const { data: inventoryRows, error: invError } = await supabase
+                .from('inventory')
+                .select('quantity, low_stock_limit, status, combination_id')
+                .in('combination_id', combinationIds);
+
+            if (invError || !inventoryRows || inventoryRows.length === 0) {
+                setStockInfo({ quantity: 0, low_stock_limit: 0 });
+                return;
+            }
+
+            const totalQty = (inventoryRows || []).reduce((sum, r) => sum + (Number(r.quantity) || 0), 0);
+            const lowLimit = (inventoryRows && inventoryRows[0] && typeof inventoryRows[0].low_stock_limit === 'number') ? inventoryRows[0].low_stock_limit : 0;
+            setStockInfo({ quantity: totalQty, low_stock_limit: lowLimit });
+        };
+
+        fetchStockInfo();
+    }, [productId, selectedVariants, variantGroups]);
+
+    // Clamp quantity when stock changes
+    useEffect(() => {
+        if (stockInfo && typeof stockInfo.quantity === 'number') {
+            setQuantity(q => {
+                if (stockInfo.quantity <= 0) return q;
+                return Math.min(q, stockInfo.quantity);
+            });
+        }
+    }, [stockInfo?.quantity]);
+
     // Resolve imageKey to a public URL (robust: accepts full urls, leading slashes, and tries common buckets)
     useEffect(() => {
         let isMounted = true;
@@ -241,6 +312,75 @@ const ProductBox = () => {
         resolveImage();
         return () => { isMounted = false; };
     }, [imageKey]);
+
+    // Build thumbnails for Product-Box
+    useEffect(() => {
+        let isMounted = true;
+        const tryGetPublic = async (bucket, keyBase) => {
+            const exts = ['.png', '.jpg', '.jpeg', '.webp'];
+            for (const ext of exts) {
+                try {
+                    const { data } = supabase.storage.from(bucket).getPublicUrl(keyBase + ext);
+                    const url = data?.publicUrl || data?.publicURL;
+                    if (url && !url.endsWith('/')) {
+                        try { const head = await fetch(url, { method: 'HEAD' }); if (head.ok) return url; } catch (_) {}
+                    }
+                } catch (_) {}
+            }
+            return null;
+        };
+        const buildThumbnails = async () => {
+            const results = [];
+            results.push('/packaging/product-box.png');
+            for (const base of ['product-box-1','product-box-2','product-box-3']) {
+                if (results.length >= 4) break;
+                const url = await tryGetPublic('packaging-images', base);
+                if (url) results.push(url);
+            }
+            if (results.length < 4 && imageKey) {
+                const key = String(imageKey).replace(/^\/+/, '');
+                const m = key.match(/(.+?)\.(png|jpg|jpeg|webp|gif)$/i);
+                const base = m ? m[1] : key;
+                for (const suf of ['-1','-2','-3']) {
+                    if (results.length >= 4) break;
+                    const url = await tryGetPublic('packaging-images', base + suf);
+                    if (url) results.push(url);
+                }
+            }
+            for (const f of ['/packaging/product-box.png','/packaging/product-box-1.png','/packaging/product-box-2.png','/logo-icon/logo.png']) {
+                if (results.length >= 4) break;
+                try { const r = await fetch(f, { method: 'HEAD' }); if (r.ok) results.push(f); } catch (_) {}
+            }
+            if (!isMounted) return;
+            const seen = new Set(); const ordered = [];
+            for (const u of results) { if (u && !seen.has(u)) { seen.add(u); ordered.push(u); } }
+            let padded = ordered.slice(0,4); while (padded.length < 4) padded.push(undefined);
+            setThumbnails(padded);
+            setActiveThumb(prev => padded[prev] ? prev : (padded.findIndex(Boolean) === -1 ? 0 : padded.findIndex(Boolean)));
+            const idx = padded.findIndex(Boolean); if (idx >= 0 && !imageSrc) setImageSrc(padded[idx]);
+        };
+        buildThumbnails();
+        return () => { isMounted = false; };
+    }, [imageKey, imageSrc]);
+
+    const prevImage = () => {
+        const valid = thumbnails.map((t,i)=>t?i:-1).filter(i=>i>=0);
+        if (!valid.length) return;
+        const current = valid.includes(activeThumb)?activeThumb:valid[0];
+        const idx = valid.indexOf(current);
+        const prevIdx = valid[(idx-1+valid.length)%valid.length];
+        setActiveThumb(prevIdx);
+        if (thumbnails[prevIdx]) setImageSrc(thumbnails[prevIdx]);
+    };
+    const nextImage = () => {
+        const valid = thumbnails.map((t,i)=>t?i:-1).filter(i=>i>=0);
+        if (!valid.length) return;
+        const current = valid.includes(activeThumb)?activeThumb:valid[0];
+        const idx = valid.indexOf(current);
+        const nextIdx = valid[(idx+1)%valid.length];
+        setActiveThumb(nextIdx);
+        if (thumbnails[nextIdx]) setImageSrc(thumbnails[nextIdx]);
+    };
 
     // Cart editing: detect if coming from cart and restore state
     useEffect(() => {
@@ -622,7 +762,11 @@ const ProductBox = () => {
 
                 if (!isMounted) return;
                 if (error) {
-                    console.warn('[Cap-Info] reviews query error:', error.message || error);
+                    // If reviews table doesn't exist in this environment, quietly disable reviews
+                    const missing = (String(error?.message || '').toLowerCase().includes('does not exist') || String(error?.details || '').toLowerCase().includes('does not exist'));
+                    if (!missing) {
+                        console.warn('[Cap-Info] reviews query error:', error.message || error);
+                    }
                     setReviewsAvailable(false);
                     setReviewsCount(0);
                     setAverageRating(null);
@@ -652,7 +796,10 @@ const ProductBox = () => {
     }, [productId]);
 
     const toggleDetails = () => setDetailsOpen((s) => !s);
-    const incrementQuantity = () => setQuantity((q) => q + 1);
+    const incrementQuantity = () => setQuantity((q) => {
+        const maxStock = stockInfo?.quantity || Infinity;
+        return Math.min(q + 1, maxStock);
+    });
     const decrementQuantity = () => setQuantity((q) => Math.max(1, q - 1));
 
     const selectVariant = (groupId, value) => {
@@ -728,24 +875,29 @@ const ProductBox = () => {
                                 <button
                                     type="button"
                                     aria-label="Previous image"
-                                    className="absolute left-1 top-1/2 -translate-y-1/2 p-2 bg-transparent focus:outline-none focus:ring-0"
+                                    onClick={prevImage}
+                                    aria-disabled={thumbnails.filter(Boolean).length < 2}
+                                    className={`absolute left-1 top-1/2 -translate-y-1/2 p-2 bg-transparent focus:outline-none focus:ring-0 ${thumbnails.filter(Boolean).length < 2 ? 'opacity-40 pointer-events-none' : ''}`}
                                 >
                                     <img src="/logo-icon/arrow-left.svg" alt="Previous" className="h-6 w-6" />
                                 </button>
                                 <button
                                     type="button"
                                     aria-label="Next image"
-                                    className="absolute right-1 top-1/2 -translate-y-1/2 p-2 bg-transparent focus:outline-none focus:ring-0"
+                                    onClick={nextImage}
+                                    aria-disabled={thumbnails.filter(Boolean).length < 2}
+                                    className={`absolute right-1 top-1/2 -translate-y-1/2 p-2 bg-transparent focus:outline-none focus:ring-0 ${thumbnails.filter(Boolean).length < 2 ? 'opacity-40 pointer-events-none' : ''}`}
                                 >
                                     <img src="/logo-icon/arrow-right.svg" alt="Next" className="h-6 w-6" />
                                 </button>
                             </div>
 
                             <div className="mt-4 grid grid-cols-4 gap-3">
-                                <div className="h-20 w-full border rounded p-2 bg-[#f7f7f7]" aria-hidden />
-                                <div className="h-20 w-full border rounded p-2 bg-[#f7f7f7]" aria-hidden />
-                                <div className="h-20 w-full border rounded p-2 bg-[#f7f7f7]" aria-hidden />
-                                <div className="h-20 w-full border rounded p-2 bg-gray-50" aria-hidden />
+                                {thumbnails.map((src,i)=> (
+                                    <button key={i} type="button" className={`h-[135px] w-[120px] border rounded p-2 bg-[#f7f7f7] flex items-center justify-center focus:outline-none ${i===activeThumb?'ring-2 ring-black':''}`} onClick={()=>{ if(src){ setActiveThumb(i); setImageSrc(src); } }} disabled={!src} aria-label={`Thumbnail ${i+1}`}>
+                                        {src ? <img src={src} alt="Thumbnail" className="object-contain h-full w-full" /> : <div className="h-full w-full" aria-hidden />}
+                                    </button>
+                                ))}
                             </div>
                         </div>
                     </div>
@@ -779,6 +931,24 @@ const ProductBox = () => {
                         <div className="text-3xl text-[#EF7D66] font-bold mb-4">
                             {loading ? "" : `₱${totalPrice.toFixed(2)}`}
                             <p className="italic text-black text-[12px]">Shipping calculated at checkout.</p>
+                        </div>
+                        {/* Stock status (moved just under shipping note) */}
+                        <div className="mb-2">
+                            {Object.values(selectedVariants).filter(v => v?.id).length > 0 ? (
+                                stockInfo ? (
+                                    stockInfo.quantity === 0 ? (
+                                        <span className="text-red-600 font-semibold">Out of Stocks</span>
+                                    ) : stockInfo.quantity <= 5 ? (
+                                        <span className="text-yellow-600 font-semibold">Low on Stocks: {stockInfo.quantity}</span>
+                                    ) : (
+                                        <span className="text-green-700 font-semibold">Stock: {stockInfo.quantity}</span>
+                                    )
+                                ) : (
+                                    <span className="text font-semibold">Checking stocks.</span>
+                                )
+                            ) : (
+                                <span className="text-gray-500">Select all variants to see stock.</span>
+                            )}
                         </div>
                         <hr className="mb-6" />
 
@@ -860,19 +1030,35 @@ const ProductBox = () => {
                             />
                         </div>
 
+
                         <div className="mb-6">
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">QUANTITY</div>
-                            <div className="inline-flex items-center border border-blaack rounded">
+                            <div className="inline-flex items-center border border-black rounded">
                                 <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={decrementQuantity} aria-label="Decrease quantity" disabled={quantity <= 1}>-</button>
                                 <div className="px-4 text-black" aria-live="polite">{quantity}</div>
-                                <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={incrementQuantity} aria-label="Increase quantity">+</button>
+                                <button
+                                    type="button"
+                                    className="px-3 bg-white text-black focus:outline-none focus:ring-0"
+                                    onClick={incrementQuantity}
+                                    aria-label="Increase quantity"
+                                    disabled={quantity >= (stockInfo?.quantity || Infinity)}
+                                >
+                                    +
+                                </button>
                             </div>
                         </div>
 
 
                         {/* footer actions pinned at bottom */}
                         <div className="flex items-center gap-4 mt-4">
-                            <button type="button" onClick={handleAddToCart} className="bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0">{cartSuccess ? cartSuccess : (fromCart ? 'UPDATE CART' : 'ADD TO CART')}</button>
+                            <button
+                                type="button"
+                                onClick={handleAddToCart}
+                                className="bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0"
+                                disabled={stockInfo && stockInfo.quantity <= 0}
+                            >
+                                {cartSuccess ? cartSuccess : (fromCart ? 'UPDATE CART' : 'ADD TO CART')}
+                            </button>
                             {cartError && <div className="text-red-600 text-sm ml-2">{cartError}</div>}
                             <button
                                 className="bg-white p-1.5 rounded-full shadow-md"

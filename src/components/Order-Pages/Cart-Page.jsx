@@ -267,25 +267,41 @@ const CartPage = () => {
   }, [loadCart]);
 
   const toggleSelect = (id) => {
+    const cartRow = carts.find((c) => c.cart_id === id);
+    const inStock = (cartRow?.inventory?.quantity || 0) > 0;
+    if (!inStock) return; // prevent selecting out-of-stock
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
-      setAllSelected(next.size === carts.length && carts.length > 0);
+      const selectableCount = carts.filter((c) => (c.inventory?.quantity || 0) > 0).length;
+      setAllSelected(selectableCount > 0 && next.size === selectableCount);
       return next;
     });
   };
 
   const toggleSelectAll = () => {
+    const selectable = carts.filter((c) => (c.inventory?.quantity || 0) > 0).map((c) => c.cart_id);
     if (allSelected) {
       setSelectedIds(new Set());
       setAllSelected(false);
     } else {
-      const all = new Set(carts.map((c) => c.cart_id));
+      const all = new Set(selectable);
       setSelectedIds(all);
-      setAllSelected(true);
+      setAllSelected(selectable.length > 0);
     }
   };
+
+  // Keep selections in sync with stock changes: drop any out-of-stock ids
+  useEffect(() => {
+    const allowed = new Set(carts.filter((c) => (c.inventory?.quantity || 0) > 0).map((c) => c.cart_id));
+    setSelectedIds((prev) => {
+      const filtered = new Set(Array.from(prev).filter((id) => allowed.has(id)));
+      const selectableCount = allowed.size;
+      setAllSelected(selectableCount > 0 && filtered.size === selectableCount);
+      return filtered;
+    });
+  }, [carts]);
 
   const removeSelected = async () => {
     const ids = Array.from(selectedIds);
@@ -618,9 +634,11 @@ const CartPage = () => {
                         <div className="col-span-6 flex items-start gap-4">
                           <input
                             type="checkbox"
-                            className="mt-3 w-4 h-4 bg-white border rounded checked:bg-black checked:border-black focus:ring-0"
+                            className="mt-3 w-4 h-4 bg-white border rounded checked:bg-black checked:border-black focus:ring-0 disabled:opacity-40 disabled:cursor-not-allowed"
                             checked={selectedIds.has(c.cart_id)}
                             onChange={() => toggleSelect(c.cart_id)}
+                            disabled={(c.inventory?.quantity || 0) === 0}
+                            title={(c.inventory?.quantity || 0) === 0 ? 'Out of stock' : undefined}
                           />
                           <img
                             src={c.product?.image_url || "/apparel-images/caps.png"}
@@ -810,7 +828,17 @@ const CartPage = () => {
                   <div className="font-semibold text-lg font-dm-sans text-black">Total</div>
                   <div className="font-bold text-xl font-dm-sans text-black">₱{subtotal.toFixed(2)}</div>
                 </div>
-                <button className="w-full bg-[#2B4269] text-white font-dm-sans font-semibold py-3 rounded border disabled:opacity-50">
+                <button
+                  className="w-full bg-[#2B4269] text-white font-dm-sans font-semibold py-3 rounded border disabled:opacity-50"
+                  onClick={() => {
+                    try {
+                      localStorage.setItem('cartSubtotal', String(subtotal));
+                      localStorage.setItem('cartSelectedIds', JSON.stringify(Array.from(selectedIds)));
+                    } catch {}
+                    navigate('/checkout');
+                  }}
+                  disabled={selectedIds.size === 0}
+                >
                   Proceed to Checkout
                 </button>
               </div>

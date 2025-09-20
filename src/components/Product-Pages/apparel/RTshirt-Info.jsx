@@ -479,64 +479,56 @@ const RTshirt = () => {
         };
     }, []);
 
-    // Fetch stock info based on selected variants
+    // Fetch stock info based on selected variants (subset-match + aggregate like Chip-Bag)
     useEffect(() => {
         const fetchStockInfo = async () => {
             if (!productId || !variantGroups.length) {
                 setStockInfo(null);
                 return;
             }
-            // Only fetch if all groups are selected
+
+            // Allow partial selection; require at least one variant selected
             const variantIds = Object.values(selectedVariants)
-                .map(v => v.id)
+                .map(v => v?.id)
                 .filter(Boolean);
 
-            if (variantIds.length !== variantGroups.length) {
+            if (variantIds.length === 0) {
                 setStockInfo(null);
                 return;
             }
 
-            // Sort for consistency (if your DB stores sorted arrays)
-            const sortedVariantIds = [...variantIds].sort((a, b) => a - b);
+            const sortedVariantIds = [...variantIds].map(Number).sort((a, b) => a - b);
 
-            // 1. Find the matching combination
             const { data: combinations, error: combError } = await supabase
                 .from('product_variant_combinations')
                 .select('combination_id, variants')
                 .eq('product_id', productId);
 
-            if (combError) {
-                setStockInfo(null);
-                return;
-            }
+            if (combError) { setStockInfo(null); return; }
 
-            // Find the combination where variants array matches exactly
-            const match = (combinations || []).find(row => {
-                if (!row.variants || row.variants.length !== sortedVariantIds.length) return false;
-                // Compare arrays (order-insensitive)
-                const a = [...row.variants].sort((x, y) => x - y);
-                return a.every((v, i) => v === sortedVariantIds[i]);
-            });
+            const selectedSet = new Set(sortedVariantIds);
+            const candidates = (combinations || []).filter(row => Array.isArray(row.variants) && row.variants.length > 0 && row.variants.every(v => selectedSet.has(Number(v))));
+            const match = candidates.sort((a, b) => (b.variants?.length || 0) - (a.variants?.length || 0))[0];
 
             if (!match) {
-                setStockInfo(null);
+                setStockInfo({ quantity: 0, low_stock_limit: 0 });
                 return;
             }
 
-            // 2. Get inventory for this combination_id
-            const { data: inventory, error: invError } = await supabase
+            const combinationIds = candidates.length > 0 ? candidates.map(c => c.combination_id) : [match.combination_id];
+            const { data: inventoryRows, error: invError } = await supabase
                 .from('inventory')
-                .select('quantity, low_stock_limit')
-                .eq('combination_id', match.combination_id)
-                .eq('status', 'in_stock')
-                .single();
+                .select('quantity, low_stock_limit, combination_id')
+                .in('combination_id', combinationIds);
 
-            if (invError || !inventory) {
-                setStockInfo(null);
+            if (invError || !inventoryRows || inventoryRows.length === 0) {
+                setStockInfo({ quantity: 0, low_stock_limit: 0 });
                 return;
             }
 
-            setStockInfo(inventory);
+            const totalQty = (inventoryRows || []).reduce((sum, r) => sum + (Number(r.quantity) || 0), 0);
+            const lowLimit = (inventoryRows && inventoryRows[0] && typeof inventoryRows[0].low_stock_limit === 'number') ? inventoryRows[0].low_stock_limit : 0;
+            setStockInfo({ quantity: totalQty, low_stock_limit: lowLimit });
         };
 
         fetchStockInfo();
@@ -947,21 +939,27 @@ const RTshirt = () => {
                             {loading ? "" : `₱${totalPrice.toFixed(2)}`}
                             <p className="italic text-black text-[12px]">Shipping calculated at checkout.</p>
                         </div>
-                        <div className="mt-2 text-sm">
-                            {variantGroups.length === 0 || Object.keys(selectedVariants).length !== variantGroups.length ? (
-                                <span className="text-gray-500">Select all variants to see stock.</span>
-                            ) : stockInfo === null ? (
-                                 <span className="text font-semibold">Checking stocks.</span>
-                            ) : stockInfo.quantity > 0 ? (
-                                <span className="text-green-700 font-semibold">Stock: {stockInfo.quantity}</span>
+                        {/* Stock status (standardized like packaging) */}
+                        <div className="mb-2">
+                            {Object.values(selectedVariants).filter(v => v?.id).length > 0 ? (
+                                stockInfo ? (
+                                    stockInfo.quantity === 0 ? (
+                                        <span className="text-red-600 font-semibold">Out of Stocks</span>
+                                    ) : stockInfo.quantity <= 5 ? (
+                                        <span className="text-yellow-600 font-semibold">Low on Stocks: {stockInfo.quantity}</span>
+                                    ) : (
+                                        <span className="text-green-700 font-semibold">Stock: {stockInfo.quantity}</span>
+                                    )
+                                ) : (
+                                    <span className="text font-semibold">Checking stocks.</span>
+                                )
                             ) : (
-                                <span className="text-red-600 font-semibold">Out of stock</span>
+                                <span className="text-gray-500">Select all variants to see stock.</span>
                             )}
                         </div>
-                        {stockInfo && stockInfo.low_stock_limit && stockInfo.quantity > 0 && stockInfo.quantity <= stockInfo.low_stock_limit && (
-                            <div className="text-xs text-yellow-600 mt-1">Hurry! Only {stockInfo.quantity} left in stock.</div>
-                        )}
                         <hr className="mb-6" />
+                        
+                     
 
                         {/* scrollable content area */}
                         <div className="flex-1 pr-2">

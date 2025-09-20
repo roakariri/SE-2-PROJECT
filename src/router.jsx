@@ -129,9 +129,27 @@ import Deals from "./Deals";
 import StampSeal from "./Stamp-Seal";
 
 //Mockup tool
-  import MockupTool from "./Mockup-Tool";
+  import RTMockupTool from "./MT-RTshirt";
+  import TapestryMockupTool from "./MT-Tapestry";
+  import PHMockupTool from "./MT-PhoneHolder";
+  import BlanketMockupTool from "./MT-Blanket";
 
-//check put 
+  import IDCardsMockupTool from "./MT-IDCards";
+  import PCardsMockupTool from "./MT-PCards";
+  import PostCardsMockupTool from "./MT-PostCards";
+  import TYCardsMockupTool from "./MT-TYCards";
+
+  import PosterMockupTool from "./MT-Poster";
+  import RetractableBannerMockupTool from "./MT-RetractableBanner";
+  import ClothingBannerMockupTool from "./MT-ClothingBanner";
+
+  import PaperBagMockupTool from "./MT-PaperBag";
+  import PlasticBagMockupTool from "./MT-PlasticBag";
+  import ToteBagMockupTool from "./MT-ToteBag";
+  import SweatshirtMockupTool from "./MT-Sweatshirt";
+  import HoodieMockupTool from "./MT-Hoodie";
+
+//check out 
   import Checkout from "./Checkout";
 
 
@@ -319,7 +337,26 @@ export const router = createBrowserRouter([
   {path: "/favorites/wax-stamp", element: <StampSeal />},
   
   //Mockup tool
-  {path: "/mockup-tool", element: <MockupTool />},
+  {path: "/rounded-t-shirt-mockuptool", element: <RTMockupTool />},
+  {path: "/tapestry-mockuptool", element: <TapestryMockupTool />},
+  {path: "/phone-holder-mockuptool", element: <PHMockupTool />},
+  {path: "/blanket-mockuptool", element: <BlanketMockupTool />},
+
+  {path: "/photo-cards-mockuptool", element: <PCardsMockupTool />},
+  {path: "/thank-you-cards-mockuptool", element: <TYCardsMockupTool />},
+  {path: "/post-cards-mockuptool", element: <PostCardsMockupTool />},
+  {path: "/id-cards-mockuptool", element: <IDCardsMockupTool />},
+
+  {path: "/poster-mockuptool", element: <PosterMockupTool />},
+  {path: "/retractable-banner-mockuptool", element: <RetractableBannerMockupTool />},
+  {path: "/clothing-banner-mockuptool", element: <ClothingBannerMockupTool />},
+
+  {path: "/paper-bag-mockuptool", element: <PaperBagMockupTool />},
+  {path: "/plastic-bag-mockuptool", element: <PlasticBagMockupTool />},
+  {path: "/basic-tote-bag-mockuptool", element: <ToteBagMockupTool />},
+  {path: "/sweatshirt-mockuptool", element: <SweatshirtMockupTool />},
+  {path: "/hoodie-mockuptool", element: <HoodieMockupTool />},
+
 
 //orders
   //checkout 

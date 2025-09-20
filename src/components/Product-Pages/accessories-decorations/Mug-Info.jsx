@@ -1232,17 +1232,23 @@ const ButtonPin = () => {
                         <div className="text-3xl text-[#EF7D66] font-bold mb-4">
                             {loading ? "" : `₱${totalPrice.toFixed(2)}`}
                             <p className="italic text-[12px]">Shipping calculated at checkout.</p>
-                            <div className="mt-2 text-sm">
-                                {variantGroups.length === 0 || (variantGroups || []).some(g => !selectedVariants[g.id]) ? (
-                                    <span className="text-gray-500">Select all variants to see stock.</span>
-                                ) : stockInfo === null ? (
-                                    <span className="text font-semibold">Checking stocks.</span>
-                                ) : stockInfo.quantity > 0 ? (
-                                    <span className="text-green-700 font-semibold">Stock: {stockInfo.quantity}</span>
+                        </div>
+                        <div className="mb-2">
+                            {Object.values(selectedVariants).filter(v => v?.id).length > 0 ? (
+                                stockInfo ? (
+                                    stockInfo.quantity === 0 ? (
+                                        <span className="text-red-600 font-semibold">Out of Stocks</span>
+                                    ) : stockInfo.quantity <= 5 ? (
+                                        <span className="text-yellow-600 font-semibold">Low on Stocks: {stockInfo.quantity}</span>
+                                    ) : (
+                                        <span className="text-green-700 font-semibold">Stock: {stockInfo.quantity}</span>
+                                    )
                                 ) : (
-                                    <span className="text-red-600 font-semibold">Out of stock</span>
-                                )}
-                            </div>
+                                    <span className="text font-semibold">Checking stocks.</span>
+                                )
+                            ) : (
+                                <span className="text-gray-500">Select all variants to see stock.</span>
+                            )}
                         </div>
                         <hr className="mb-6" />
 
