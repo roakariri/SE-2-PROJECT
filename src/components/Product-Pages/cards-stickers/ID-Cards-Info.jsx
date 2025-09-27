@@ -1,6 +1,7 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "../../../supabaseClient";
+import { v4 as uuidv4 } from 'uuid';
 import { UserAuth } from "../../../context/AuthContext";
 import UploadDesign from '../../UploadDesign';
 
@@ -46,6 +47,7 @@ const IDCards = () => {
     const [selectedVariants, setSelectedVariants] = useState({});
 
     const slug = location.pathname.split('/').filter(Boolean).pop();
+    const hasLoggedViewRef = useRef(false);
 
     useEffect(() => {
         let isMounted = true;
@@ -91,6 +93,48 @@ const IDCards = () => {
         fetchProduct();
         return () => { isMounted = false; };
     }, [slug]);
+
+    // Record recently viewed (once per page view)
+    useEffect(() => {
+        const logRecentlyViewed = async () => {
+            try {
+                const userId = session?.user?.id;
+                if (!userId || !productId) return;
+                if (hasLoggedViewRef.current) return;
+
+                const nowIso = new Date().toISOString();
+
+                const { data: updData, error: updError } = await supabase
+                    .from('recently_viewed')
+                    .update({ viewed_at: nowIso })
+                    .eq('user_id', userId)
+                    .eq('product_id', productId)
+                    .select('id');
+
+                if (updError) {
+                    console.warn('[ID-Cards-Info] recently_viewed update error:', updError);
+                }
+
+                if (Array.isArray(updData) && updData.length > 0) {
+                    hasLoggedViewRef.current = true;
+                    return;
+                }
+
+                const newId = (typeof crypto !== 'undefined' && crypto?.randomUUID) ? crypto.randomUUID() : uuidv4();
+                const { error: insError } = await supabase
+                    .from('recently_viewed')
+                    .insert([{ id: newId, user_id: userId, product_id: productId, viewed_at: nowIso }]);
+                if (insError) {
+                    console.warn('[ID-Cards-Info] recently_viewed insert error:', insError);
+                } else {
+                    hasLoggedViewRef.current = true;
+                }
+            } catch (err) {
+                console.warn('[ID-Cards-Info] recently_viewed log error:', err);
+            }
+        };
+        logRecentlyViewed();
+    }, [productId, session?.user?.id]);
 
     // Fetch variants with nested joins
     useEffect(() => {

@@ -107,7 +107,131 @@ const AccountPage = () => {
     const [addressLastNameError, setAddressLastNameError] = React.useState("");
     const [editingAddressId, setEditingAddressId] = React.useState(null);
     const [addressStreetError, setAddressStreetError] = React.useState("");
+    const [addressPhoneError, setAddressPhoneError] = React.useState("");
     const [showAddressEditor, setShowAddressEditor] = React.useState(false);
+
+    // Orders state
+    const [orders, setOrders] = React.useState([]);
+    const [ordersLoading, setOrdersLoading] = React.useState(false);
+    const [ordersSearch, setOrdersSearch] = React.useState("");
+    const [statusFilter, setStatusFilter] = React.useState('all'); // all | placed | in-production | ready | shipped | delivered
+
+    // Helper: format currency PHP
+    const php = (n) => `₱${Number(n || 0).toFixed(2)}`;
+    const formatDate = (iso) => {
+        try { const d = iso ? new Date(iso) : new Date(); return d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }); } catch { return String(iso || ''); }
+    };
+    const statusPill = (status) => {
+        const s = String(status || '').toLowerCase();
+        if (s.includes('cancel')) return { label: 'Cancelled', className: 'text-red-600' };
+        if (s.includes('deliver')) return { label: 'Delivered', className: 'text-green-600' };
+        if (s.includes('shipped')) return { label: 'Shipped', className: 'text-[#3B5B92]' };
+        if (s.includes('ready')) return { label: 'Ready for Shipment', className: 'text-[#F79E1B]' };
+        if (s.includes('production')) return { label: 'Order in Production', className: 'text-[#F79E1B]' };
+        if (s.includes('placed')) return { label: 'Order Placed', className: 'text-[#F79E1B]' };
+        // Fallback to given status text or default stage
+        return { label: status || 'Order Placed', className: 'text-[#F79E1B]' };
+    };
+
+    // Load user's orders with first product image and item count
+    React.useEffect(() => {
+        let cancelled = false;
+        const load = async () => {
+            setOrdersLoading(true);
+            try {
+                const { data: sess } = await supabase.auth.getSession();
+                const userId = sess?.session?.user?.id;
+                if (!userId) { if (!cancelled) setOrders([]); return; }
+                // Fetch recent orders
+                const { data: ords, error } = await supabase
+                    .from('orders')
+                    .select('order_id, user_id, total_price, created_at, status')
+                    .eq('user_id', userId)
+                    .order('created_at', { ascending: false })
+                    .limit(50);
+                if (error) throw error;
+                const list = Array.isArray(ords) ? ords : [];
+                if (list.length === 0) { if (!cancelled) setOrders([]); return; }
+                const orderIds = list.map(o => o.order_id);
+                // Fetch order items and related product ids
+                const { data: itemsRows } = await supabase
+                    .from('order_items')
+                    .select('order_item_id, order_id, product_id, quantity')
+                    .in('order_id', orderIds);
+                const itemsByOrder = (itemsRows || []).reduce((acc, r) => {
+                    const a = acc[r.order_id] || (acc[r.order_id] = []);
+                    a.push(r);
+                    return acc;
+                }, {});
+                const productIds = [...new Set((itemsRows || []).map(r => r.product_id).filter(Boolean))];
+                let productsMap = {};
+                if (productIds.length > 0) {
+                    const { data: prods } = await supabase
+                        .from('products')
+                        .select('id, name, image_url, product_types ( name, product_categories ( name ) )')
+                        .in('id', productIds);
+                    productsMap = (prods || []).reduce((acc, p) => { acc[p.id] = p; return acc; }, {});
+                }
+                const buildImg = (product) => {
+                    const image_key = product?.image_url;
+                    if (!image_key) return '/logo-icon/logo.png';
+                    if (typeof image_key === 'string' && (image_key.startsWith('http') || image_key.startsWith('/'))) return image_key;
+                    const key = String(image_key).replace(/^\/+/, '');
+                    const categoryName = (product?.product_types?.product_categories?.name || product?.product_types?.name || '').toLowerCase();
+                    let primaryBucket = null;
+                    if (categoryName.includes('apparel')) primaryBucket = 'apparel-images';
+                    else if (categoryName.includes('accessories')) primaryBucket = 'accessoriesdecorations-images';
+                    else if (categoryName.includes('signage') || categoryName.includes('poster')) primaryBucket = 'signage-posters-images';
+                    else if (categoryName.includes('cards') || categoryName.includes('sticker')) primaryBucket = 'cards-stickers-images';
+                    else if (categoryName.includes('packaging')) primaryBucket = 'packaging-images';
+                    else if (categoryName.includes('3d print')) primaryBucket = '3d-prints-images';
+                    const buckets = [primaryBucket,'apparel-images','accessoriesdecorations-images','signage-posters-images','cards-stickers-images','packaging-images','3d-prints-images','product-images','images','public'].filter(Boolean);
+                    for (const b of buckets) {
+                        try {
+                            const { data } = supabase.storage.from(b).getPublicUrl(key);
+                            const url = data?.publicUrl;
+                            if (url && !url.endsWith('/')) return url;
+                        } catch {}
+                    }
+                    return '/logo-icon/logo.png';
+                };
+                const enriched = list.map(o => {
+                    const its = itemsByOrder[o.order_id] || [];
+                    // collect product ids for this order
+                    const prodIds = its.map(i => i.product_id).filter(pid => pid && productsMap[pid]);
+                    const unique = Array.from(new Set(prodIds));
+                    const firstOnly = unique.slice(0, 1);
+                    const imgs = firstOnly.map(pid => buildImg(productsMap[pid]));
+                    const img = imgs[0] || '/logo-icon/logo.png';
+                    const countExtra = Math.max(0, its.length - 1);
+                    const productNames = unique.map(pid => productsMap[pid]?.name).filter(Boolean);
+                    return {
+                        id: o.order_id,
+                        date: o.created_at,
+                        total: Number(o.total_price || 0),
+                        status: o.status || 'In Progress',
+                        img,
+                        extraCount: countExtra,
+                        productIds: unique,
+                        productNames,
+                    };
+                });
+                if (!cancelled) setOrders(enriched);
+            } catch (err) {
+                console.warn('[AccountPage] load orders error:', err);
+                if (!cancelled) setOrders([]);
+            } finally {
+                if (!cancelled) setOrdersLoading(false);
+            }
+        };
+        load();
+        const sub = supabase.auth.onAuthStateChange((_e,_s) => { if (!cancelled) load(); });
+        return () => { cancelled = true; try { sub?.data?.subscription?.unsubscribe?.(); } catch {} };
+    }, []);
+
+    // Recently Viewed state for Homebase
+    const [recent, setRecent] = React.useState([]);
+    const [recentLoading, setRecentLoading] = React.useState(false);
 
     // Fetch user, profile, and addresses
     const fetchUserAndProfile = React.useCallback(async () => {
@@ -185,6 +309,109 @@ const AccountPage = () => {
     React.useEffect(() => {
         fetchUserAndProfile();
     }, [fetchUserAndProfile]);
+
+    // Recently Viewed loader (same logic as Homepage)
+    React.useEffect(() => {
+        let cancelled = false;
+        const resolveProductRoute = (product) => {
+            const candidate = product?.route ?? null;
+            const normalize = (r) => {
+                if (!r) return null;
+                if (typeof r === 'string') return r.trim();
+                return null;
+            };
+            const raw = normalize(candidate);
+            const slugify = (str = '') => str.toString().toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+            if (raw) {
+                if (raw.startsWith('/') || raw.includes('/')) return raw.startsWith('/') ? raw : `/${raw}`;
+                const categoryName = product?.product_types?.product_categories?.name || product?.product_types?.name || '';
+                const categorySlug = slugify(categoryName || 'product');
+                const productSlug = slugify(raw);
+                return `/${categorySlug}/${productSlug}`;
+            }
+            const categoryName = product?.product_types?.product_categories?.name || product?.product_types?.name || '';
+            const categorySlug = slugify(categoryName || 'product');
+            const productSlug = slugify(product?.name || product?.id);
+            return `/${categorySlug}/${productSlug}`;
+        };
+        const headExists = async (url) => {
+            try { const res = await fetch(url, { method: 'HEAD' }); return !!res?.ok; } catch { return false; }
+        };
+        const resolveImage = async (product, fallbacks = []) => {
+            try {
+                const image_key = product?.image_url;
+                if (!image_key) {
+                    for (const f of fallbacks) { if (await headExists(f)) return f; }
+                    return fallbacks[0] || "/logo-icon/logo.png";
+                }
+                if (/^https?:\/\//.test(image_key) || image_key.startsWith('/')) { return image_key; }
+                const key = String(image_key).replace(/^\/+/, '');
+                const categoryName = (product?.product_types?.product_categories?.name || product?.product_types?.name || '').toLowerCase();
+                let primaryBucket = null;
+                if (categoryName.includes('apparel')) primaryBucket = 'apparel-images';
+                else if (categoryName.includes('accessories')) primaryBucket = 'accessoriesdecorations-images';
+                else if (categoryName.includes('signage') || categoryName.includes('poster')) primaryBucket = 'signage-posters-images';
+                else if (categoryName.includes('cards') || categoryName.includes('sticker')) primaryBucket = 'cards-stickers-images';
+                else if (categoryName.includes('packaging')) primaryBucket = 'packaging-images';
+                else if (categoryName.includes('3d print')) primaryBucket = '3d-prints-images';
+                const allBuckets = [primaryBucket,'apparel-images','accessoriesdecorations-images','signage-posters-images','cards-stickers-images','packaging-images','3d-prints-images','product-images','images','public'].filter(Boolean);
+                const seen = new Set();
+                for (const b of allBuckets) {
+                    if (seen.has(b)) continue; seen.add(b);
+                    try {
+                        const { data } = supabase.storage.from(b).getPublicUrl(key);
+                        const url = data?.publicUrl;
+                        if (url && !url.endsWith('/')) { if (await headExists(url)) return url; }
+                    } catch { /* continue */ }
+                }
+                for (const f of fallbacks) { if (await headExists(f)) return f; }
+                return "/logo-icon/logo.png";
+            } catch {
+                return "/logo-icon/logo.png";
+            }
+        };
+
+        const load = async () => {
+            setRecentLoading(true);
+            try {
+                let { data: sessionData } = await supabase.auth.getSession();
+                let userId = sessionData?.session?.user?.id;
+                if (!userId) {
+                    const { data: userData } = await supabase.auth.getUser();
+                    userId = userData?.user?.id || null;
+                }
+                if (!userId) { if (!cancelled) setRecent([]); return; }
+                const { data: rows, error } = await supabase
+                    .from('recently_viewed')
+                    .select(`product_id, viewed_at, products ( id, name, image_url, route, product_types ( id, name, category_id, product_categories ( id, name ) ) )`)
+                    .eq('user_id', userId)
+                    .not('product_id', 'is', null)
+                    .order('viewed_at', { ascending: false })
+                    .limit(25);
+                if (error) throw error;
+                const items = [];
+                for (const r of (rows || [])) {
+                    const p = r?.products; if (!p) continue;
+                    const img = await resolveImage(p, ['/logo-icon/logo.png']);
+                    const href = resolveProductRoute(p) || '/';
+                    items.push({ id: p.id, name: p.name, img, href });
+                }
+                const seenIds = new Set();
+                const dedup = items.filter(it => (seenIds.has(it.id) ? false : (seenIds.add(it.id), true)));
+                const top5 = dedup.slice(0, 5);
+                if (!cancelled) setRecent(top5);
+            } catch (err) {
+                console.warn('[AccountPage] recently viewed load error:', err);
+                if (!cancelled) setRecent([]);
+            } finally {
+                if (!cancelled) setRecentLoading(false);
+            }
+        };
+
+        load();
+        const { data: sub } = supabase.auth.onAuthStateChange((_event, _session) => { if (!cancelled) load(); });
+        return () => { cancelled = true; sub?.subscription?.unsubscribe?.(); };
+    }, []);
 
     // Note: we intentionally do not read tab from URL on initial load so refresh
     // always lands on the 'homebase' tab. Deep-links via URL were previously
@@ -611,6 +838,40 @@ const AccountPage = () => {
         }));
     };
 
+    // Phone helpers: UX shows +63 and accepts 10 digits starting with 9; store as 09XXXXXXXXX
+    const validatePHMobileLocal10 = (raw) => {
+        try {
+            const digits = String(raw || '').replace(/\D/g, '');
+            if (digits.length !== 10) return 'Enter 10 digits after +63 (e.g., 9XXXXXXXXX).';
+            if (!/^9\d{9}$/.test(digits)) return 'Must start with 9 and be 10 digits.';
+            if (/^(\d)\1{9}$/.test(digits)) return 'Mobile number cannot be all the same digit.';
+            return '';
+        } catch {
+            return 'Enter 10 digits after +63 (e.g., 9XXXXXXXXX).';
+        }
+    };
+    const toLocal10 = (stored) => {
+        const s = String(stored || '').replace(/\D/g, '');
+        if (s.startsWith('63') && s.length >= 12) return s.slice(2);
+        if (s.startsWith('09') && s.length >= 11) return s.slice(1);
+        if (s.length === 10 && s.startsWith('9')) return s;
+        return s.slice(-10);
+    };
+    const normalizePhoneForSave = (local10) => {
+        const d = String(local10 || '').replace(/\D/g, '');
+        if (d.length === 10 && d.startsWith('9')) return '0' + d;
+        if (d.startsWith('63')) return '0' + d.slice(2);
+        if (d.length === 11 && d.startsWith('09')) return d;
+        return d;
+    };
+    const formatDisplayPhone = (stored) => {
+        const digits = String(stored || '').replace(/\D/g, '');
+        if (digits.startsWith('63')) return digits.slice(2);
+        if (digits.startsWith('09')) return digits.slice(1);
+        if (digits.startsWith('9')) return digits;
+        return digits.slice(-10);
+    };
+
     const handleAddressSubmit = async (e) => {
         e.preventDefault();
         if (!session?.user?.id) return;
@@ -625,6 +886,14 @@ const AccountPage = () => {
         const missing = requiredFields.filter(f => !addressForm[f] || (typeof addressForm[f] === 'string' && addressForm[f].trim() === ''));
         if (missing.length > 0) {
             setAddressErrorMsg('Please fill in all required address fields.');
+            return;
+        }
+
+        // Validate phone number format (+63 prefix UX, 10 digits)
+        const phoneErr = validatePHMobileLocal10(addressForm.phone_number);
+        setAddressPhoneError(phoneErr);
+        if (phoneErr) {
+            setAddressErrorMsg('Please enter a valid Philippine mobile number.');
             return;
         }
 
@@ -654,6 +923,7 @@ const AccountPage = () => {
         const addressIdToUse = editingAddressId ?? addressForm.address_id ?? uuidv4();
         const upsertData = {
             ...addressForm,
+            phone_number: normalizePhoneForSave(addressForm.phone_number),
             user_id: session.user.id,
             address_id: addressIdToUse,
         };
@@ -697,6 +967,7 @@ const AccountPage = () => {
         setAddressSuccessMsg("Address saved successfully!");
     setAddressErrorMsg("");
     setAddressStreetError("");
+    setAddressPhoneError("");
     // clear inline name errors after successful save
     setAddressFirstNameError("");
     setAddressLastNameError("");
@@ -722,7 +993,10 @@ const AccountPage = () => {
     };
 
     const handleEditAddress = (address) => {
-        setAddressForm(address);
+        setAddressForm({
+            ...address,
+            phone_number: toLocal10(address.phone_number)
+        });
         // mark which address is being edited so save will update instead of creating new
         setEditingAddressId(address.address_id || null);
         setProvinceInput(address.province || "");
@@ -786,7 +1060,7 @@ const AccountPage = () => {
     
     return (
         <div className="min-h-screen w-full bg-white phone:pt-[212px] tablet:pt-[215px] laptop:pt-[166px] relative z-0">
-            <div className="flex flex-row justify-center gap-[100px] h-full p-4 px-[100px]">
+            <div className="flex flex-row justify-center gap-[50px] h-full p-4 px-[100px]">
                 {/* Account Page Nav */}
                 <div className="flex flex-col rounded-lg p-4">
                     <div className="flex flex-col justify-center p-0">
@@ -828,11 +1102,91 @@ const AccountPage = () => {
                         </div>
                         <div>
                             <p className="text-[24px] text-black font-dm-sans">Your Last Order</p>
-                            <p className="mt-7">You have not placed any orders.</p>
+                            {/* Latest order card (same layout as Orders) */}
+                            {ordersLoading ? (
+                                <div className="text-gray-500 mt-4">Loading last order…</div>
+                            ) : orders.length === 0 ? (
+                                <p className="mt-7">You have not placed any orders.</p>
+                            ) : (() => {
+                                const o = orders[0];
+                                const pill = statusPill(o.status);
+                                return (
+                                    <div className="w-full flex items-start gap-[70px] mt-4">
+                                        {/* Thumbnail */}
+                                                    <div className="w-[60px]">
+                                                        <div className="w-[107px] h-[105px] relative z-0">
+                                                            <img src={o.img} alt={`Order ${o.id}`} className="w-[107px] h-[105px] object-contain rounded z-0" onError={(e)=>{e.currentTarget.src='/logo-icon/logo.png';}} />
+                                                            {o.extraCount > 0 && (
+                                                                <div className="absolute top-1 right-1 z-10 bg-white/9 h-[90px] justify-end flex flex-col  px-1.5 py-0.5 text-[16px] leading-none text-[#171738] font-semibold">+{o.extraCount}</div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                        {/* Labeled grid like Orders */}
+                                        <div className="flex flex-row border border-[#939393] rounded-lg p-3 w-full">
+                                            <div className="flex-1 ">
+                                                <div className="grid grid-cols-4 gap-10 text-[#171738] text-sm font-dm-sans border-b border-[#939393] w-full pb-2 mb-2">
+                                                    <div className="min-w-[120px] font-semibold text-[16px]">Order</div>
+                                                    <div className="min-w-[160px] ml-[-70px] font-semibold text-[16px]">Date</div>
+                                                    <div className="min-w-[140px] ml-[-50px] font-semibold text-[16px]">Status</div>
+                                                    <div className="min-w-[120px] ml-[-70px] font-semibold text-[16px]">Total</div>
+                                                </div>
+                                                <div className="grid grid-cols-5 gap-10 items-center">
+                                                    <div className="min-w-[120px]"><a href={`/order?order_id=${o.id}`} onClick={(e)=>{e.preventDefault(); navigate(`/order?order_id=${o.id}`);}} className="text-black font-semibold">#{o.id}</a></div>
+                                                    <div className="min-w-[160px] ml-[-30px]  font-dm-sans text-[#171738]">{formatDate(o.date)}</div>
+                                                    <div className={`min-w-[140px] font-dm-sans ml-[20px] font-semibold ${pill.className}`}>{pill.label}</div>
+                                                    <div className="min-w-[120px] ml-[40px] font-dm-sans text-[#171738]">{php(o.total)}</div>
+                                                    <button className="text-[#2B4269] bg-transparent underline" onClick={()=>navigate(`/order?order_id=${o.id}`)}>View</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
                         </div>
                         <div className="mt-[50px]">
                             <p className="text-[24px] text-black font-dm-sans">Recently Viewed Products</p>
-                            <p className="mt-7">You have not viewed any products.</p>
+                            <div className="mt-4">
+                                <div className="grid grid-cols-1 phone:grid-cols-1 tablet:grid-cols-2 laptop:grid-cols-3 semi-bigscreen:grid-cols-4 biggest:grid-cols-5 gap-6">
+                                    {(recentLoading ? Array.from({ length: 8 }) : recent).map((item, idx) => (
+                                        <div key={item?.id || idx} className="p-0 text-center group relative w-[230px] mx-auto">
+                                            <div className="relative w-[230px] h-48 mb-4 mx-auto overflow-hidden  rounded-[4px] bg-white">
+                                                {recentLoading ? (
+                                                    <div className="animate-pulse bg-gray-200 w-full h-full" />
+                                                ) : (
+                                                    <a
+                                                        href={item.href}
+                                                        onClick={e => { e.preventDefault(); navigate(item.href); }}
+                                                        className="block w-full h-full"
+                                                        title={item.name}
+                                                    >
+                                                        <img
+                                                            src={item.img}
+                                                            alt={item.name}
+                                                            className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-110 cursor-pointer"
+                                                        />
+                                                    </a>
+                                                )}
+                                            </div>
+                                            <h3 className="font-dm-sans font-semibold mt-2 text-black text-center cursor-pointer">
+                                                {recentLoading ? (
+                                                    <span className="inline-block w-24 h-4 bg-gray-200 animate-pulse rounded" />
+                                                ) : (
+                                                    <a
+                                                        href={item.href}
+                                                        onClick={e => { e.preventDefault(); navigate(item.href); }}
+                                                        className="text-black hover:text-black"
+                                                    >
+                                                        {item.name}
+                                                    </a>
+                                                )}
+                                            </h3>
+                                        </div>
+                                    ))}
+                                </div>
+                                {!recentLoading && recent.length === 0 && (
+                                    <div className="text-[#171738] font-normal py-4">You have not viewed any products.</div>
+                                )}
+                            </div>
                         </div>
                     </div>
                 )}
@@ -852,6 +1206,8 @@ const AccountPage = () => {
                                     type="text"
                                     placeholder="Search by Order # or Product Name"
                                     className="w-full rounded-full border border-gray-300 py-4 pl-8 pr-12 text-[24px] text-gray-400 font-dm-sans focus:outline-none bg-white"
+                                    value={ordersSearch}
+                                    onChange={(e)=>setOrdersSearch(e.target.value)}
                                 />
                                 <span className="absolute right-6 top-1/2 transform -translate-y-1/2 text-gray-400">
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -860,7 +1216,137 @@ const AccountPage = () => {
                                 </span>
                             </div>
                             <div className="flex justify-end mt-2">
-                                <span className="text-gray-500 text-[18px] font-dm-sans">Showing 0 Orders</span>
+                                <span className="text-gray-500 text-[18px] font-dm-sans">Showing {ordersLoading ? 0 : orders.filter(o => {
+                                    if (!ordersSearch) {
+                                        // no search term; apply only status filter
+                                        if (statusFilter === 'all') return true;
+                                        const s = String(o.status || '').toLowerCase();
+                                        if (statusFilter === 'placed') return s.includes('placed');
+                                        if (statusFilter === 'in-production') return s.includes('production');
+                                        if (statusFilter === 'ready') return s.includes('ready');
+                                        if (statusFilter === 'shipped') return s.includes('shipped');
+                                        if (statusFilter === 'delivered') return s.includes('deliver');
+                                        if (statusFilter === 'cancelled') return s.includes('cancel');
+                                        return true;
+                                    }
+                                    const q = ordersSearch.toLowerCase();
+                                    const matchOrderId = `#${o.id}`.toLowerCase().includes(q) || String(o.id).toLowerCase().includes(q);
+                                    const matchProductName = (o.productNames || []).some(n => String(n).toLowerCase().includes(q));
+                                    const matchProductId = (o.productIds || []).some(pid => String(pid).toLowerCase().includes(q));
+                                    const matchesSearch = matchOrderId || matchProductName || matchProductId;
+                                    if (!matchesSearch) return false;
+                                    if (statusFilter === 'all') return true;
+                                    const s = String(o.status || '').toLowerCase();
+                                    if (statusFilter === 'placed') return s.includes('placed');
+                                    if (statusFilter === 'in-production') return s.includes('production');
+                                    if (statusFilter === 'ready') return s.includes('ready');
+                                    if (statusFilter === 'shipped') return s.includes('shipped');
+                                    if (statusFilter === 'delivered') return s.includes('deliver');
+                                    if (statusFilter === 'cancelled') return s.includes('cancel');
+                                    return true;
+                                }).length} Orders</span>
+                            </div>
+                            {/* Status filter chips and date range stub */}
+                            <div className="flex items-center gap-[80px] mt-3 mb-3">
+                                <div className="flex-1 flex max-w-[600px] items-center gap-2 overflow-x-auto whitespace-nowrap p-3 pr-2" style={{ WebkitOverflowScrolling: 'touch' }}>
+                                    {[
+                                        { key: 'all', label: 'All' },
+                                        { key: 'placed', label: 'Order Placed' },
+                                        { key: 'in-production', label: 'Order in Production' },
+                                        { key: 'ready', label: 'Ready for Shipment' },
+                                        { key: 'shipped', label: 'Shipped' },
+                                        { key: 'delivered', label: 'Delivered' },
+                                        { key: 'cancelled', label: 'Cancelled' },
+                                    ].map(f => (
+                                        <button
+                                            key={f.key}
+                                            className={`shrink-0 px-3 py-1 text-sm rounded border ${statusFilter === f.key ? 'bg-[#2B4269] text-white border-[#2B4269]' : 'bg-white text-[#171738] border-gray-300'}`}
+                                            onClick={() => setStatusFilter(f.key)}
+                                        >{f.label}</button>
+                                    ))}
+                                </div>
+                                <div className="shrink-0">
+                                    <button className="px-3 py-1 text-sm rounded border bg-white text-[#171738] border-gray-300 flex items-center gap-2">
+                                        <span>Select date range</span>
+                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M7 10l5 5 5-5H7z"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                            
+
+                            {/* Orders list */}
+                            <div className="mt-5 space-y-4 max-h-[480px] overflow-y-auto pr-2">
+                                {ordersLoading ? (
+                                    <div className="text-gray-500">Loading orders…</div>
+                                ) : orders.length === 0 ? (
+                                    <div className="text-gray-500">You have not placed any orders.</div>
+                                ) : (
+                                    orders
+                                        .filter(o => {
+                                            if (!ordersSearch) {
+                                                if (statusFilter === 'all') return true;
+                                                const s = String(o.status || '').toLowerCase();
+                                                if (statusFilter === 'placed') return s.includes('placed');
+                                                if (statusFilter === 'in-production') return s.includes('production');
+                                                if (statusFilter === 'ready') return s.includes('ready');
+                                                if (statusFilter === 'shipped') return s.includes('shipped');
+                                                if (statusFilter === 'delivered') return s.includes('deliver');
+                                                if (statusFilter === 'cancelled') return s.includes('cancel');
+                                                return true;
+                                            }
+                                            const q = ordersSearch.toLowerCase();
+                                            const matchOrderId = `#${o.id}`.toLowerCase().includes(q) || String(o.id).toLowerCase().includes(q);
+                                            const matchProductName = (o.productNames || []).some(n => String(n).toLowerCase().includes(q));
+                                            const matchProductId = (o.productIds || []).some(pid => String(pid).toLowerCase().includes(q));
+                                            const matchesSearch = matchOrderId || matchProductName || matchProductId;
+                                            if (!matchesSearch) return false;
+                                            if (statusFilter === 'all') return true;
+                                            const s = String(o.status || '').toLowerCase();
+                                            if (statusFilter === 'placed') return s.includes('placed');
+                                            if (statusFilter === 'in-production') return s.includes('production');
+                                            if (statusFilter === 'ready') return s.includes('ready');
+                                            if (statusFilter === 'shipped') return s.includes('shipped');
+                                            if (statusFilter === 'delivered') return s.includes('deliver');
+                                            if (statusFilter === 'cancelled') return s.includes('cancel');
+                                            return true;
+                                        })
+                                        .map((o) => {
+                                            const pill = statusPill(o.status);
+                                            return (
+                                                <div key={o.id} className="w-full flex items-start gap-[70px] ">
+                                                    {/* Thumbnails stack */}
+                                                    <div className="w-[60px]">
+                                                        <div className="w-[107px] h-[105px] relative z-0">
+                                                            <img src={o.img} alt={`Order ${o.id}`} className="w-[107px] h-[105px] object-contain rounded z-0" onError={(e)=>{e.currentTarget.src='/logo-icon/logo.png';}} />
+                                                            {o.extraCount > 0 && (
+                                                                <div className="absolute top-1 right-1 z-10 bg-white/9 h-[90px] justify-end flex flex-col  px-1.5 py-0.5 text-[16px] leading-none text-[#171738] font-semibold">+{o.extraCount}</div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    {/* Labeled grid */}
+                                                    <div className="flex flex-row border border-[#939393] rounded-lg p-3">
+                                                        <div className="flex-1 ">
+                                                            <div className="grid grid-cols-4 gap-10 text-[#171738] text-sm font-dm-sans border-b border-[#939393] w-full pb-2 mb-2">
+                                                                <div className="min-w-[120px] font-semibold text-[16px]">Order</div>
+                                                                <div className="min-w-[160px] ml-[-70px] font-semibold text-[16px]">Date</div>
+                                                                <div className="min-w-[140px] ml-[-50px] font-semibold text-[16px]">Status</div>
+                                                                <div className="min-w-[120px] ml-[-70px] font-semibold text-[16px]">Total</div>
+                                                            </div>
+                                                            <div className="grid grid-cols-5 gap-10 items-center">
+                                                                <div className="min-w-[120px]"><a href={`/order?order_id=${o.id}`} onClick={(e)=>{e.preventDefault(); navigate(`/order?order_id=${o.id}`);}} className="text-black font-semibold">#{o.id}</a></div>
+                                                                <div className="min-w-[160px] ml-[-30px]  font-dm-sans text-[#171738]">{formatDate(o.date)}</div>
+                                                                <div className={`min-w-[140px] font-dm-sans ml-[20px] font-semibold ${pill.className}`}>{pill.label}</div>
+                                                                <div className="min-w-[120px] ml-[40px] font-dm-sans text-[#171738]">{php(o.total)}</div>
+                                                                <button className="text-[#2B4269] bg-transparent underline" onClick={()=>navigate(`/order?order_id=${o.id}`)}>View</button>
+                                                            </div>
+                                                        </div>   
+                                                                                                        
+                                                    </div>
+                                                    
+                                                </div>
+                                            );
+                                        })
+                                )}
                             </div>
                         </div>
                     </div>
@@ -1069,7 +1555,7 @@ const AccountPage = () => {
                                             <p className="font-dm-sans">{address.street_address}, {address.barangay},</p>
                                             <p className="font-dm-sans">{address.city}, {address.province}.</p>
                                             <p className="font-dm-sans">{address.postal_code}</p>
-                                            <p className="font-dm-sans">{address.phone_number}</p>
+                                            <p className="font-dm-sans">+63 {formatDisplayPhone(address.phone_number)}</p>
                                             <p className="font-dm-sans capitalize">{address.label}.</p>
 
                                             <div className="flex flex-row w-full p-1 mt-auto gap-[50px] items-center justify-center">
@@ -1414,26 +1900,26 @@ const AccountPage = () => {
                                             <div className="col-span-2 flex gap-4 items-end">
                                                 <div className="flex-1">
                                                     <p className="text-[16px] font-dm-sans mb-2">Phone Number</p>
-                                                    <input
-                                                        type="text"
-                                                        className="w-full border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white"
-                                                        placeholder="Phone Number"
-                                                        name="phone_number"
-                                                        value={addressForm.phone_number}
-                                                        onChange={e => {
-                                                            // Only allow numbers
-                                                            const value = e.target.value.replace(/[^0-9]/g, '');
-                                                            handleAddressChange({
-                                                                target: {
-                                                                    name: 'phone_number',
-                                                                    value,
-                                                                    type: 'text',
-                                                                }
-                                                            });
-                                                        }}
-                                                        maxLength={11}
-                                                        required
-                                                    />
+                                                    <div className="relative">
+                                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600 select-none">+63</span>
+                                                        <input
+                                                            type="text"
+                                                            className="w-full border border-[#3B5B92] rounded-md pl-12 pr-4 py-3 text-black font-dm-sans bg-white"
+                                                            placeholder="9XXXXXXXXX"
+                                                            name="phone_number"
+                                                            value={addressForm.phone_number}
+                                                            onChange={e => {
+                                                                const value = e.target.value.replace(/[^0-9]/g, '').slice(0,10);
+                                                                handleAddressChange({ target: { name: 'phone_number', value, type: 'text' } });
+                                                                setAddressPhoneError(validatePHMobileLocal10(value));
+                                                            }}
+                                                            maxLength={10}
+                                                            required
+                                                        />
+                                                    </div>
+                                                    {addressPhoneError && (
+                                                        <p className="text-red-600 font-dm-sans text-sm mt-1">{addressPhoneError}</p>
+                                                    )}
                                                 </div>
                                                 <div className="flex flex-1 gap-4 items-end">
                                                     <div className="flex-1 flex flex-col">

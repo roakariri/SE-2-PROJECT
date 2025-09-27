@@ -23,6 +23,17 @@ const MockupToolPage = () => {
     const [selectedVariants, setSelectedVariants] = useState({});
     const [productImageUrl, setProductImageUrl] = useState(null);
 
+    // Resolve a mockup image public URL from Supabase storage (bucket: mockup-apparel-rtshirts)
+    const getMockupPublicUrl = (colorName, sideName) => {
+        try {
+            const key = `${colorName} - ${sideName}.png`;
+            const { data } = supabase.storage.from('mockup-apparel-rtshirts').getPublicUrl(key);
+            return data?.publicUrl || '';
+        } catch (e) {
+            return '';
+        }
+    };
+
     // Generic resolver from arbitrary name/value
     const resolveColorNameFrom = (rawNameIn, rawValIn) => {
         const rawName = String(rawNameIn || '').trim();
@@ -121,8 +132,8 @@ const MockupToolPage = () => {
         const fabric = window.fabric;
         const canvas = fabricCanvasRef.current;
         if (!fabric || !canvas) return;
-        const sideName = side === 'back' ? 'Back' : 'Front';
-        const buildUrl = (name) => encodeURI(`/mockup-images/apparel-images-mock/${name} - ${sideName}.png`);
+    const sideName = side === 'back' ? 'Back' : 'Front';
+    const buildUrl = (name) => getMockupPublicUrl(name, sideName);
         const colorName = resolveSelectedColorName();
         const tryUrl = buildUrl(colorName);
 
@@ -178,8 +189,8 @@ const MockupToolPage = () => {
         const fabric = window.fabric;
         const canvas = fabricCanvasRef.current;
         if (!fabric || !canvas) return;
-        const sideName = side === 'back' ? 'Back' : 'Front';
-        const buildUrl = (name) => encodeURI(`/mockup-images/apparel-images-mock/${name} - ${sideName}.png`);
+    const sideName = side === 'back' ? 'Back' : 'Front';
+    const buildUrl = (name) => getMockupPublicUrl(name, sideName);
         const tryUrl = buildUrl(colorNameExplicit);
         const probe = new Image();
         probe.crossOrigin = 'anonymous';
@@ -833,7 +844,7 @@ const MockupToolPage = () => {
                             className={`w-24 h-28 bg-white border rounded flex flex-col items-center justify-center overflow-hidden transition focus:outline-none ring-offset-2 ${activeSide==='front' ? 'ring-2 ring-[#27496d]' : 'hover:ring-1 hover:ring-gray-300'}`}
                         >
                             <img
-                                src={encodeURI(`/mockup-images/apparel-images-mock/${resolveSelectedColorName()} - Front.png`)}
+                                src={getMockupPublicUrl(resolveSelectedColorName(), 'Front')}
                                 alt="Front"
                                 className="w-full h-24 object-contain"
                             />
@@ -870,7 +881,7 @@ const MockupToolPage = () => {
                             className={`w-24 h-28 bg-white border rounded flex flex-col items-center justify-center overflow-hidden transition focus:outline-none ring-offset-2 ${activeSide==='back' ? 'ring-2 ring-[#27496d] ' : 'hover:ring-1 hover:ring-gray-300'}`}
                         >
                             <img
-                                src={encodeURI(`/mockup-images/apparel-images-mock/${resolveSelectedColorName()} - Back.png`)}
+                                src={getMockupPublicUrl(resolveSelectedColorName(), 'Back')}
                                 alt="Back"
                                 className="w-full h-24 object-contain"
                             />

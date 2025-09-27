@@ -1,5 +1,6 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useState, useRef } from "react";
+import { v4 as uuidv4 } from 'uuid';
 import { supabase } from "../../../supabaseClient";
 import { UserAuth } from "../../../context/AuthContext";
 import UploadDesign from '../../UploadDesign';
@@ -46,6 +47,7 @@ const Hoodie = () => {
     const [uploadResetKey, setUploadResetKey] = useState(0);
 
     const slug = location.pathname.split('/').filter(Boolean).pop();
+    const hasLoggedViewRef = useRef(false);
 
     useEffect(() => {
         let isMounted = true;
@@ -91,6 +93,60 @@ const Hoodie = () => {
         fetchProduct();
         return () => { isMounted = false; };
     }, [slug]);
+
+    // Record recently viewed (once per page view)
+    useEffect(() => {
+        const logRecentlyViewed = async () => {
+            try {
+                const userId = session?.user?.id;
+                if (!userId || !productId) return;
+                if (hasLoggedViewRef.current) return;
+
+                const nowIso = new Date().toISOString();
+
+                // 1) Try update existing row's timestamp
+                const { data: updData, error: updError } = await supabase
+                    .from('recently_viewed')
+                    .update({ viewed_at: nowIso })
+                    .eq('user_id', userId)
+                    .eq('product_id', productId)
+                    .select('id');
+
+                if (updError) {
+                    console.warn('[Hoodie-Info] recently_viewed update error:', updError);
+                }
+
+                if (Array.isArray(updData) && updData.length > 0) {
+                    if (process.env.NODE_ENV !== 'production') {
+                        console.debug('[Hoodie-Info] recently_viewed updated', { productId, userId, row: updData?.[0]?.id });
+                    }
+                    hasLoggedViewRef.current = true;
+                    return;
+                }
+
+                // 2) If no existing row, insert with generated UUID
+                const newId = (typeof crypto !== 'undefined' && crypto?.randomUUID) ? crypto.randomUUID() : uuidv4();
+                const { data: insData, error: insError } = await supabase
+                    .from('recently_viewed')
+                    .insert([{ id: newId, user_id: userId, product_id: productId, viewed_at: nowIso }])
+                    .select('id')
+                    .limit(1);
+
+                if (insError) {
+                    console.warn('[Hoodie-Info] recently_viewed insert error:', insError);
+                } else {
+                    if (process.env.NODE_ENV !== 'production') {
+                        console.debug('[Hoodie-Info] recently_viewed inserted', { productId, userId, row: insData?.[0]?.id });
+                    }
+                    hasLoggedViewRef.current = true;
+                }
+            } catch (err) {
+                console.warn('[Hoodie-Info] recently_viewed log error:', err);
+            }
+        };
+
+        logRecentlyViewed();
+    }, [productId, session?.user?.id]);
 
     // Fetch stock info based on selected variants (subset-match + aggregate like Chip-Bag)
     useEffect(() => {

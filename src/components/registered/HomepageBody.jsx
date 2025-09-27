@@ -5,6 +5,164 @@ import { useNavigate } from "react-router-dom";
 const HomePage = () => {
   const navigate = useNavigate();
 
+  // Recently viewed state
+  const [recent, setRecent] = useState([]);
+  const [recentLoading, setRecentLoading] = useState(false);
+
+  // Fetch recently viewed for current user
+  useEffect(() => {
+    let cancelled = false;
+    // Build a product route like "/apparel/cap" using product.route when available
+    // or falling back to a slugified category + product name combination.
+    const resolveProductRoute = (product) => {
+      const candidate = product?.route ?? null;
+      const normalize = (r) => {
+        if (!r) return null;
+        if (typeof r === 'string') return r.trim();
+        return null;
+      };
+      const raw = normalize(candidate);
+      const slugify = (str = '') => str.toString().toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+
+      // If route already contains a slash or starts with one, treat as full path
+      if (raw) {
+        if (raw.startsWith('/') || raw.includes('/')) return raw.startsWith('/') ? raw : `/${raw}`;
+        // raw is a simple slug (e.g., "cap") -> prepend category
+        const categoryName = product?.product_types?.product_categories?.name
+          || product?.product_types?.name
+          || '';
+        const categorySlug = slugify(categoryName || 'product');
+        const productSlug = slugify(raw);
+        return `/${categorySlug}/${productSlug}`;
+      }
+
+      // No route provided -> build from category + product name
+      const categoryName = product?.product_types?.product_categories?.name
+        || product?.product_types?.name
+        || '';
+      const categorySlug = slugify(categoryName || 'product');
+      const productSlug = slugify(product?.name || product?.id);
+      return `/${categorySlug}/${productSlug}`;
+    };
+    const headExists = async (url) => {
+      try {
+        const res = await fetch(url, { method: 'HEAD' });
+        return !!res?.ok;
+      } catch {
+        return false;
+      }
+    };
+
+    const resolveImage = async (product, fallbacks = []) => {
+      try {
+        const image_key = product?.image_url;
+        if (!image_key) {
+          for (const f of fallbacks) { if (await headExists(f)) return f; }
+          return fallbacks[0] || "/logo-icon/logo.png";
+        }
+        if (/^https?:\/\//.test(image_key) || image_key.startsWith('/')) {
+          return image_key;
+        }
+
+        const key = String(image_key).replace(/^\/+/, '');
+        const categoryName = (product?.product_types?.product_categories?.name || product?.product_types?.name || '').toLowerCase();
+        let primaryBucket = null;
+        if (categoryName.includes('apparel')) primaryBucket = 'apparel-images';
+        else if (categoryName.includes('accessories')) primaryBucket = 'accessoriesdecorations-images';
+        else if (categoryName.includes('signage') || categoryName.includes('poster')) primaryBucket = 'signage-posters-images';
+        else if (categoryName.includes('cards') || categoryName.includes('sticker')) primaryBucket = 'cards-stickers-images';
+        else if (categoryName.includes('packaging')) primaryBucket = 'packaging-images';
+        else if (categoryName.includes('3d print')) primaryBucket = '3d-prints-images';
+
+        const allBuckets = [
+          primaryBucket,
+          'apparel-images',
+          'accessoriesdecorations-images',
+          'signage-posters-images',
+          'cards-stickers-images',
+          'packaging-images',
+          '3d-prints-images',
+          'product-images',
+          'images',
+          'public'
+        ].filter(Boolean);
+
+        const seen = new Set();
+        for (const b of allBuckets) {
+          if (seen.has(b)) continue; seen.add(b);
+          try {
+            const { data } = supabase.storage.from(b).getPublicUrl(key);
+            const url = data?.publicUrl;
+            if (url && !url.endsWith('/')) {
+              if (await headExists(url)) return url;
+            }
+          } catch { /* continue */ }
+        }
+
+        for (const f of fallbacks) { if (await headExists(f)) return f; }
+        return "/logo-icon/logo.png";
+      } catch (_e) {
+        return "/logo-icon/logo.png";
+      }
+    };
+
+    const load = async () => {
+      setRecentLoading(true);
+      try {
+        let { data: sessionData } = await supabase.auth.getSession();
+        let userId = sessionData?.session?.user?.id;
+        if (!userId) {
+          const { data: userData } = await supabase.auth.getUser();
+          userId = userData?.user?.id || null;
+        }
+        if (!userId) { if (!cancelled) setRecent([]); return; }
+        if (process.env.NODE_ENV !== 'production') {
+          console.debug('[Homepage] recently viewed: userId', userId);
+        }
+
+        // Single query with join to products; requires FK recently_viewed.product_id -> products.id
+        const { data: rows, error } = await supabase
+          .from('recently_viewed')
+          .select(`product_id, viewed_at, products ( id, name, image_url, route, product_types ( id, name, category_id, product_categories ( id, name ) ) )`)
+          .eq('user_id', userId)
+          .not('product_id', 'is', null)
+          .order('viewed_at', { ascending: false })
+          .limit(25);
+        if (error) throw error;
+        if (process.env.NODE_ENV !== 'production') {
+          console.debug('[Homepage] recently viewed rows:', rows?.length || 0);
+        }
+
+        const items = [];
+        for (const r of (rows || [])) {
+          const p = r?.products;
+          if (!p) continue;
+          const img = await resolveImage(p, ['/logo-icon/logo.png']);
+          const href = resolveProductRoute(p) || '/';
+          items.push({ id: p.id, name: p.name, img, href });
+        }
+        // Dedup while preserving order
+  const seen = new Set();
+  const dedup = items.filter(it => (seen.has(it.id) ? false : (seen.add(it.id), true)));
+  const top5 = dedup.slice(0, 5);
+  if (!cancelled) setRecent(top5);
+      } catch (err) {
+        console.warn('[Homepage] recently viewed load error:', err);
+        if (!cancelled) setRecent([]);
+      } finally {
+        if (!cancelled) setRecentLoading(false);
+      }
+    };
+
+    load();
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, _session) => {
+      if (!cancelled) load();
+    });
+    const onFocus = () => { if (!cancelled) load(); };
+    window.addEventListener('focus', onFocus);
+    return () => { cancelled = true; sub?.subscription?.unsubscribe?.(); window.removeEventListener('focus', onFocus); };
+  }, []);
+
 
   return (
     
@@ -63,6 +221,45 @@ const HomePage = () => {
           </div>
           <div className="border mt-5 laptop:ml-5 rounded-[4px]">
             <img src="/images/caps.png" className="phone:w-[220px] tablet:w-[300px] laptop:w-[clamp(250px,24vw,400px)] phone:h-[180px] tablet:h-[220px] laptop:h-[clamp(200px,24vw,305px)] rounded-[4px]" />
+          </div>
+        </div>
+      </div>
+
+      {/* Recently Viewed */}
+      <div className="flex flex-col items-center justify-center mt-10 text-[#171738] font-bold font-dm-sans phone:text-[10px] tablet:text-[14px] laptop:text-[16px] laptop:items-center laptop:mx-auto laptop:max-w-[1200px] w-full">
+        <div className="w-full px-4 laptop:px-0">
+          <h2 className="phone:text-[20px] tablet:text-[24px] laptop:text-[26px] mb-4 border-t pt-6">Recently Viewed</h2>
+        </div>
+        <div className="w-full overflow-x-auto">
+          <div className="flex gap-4 px-4 laptop:px-0">
+            {(recentLoading ? Array.from({ length: 5 }) : recent).map((item, idx) => (
+              <div key={item?.id || idx} className="flex-shrink-0 w-[180px]">
+                <div className="border rounded-[4px] bg-white w-[180px] h-[180px] overflow-hidden">
+                  {recentLoading ? (
+                    <div className="animate-pulse bg-gray-200 w-full h-full" />
+                  ) : (
+                    <a
+                      href={item.href}
+                      onClick={e => { e.preventDefault(); navigate(item.href); }}
+                      className="block w-full h-full"
+                      title={item.name}
+                    >
+                      <img src={item.img} alt={item.name} className="w-full h-full object-cover cursor-pointer" />
+                    </a>
+                  )}
+                </div>
+                <div className="text-center text-black font-dm-sans text-[14px] mt-2 truncate">
+                  {recentLoading ? <span className="inline-block w-24 h-4 bg-gray-200 animate-pulse rounded" /> : (
+                    <a href={item.href} onClick={e => { e.preventDefault(); navigate(item.href); }} className="text-black hover:text-black">
+                      {item.name}
+                    </a>
+                  )}
+                </div>
+              </div>
+            ))}
+            {!recentLoading && recent.length === 0 && (
+              <div className="text-[#171738] font-normal py-4">No recently viewed products yet.</div>
+            )}
           </div>
         </div>
       </div>

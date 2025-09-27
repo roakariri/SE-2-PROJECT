@@ -8,6 +8,7 @@ const colorNames = {
   "#c40233": "Red",
   "#000000": "Black",
   "#ffffff": "White",
+  "#faf9f6": "Off-White",
   "#ede8d0": "Beige",
   "#808080": "Gray",
   "#228b22": "Green",
@@ -147,15 +148,20 @@ const CartPage = () => {
               const groupName = val.variant_values?.variant_groups?.name;
               let displayValue = valueName || "—";
 
-              if (groupName?.toLowerCase().includes("color") && valueName) {
+              // Translate hex color codes to human names for color-like groups (Color, Strap, Trim, Accessories)
+              if (valueName) {
+                const g = (groupName || '').toLowerCase();
                 const normalizedValue = normalizeHexCode(valueName);
-                displayValue = colorNames[normalizedValue] || colorNames[valueName] || valueName;
-                console.log(`Cart ${it.cart_id} color variant mapping:`, {
-                  groupName,
-                  valueName,
-                  normalizedValue,
-                  displayValue,
-                });
+                const looksHex = /^#[0-9a-f]{6}$/i.test(normalizedValue);
+                const shouldTranslate = g.includes('color') || g.includes('strap') || g.includes('trim') || g.includes('accessories');
+
+                if (looksHex && shouldTranslate) {
+                  displayValue = colorNames[normalizedValue] || valueName;
+                  console.log(`Cart ${it.cart_id} hex→name mapping:`, { groupName, valueName, normalizedValue, displayValue });
+                } else if (g.includes('color')) {
+                  displayValue = colorNames[normalizedValue] || colorNames[valueName] || valueName;
+                  console.log(`Cart ${it.cart_id} color name mapping:`, { groupName, valueName, normalizedValue, displayValue });
+                }
               }
 
               return {
@@ -603,10 +609,10 @@ const CartPage = () => {
                         onChange={toggleSelectAll}
                         className="w-4 h-4 bg-white border rounded checked:bg-black checked:border-black focus:ring-0"
                       />
-                      <span className="text-sm text-black">Select All</span>
+                      <span className="text-[12px] font-semibold font-dm-sans text-black">Select All</span>
                     </label>
                     <button
-                      className="bg-white text-sm text-black border px-2 py-1 rounded disabled:opacity-50"
+                      className="bg-white text-[12px] font-semibold text-black border px-2 py-1 rounded "
                       onClick={removeSelected}
                       disabled={globalActionLoading || selectedIds.size === 0}
                     >
@@ -615,23 +621,19 @@ const CartPage = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-12 gap-4 items-center font-semibold text-gray-700 border-b pb-3">
-                  <div className="col-span-6">Product</div>
+                <div className="grid grid-cols-12 gap-4 items-center font-semibold text-gray-700 border-b border-[#939393] pb-3">
+                  <div className="col-span-5">Product</div>
                   <div className="col-span-2 text-center">Price</div>
                   <div className="col-span-2 text-center">Quantity</div>
-                  <div className="col-span-2 text-right">Total Price</div>
+                  <div className="col-span-2 text-left">Total Price</div>
                 </div>
 
                 <div className="divide-y">
                   {carts.map((c) => {
                     const colorVariant = c.variants?.find((v) => v.group?.toLowerCase().includes("color"));
-                    console.log(`Cart ${c.cart_id} color variant selected for UI:`, {
-                      colorVariant: colorVariant || "None",
-                      displayValue: colorVariant ? colorVariant.value : "—",
-                    });
                     return (
-                      <div key={c.cart_id} className="grid grid-cols-12 gap-4 items-center py-6">
-                        <div className="col-span-6 flex items-start gap-4">
+                      <div key={c.cart_id} className="grid grid-cols-12 gap-4 items-center py-6 border-b border-gray-200">
+                        <div className="col-span-5 flex items-center gap-4">
                           <input
                             type="checkbox"
                             className="mt-3 w-4 h-4 bg-white border rounded checked:bg-black checked:border-black focus:ring-0 disabled:opacity-40 disabled:cursor-not-allowed"
@@ -691,13 +693,13 @@ const CartPage = () => {
                         </div>
 
                         <div className="col-span-2 text-center">
-                          <p className="font-semibold font-dm-sans text-gray-500">₱{(Number(c.base_price) || 0).toFixed(2)}</p>
+                          <p className="font-semibold font-dm-sans text-black">₱{(Number(c.base_price) || 0).toFixed(2)}</p>
                         </div>
 
                         <div className="col-span-2 text-center">
-                          <div className="inline-flex items-center border rounded">
+                          <div className="inline-flex items-center border rounded-md">
                             <button
-                              className="px-3 py-1 bg-white text-black border disabled:opacity-50"
+                              className="px-1 py-1 bg-white text-black border disabled:opacity-50"
                               onClick={() => updateQuantity(c, -1)}
                               disabled={actionLoadingIds[c.cart_id] || (c.inventory?.quantity || 0) === 0}
                             >
@@ -709,7 +711,7 @@ const CartPage = () => {
                                 min={1}
                                 max={c.inventory?.quantity || 0}
                                 value={c.quantity}
-                                className="w-16 text-center px-2 py-1 outline-none"
+                                className="w-12 text-center px-2 py-1 outline-none"
                                 onChange={(e) => {
                                   const v = e.target.value;
                                   let shouldPersistResetToOne = false;
@@ -773,7 +775,7 @@ const CartPage = () => {
                               />
                             </div>
                             <button
-                              className="px-3 py-1 bg-white text-black border disabled:opacity-50"
+                              className="px-1 py-1 bg-white text-black border disabled:opacity-50"
                               onClick={() => updateQuantity(c, +1)}
                               disabled={actionLoadingIds[c.cart_id] || (c.inventory?.quantity || 0) === 0}
                             >
@@ -782,25 +784,36 @@ const CartPage = () => {
                           </div>
                         </div>
 
-                        <div className="col-span-2 text-right font-dm-sans text-black font-semibold">
+                        <div className="ml-[10px] text-left col-span-1 block">
                           ₱{(Number(c.total_price) || 0).toFixed(2)}
                         </div>
 
-                        <div className="col-span-12 flex justify-end gap-3 mt-2">
-                          <button
-                            className="bg-white text-sm text-black border px-2 py-1 rounded disabled:opacity-50"
-                            onClick={() => editCart(c)}
-                            disabled={actionLoadingIds[c.cart_id]}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            className="bg-white text-sm text-black border px-2 py-1 rounded disabled:opacity-50"
-                            onClick={() => deleteCart(c.cart_id)}
-                            disabled={actionLoadingIds[c.cart_id]}
-                          >
-                            Delete
-                          </button>
+                        <div className="col-span-2 font-dm-sans text-black font-semibold">
+                          <div className="w-full flex items-center justify-end gap-4 ">
+                          
+                            <div className="flex items-center gap-3">
+                              <button
+                                type="button"
+                                aria-label="Edit item"
+                                title="Edit"
+                                onClick={() => editCart(c)}
+                                disabled={actionLoadingIds[c.cart_id]}
+                                className="p-1 rounded bg-transparent hover:bg-gray-100 disabled:opacity-50"
+                              >
+                                <img src="/logo-icon/edit-icon.svg" alt="edit" className="w-5 h-5" />
+                              </button>
+                              <button
+                                type="button"
+                                aria-label="Delete item"
+                                title="Delete"
+                                onClick={() => deleteCart(c.cart_id)}
+                                disabled={actionLoadingIds[c.cart_id]}
+                                className="p-1 rounded bg-transparent hover:bg-gray-100 disabled:opacity-50"
+                              >
+                                <img src="/logo-icon/trash-icon.svg" alt="delete" className="w-5 h-5" />
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     );
@@ -810,21 +823,21 @@ const CartPage = () => {
             </div>
 
             <aside className="w-full laptop:w-[340px]">
-              <div className="border rounded p-6 bg-white">
-                <h3 className="font-semibold text-lg text-gray-800 mb-4 font-dm-sans">Order Summary</h3>
-                <div className="flex justify-between text-gray-600 mb-2">
-                  <div>Subtotal</div>
-                  <div className="font-semibold font-dm-sans">₱{subtotal.toFixed(2)}</div>
+              <div className="border border-[#939393] rounded p-6 bg-white">
+                <h3 className="font-semibold text-[20px] text-gray-800 text-center mb-4 font-dm-sans">Order Summary</h3>
+                <div className="flex justify-between text-gray-400 mb-2">
+                  <div className="font-semibold">Subtotal</div>
+                  <div className="font-semibold text-black font-dm-sans">₱{subtotal.toFixed(2)}</div>
                 </div>
-                <div className="flex justify-between text-gray-600 mb-2">
-                  <div>Shipping</div>
-                  <div>TBD</div>
+                <div className="flex justify-between text-gray-400 mb-2">
+                  <div className="font-semibold">Shipping</div>
+                  <div className="text-black text-black font-semibold">TBD</div>
                 </div>
-                <div className="flex justify-between text-gray-600 mb-4">
-                  <div>Taxes</div>
-                  <div>TBD</div>
+                <div className="flex justify-between text-gray-400 mb-4">
+                  <div className="font-semibold">Taxes</div>
+                  <div className="font-semibold text-black">TBD</div>
                 </div>
-                <div className="border-t pt-4 flex justify-between items-center mb-4">
+                <div className="border-t border-[#939393] pt-4 flex justify-between items-center mb-4">
                   <div className="font-semibold text-lg font-dm-sans text-black">Total</div>
                   <div className="font-bold text-xl font-dm-sans text-black">₱{subtotal.toFixed(2)}</div>
                 </div>

@@ -12,7 +12,6 @@ const CheckoutPage = () => {
 
   // UI state
   const [payLoading, setPayLoading] = useState(false);
-  const [email, setEmail] = useState("");
   const [subtotal, setSubtotal] = useState(249.0); // fallback; try to read from storage
   const [shippingMethod, setShippingMethod] = useState("jnt"); // jnt | lbc | sdd
   const [paymentMethod, setPaymentMethod] = useState("paypal"); // paypal | cod
@@ -40,6 +39,7 @@ const CheckoutPage = () => {
   const [addressFirstNameError, setAddressFirstNameError] = useState("");
   const [addressLastNameError, setAddressLastNameError] = useState("");
   const [addressStreetError, setAddressStreetError] = useState("");
+  const [addressPhoneError, setAddressPhoneError] = useState("");
   const [addressForm, setAddressForm] = useState({
     first_name: "",
     last_name: "",
@@ -87,6 +87,18 @@ const CheckoutPage = () => {
       }
     } catch {}
   }, []);
+
+  // Guard: if no selected items (or they were cleared after a completed checkout), redirect to Cart
+  useEffect(() => {
+    // If nothing selected in storage OR current state has no items, block access
+    const rawIds = (() => { try { return localStorage.getItem('cartSelectedIds'); } catch { return null; } })();
+    const parsed = (() => { try { return rawIds ? JSON.parse(rawIds) : null; } catch { return null; } })();
+    const noLocalSelection = !parsed || !Array.isArray(parsed) || parsed.length === 0;
+    const noStateSelection = !Array.isArray(selectedCartIds) || selectedCartIds.length === 0;
+    if (noLocalSelection && noStateSelection) {
+      navigate('/cart');
+    }
+  }, [navigate, selectedCartIds]);
 
   // Load shipping methods from DB
   useEffect(() => {
@@ -168,6 +180,39 @@ const CheckoutPage = () => {
   }, [selectedAddress]);
 
   // Handlers for address add/edit (from Account page)
+  // Phone helpers: UX shows +63 and accepts 10 digits starting with 9; store as 09XXXXXXXXX
+  const validatePHMobileLocal10 = (raw) => {
+    try {
+      const digits = String(raw || '').replace(/\D/g, '');
+      if (digits.length !== 10) return 'Enter 10 digits after +63 (e.g., 9XXXXXXXXX).';
+      if (!/^9\d{9}$/.test(digits)) return 'Must start with 9 and be 10 digits.';
+      if (/^(\d)\1{9}$/.test(digits)) return 'Mobile number cannot be all the same digit.';
+      return '';
+    } catch {
+      return 'Enter 10 digits after +63 (e.g., 9XXXXXXXXX).';
+    }
+  };
+  const toLocal10 = (stored) => {
+    const s = String(stored || '').replace(/\D/g, '');
+    if (s.startsWith('63') && s.length >= 12) return s.slice(2);
+    if (s.startsWith('09') && s.length >= 11) return s.slice(1);
+    if (s.length === 10 && s.startsWith('9')) return s;
+    return s.slice(-10);
+  };
+  const normalizePhoneForSave = (local10) => {
+    const d = String(local10 || '').replace(/\D/g, '');
+    if (d.length === 10 && d.startsWith('9')) return '0' + d;
+    if (d.startsWith('63')) return '0' + d.slice(2);
+    if (d.length === 11 && d.startsWith('09')) return d;
+    return d;
+  };
+  const formatDisplayPhone = (stored) => {
+    const digits = String(stored || '').replace(/\D/g, '');
+    if (digits.startsWith('63')) return digits.slice(2);
+    if (digits.startsWith('09')) return digits.slice(1);
+    if (digits.startsWith('9')) return digits;
+    return digits.slice(-10);
+  };
   const handleAddressChange = (e) => {
     const target = e?.target || e || {};
     const { name, value, type, checked } = target;
@@ -179,8 +224,13 @@ const CheckoutPage = () => {
       if (name === 'first_name') setAddressFirstNameError(hadDigits ? 'Numbers are not allowed in the First Name.' : '');
       else setAddressLastNameError(hadDigits ? 'Numbers are not allowed in the Last Name.' : '');
     }
+    if (name === 'phone_number') {
+      // live-validate phone (10 digits after +63)
+      setAddressPhoneError(validatePHMobileLocal10(newValue));
+    }
     setAddressForm(prev => ({ ...prev, [name]: newValue }));
   };
+
 
   const handleEditAddress = (address) => {
     setAddressForm({
@@ -191,7 +241,7 @@ const CheckoutPage = () => {
       city: address.city || "",
       barangay: address.barangay || "",
       postal_code: address.postal_code || "",
-      phone_number: address.phone_number || "",
+      phone_number: toLocal10(address.phone_number),
       label: address.label || "Home",
       is_default: !!address.is_default,
       address_id: address.address_id,
@@ -216,6 +266,13 @@ const CheckoutPage = () => {
       setAddressErrorMsg('Please fill in all required address fields.');
       return;
     }
+    // Validate phone number format (10 digits after +63)
+    const phoneErr = validatePHMobileLocal10(addressForm.phone_number);
+    setAddressPhoneError(phoneErr);
+    if (phoneErr) {
+      setAddressErrorMsg('Please enter a valid Philippine mobile number.');
+      return;
+    }
     if (String(addressForm.street_address || '').trim().length > 0 && String(addressForm.street_address || '').trim().length < 5) {
       setAddressStreetError('Please enter at least 5 characters.');
       setAddressErrorMsg('Please fix the highlighted fields before saving.');
@@ -228,8 +285,8 @@ const CheckoutPage = () => {
     if (addressForm.is_default) {
       await supabase.from('addresses').update({ is_default: false }).eq('user_id', session.user.id);
     }
-    const addressIdToUse = editingAddressId ?? addressForm.address_id ?? uuidv4();
-    const upsertData = { ...addressForm, user_id: session.user.id, address_id: addressIdToUse };
+  const addressIdToUse = editingAddressId ?? addressForm.address_id ?? uuidv4();
+  const upsertData = { ...addressForm, phone_number: normalizePhoneForSave(addressForm.phone_number), user_id: session.user.id, address_id: addressIdToUse };
     if (editingAddressId || addressForm.address_id) {
       const { error: updateError } = await supabase
         .from('addresses')
@@ -250,6 +307,7 @@ const CheckoutPage = () => {
     setAddressSuccessMsg('Address saved successfully!');
     setAddressErrorMsg("");
     setAddressStreetError("");
+  setAddressPhoneError("");
     setAddressFirstNameError("");
     setAddressLastNameError("");
     setEditingAddressId(null);
@@ -274,15 +332,141 @@ const CheckoutPage = () => {
 
   // Derived values
   const selectedShipping = shippingMethods.find((m) => m.shipping_id === selectedShippingId);
+  // Compute total weight (grams) from ordered items
+  const totalWeightGrams = (orderedItems || []).reduce((sum, it) => {
+    const qty = Number(it.quantity || 1);
+    const wt = Number(it.weight || 0);
+    return sum + (isFinite(qty * wt) ? qty * wt : 0);
+  }, 0);
+  // Shipping = base_rate + (rate_per_grams * totalWeight)
   const shippingCost = selectedShipping
-    ? Number(selectedShipping.base_rate || 0)
+    ? Number((Number(selectedShipping.base_rate || 0) + Number(selectedShipping.rate_per_grams || 0) * totalWeightGrams).toFixed(2))
     : shippingMethod === "jnt"
     ? 120
     : shippingMethod === "lbc"
     ? 160
     : 180;
   const taxes = 0;
-  const total = (Number(subtotal) || 0) + shippingCost + taxes;
+  const totalRaw = (Number(subtotal) || 0) + shippingCost + taxes;
+  const totalCeil = Math.ceil(totalRaw);
+
+  // Helper: translate hex colors to human-friendly names (e.g., "#1E90FF" -> "light blue")
+  const hexToRgb = (hex) => {
+    if (typeof hex !== 'string') return null;
+    let h = hex.trim();
+    if (h.startsWith('#')) h = h.slice(1);
+    if (h.length === 3) {
+      h = h.split('').map((c) => c + c).join('');
+    }
+    if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
+    const num = parseInt(h, 16);
+    return { r: (num >> 16) & 255, g: (num >> 8) & 255, b: num & 255 };
+  };
+  const rgbToHsl = ({ r, g, b }) => {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let h, s, l = (max + min) / 2;
+    if (max === min) { h = 0; s = 0; }
+    else {
+      const d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      switch (max) {
+        case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+        case g: h = (b - r) / d + 2; break;
+        case b: h = (r - g) / d + 4; break;
+      }
+      h *= 60;
+    }
+    return { h, s, l };
+  };
+  const describeColor = ({ h, s, l }) => {
+    // Grays
+    if (s < 0.1) {
+      if (l < 0.08) return 'black';
+      if (l < 0.2) return 'very dark gray';
+      if (l < 0.35) return 'dark gray';
+      if (l < 0.65) return 'gray';
+      if (l < 0.85) return 'light gray';
+      return 'white';
+    }
+    // Hue buckets
+    let name = '';
+    if (h < 15 || h >= 345) name = 'red';
+    else if (h < 45) name = 'orange';
+    else if (h < 75) name = 'yellow';
+    else if (h < 95) name = 'lime';
+    else if (h < 150) name = 'green';
+    else if (h < 195) name = 'cyan';
+    else if (h < 255) name = 'blue';
+    else if (h < 285) name = 'purple';
+    else if (h < 345) name = 'magenta';
+    // Lightness descriptor
+    let prefix = '';
+    if (l < 0.25) prefix = 'dark ';
+    else if (l > 0.7) prefix = 'light ';
+    else if (s > 0.8 && l > 0.3 && l < 0.6) prefix = 'vivid ';
+    return (prefix + name).trim();
+  };
+  const toColorNameIfHex = (group, value) => {
+    const normalizeHex = (val) => {
+      const raw = String(val || '').trim();
+      if (!raw) return null;
+      let s = raw.startsWith('#') ? raw.slice(1) : raw;
+      if (/^[0-9a-fA-F]{3}$/.test(s)) s = s.split('').map(c => c + c).join('');
+      if (!/^[0-9a-fA-F]{6}$/.test(s)) return null;
+      return `#${s.toUpperCase()}`;
+    };
+    const HEX_NAME_MAPS = {
+      'color': {
+        '#000000': 'Black', '#FFFFFF': 'White', '#FAF9F6': 'Off-White', '#EDE8D0': 'Beige', '#808080': 'Gray', '#4169E1': 'Blue', '#C40233': 'Red'
+      },
+      'strap color': {
+        '#000000': 'Black', '#FFFFFF': 'White', '#FAF9F6': 'Off-White', '#4169E1': 'Blue', '#C40233': 'Red', '#228B22': 'Green', '#EDE8D0': 'Beige'
+      },
+      'accessories color': {
+        '#FFD700': 'Gold', '#C0C0C0': 'Silver', '#000000': 'Black', '#FFFFFF': 'White', '#FFC0CB': 'Pink', '#4169E1': 'Blue', '#228B22': 'Green', '#800080': 'Purple'
+      },
+      'trim color': {
+        '#000000': 'Black', '#FFFFFF': 'White', '#4169E1': 'Blue', '#C40233': 'Red'
+      }
+    };
+    const groupKey = (() => {
+      const g = String(group || '').toLowerCase();
+      if (g === 'color') return 'color';
+      if (g.includes('strap')) return 'strap color';
+      if (g.includes('accessories color')) return 'accessories color';
+      if (g.includes('accessories') && g.includes('color')) return 'accessories color';
+      if (g.includes('trim') && g.includes('color')) return 'trim color';
+      if (g === 'trim color') return 'trim color';
+      return null;
+    })();
+    // Preferred: strict mapping by group and hex
+    const nx = normalizeHex(value);
+    if (groupKey && nx && HEX_NAME_MAPS[groupKey] && HEX_NAME_MAPS[groupKey][nx]) {
+      return HEX_NAME_MAPS[groupKey][nx];
+    }
+    const capFirst = (s) => (typeof s === 'string' && s.length > 0) ? (s[0].toUpperCase() + s.slice(1)) : s;
+    if (!value) return value;
+    const val = String(value).trim();
+    // Accept #RGB/#RRGGBB; if group hints color and value looks like hex without #, handle it
+    const looksHex = /^#?[0-9a-fA-F]{3}$/.test(val) || /^#?[0-9a-fA-F]{6}$/.test(val);
+    const groupIsColor = typeof group === 'string' && /color/i.test(group);
+    if (looksHex) {
+      const rgb = hexToRgb(val.startsWith('#') ? val : `#${val}`);
+      if (rgb) return capFirst(describeColor(rgbToHsl(rgb)));
+    }
+    // Try rgb(...)
+    const m = val.match(/^rgb\s*\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/i);
+    if (m) {
+      const r = Math.max(0, Math.min(255, parseInt(m[1], 10)));
+      const g = Math.max(0, Math.min(255, parseInt(m[2], 10)));
+      const b = Math.max(0, Math.min(255, parseInt(m[3], 10)));
+      return capFirst(describeColor(rgbToHsl({ r, g, b })));
+    }
+    // If the group is "Color" but value isn't hex/rgb, just return value
+    if (groupIsColor) return val;
+    return value;
+  };
 
   // Fetch selected cart items for display
   useEffect(() => {
@@ -300,7 +484,7 @@ const CheckoutPage = () => {
             product_id,
             quantity,
             total_price,
-            products ( id, name, image_url, product_types ( name, product_categories ( name ) ) ),
+            products ( id, name, image_url, weight, product_types ( name, product_categories ( name ) ) ),
             cart_variants ( price, product_variant_values ( variant_values ( value_name, variant_groups ( name ) ) ) ),
             cart_dimensions ( length, width, price )
           `)
@@ -345,13 +529,69 @@ const CheckoutPage = () => {
               img = '/logo-icon/logo.png';
             }
           }
-          const variants = (it.cart_variants || []).flatMap(cv => {
+          // Build variants list from cart_variants and prioritize color to appear first
+          let variants = (it.cart_variants || []).flatMap(cv => {
             const pvv = cv.product_variant_values; if (!pvv) return [];
             const arr = Array.isArray(pvv) ? pvv : [pvv];
             return arr.map(v => ({ group: v?.variant_values?.variant_groups?.name, value: v?.variant_values?.value_name }));
           });
+          if (Array.isArray(variants) && variants.length > 1) {
+            const isColor = (g) => /color/i.test(String(g || ''));
+            const isAccessory = (g) => /(accessor|hook|clasp|clamp)/i.test(String(g || ''));
+            const isPrinting = (g) => /(print|printing)/i.test(String(g || ''));
+            variants = [...variants].sort((a, b) => {
+              const aGroup = String(a?.group || '');
+              const bGroup = String(b?.group || '');
+              const aColor = isColor(aGroup);
+              const bColor = isColor(bGroup);
+              if (aColor !== bColor) return aColor ? -1 : 1; // Color first
+              const aAcc = isAccessory(aGroup);
+              const bAcc = isAccessory(bGroup);
+              if (aAcc !== bAcc) return aAcc ? -1 : 1; // then Accessories/Hook/Clasp/Clamp
+              const aPrint = isPrinting(aGroup);
+              const bPrint = isPrinting(bGroup);
+              if (aPrint !== bPrint) return aPrint ? -1 : 1; // then Printing
+              return 0;
+            });
+          }
           const dim = (it.cart_dimensions || [])[0];
-          return { id: it.cart_id, product_id: it.product_id, name: prod.name || 'Product', image_url: img, quantity: it.quantity || 1, total_price: Number(it.total_price)||0, variants, dimension: dim ? { length: dim.length, width: dim.width } : null };
+          // Fetch any uploaded design files associated with this cart row (scoped by cart_id)
+          let uploadedFilesForCart = [];
+          try {
+            const { data: files, error: filesErr } = await supabase.from('uploaded_files').select('*').eq('cart_id', it.cart_id);
+            if (!filesErr && Array.isArray(files) && files.length > 0) {
+              uploadedFilesForCart = files.map(f => ({ ...f, id: f.id ?? f.file_id, file_id: f.file_id ?? f.id }));
+            } else if (filesErr) {
+              // Fallback when cart_id column doesn't exist or other errors: match by user_id and product_id
+              console.debug('Fallback uploaded_files fetch for checkout cart', it.cart_id, filesErr?.message || filesErr);
+              const userId = session?.user?.id;
+              if (userId) {
+                try {
+                  let fbQ = supabase.from('uploaded_files').select('*').eq('user_id', userId).order('uploaded_at', { ascending: false }).limit(10);
+                  const productIdForRow = it.product_id ?? prod.id;
+                  if (productIdForRow) fbQ = fbQ.eq('product_id', productIdForRow);
+                  const { data: fb, error: fbErr } = await fbQ;
+                  if (!fbErr && Array.isArray(fb) && fb.length > 0) uploadedFilesForCart = fb.map(f => ({ ...f, id: f.id ?? f.file_id, file_id: f.file_id ?? f.id }));
+                } catch (fbEx) {
+                  console.warn('Fallback uploaded_files query failed in checkout:', fbEx);
+                }
+              }
+            }
+          } catch (fetchErr) {
+            console.warn('Could not fetch uploaded_files for checkout cart', it.cart_id, fetchErr);
+          }
+          return {
+            id: it.cart_id,
+            product_id: it.product_id,
+            name: prod.name || 'Product',
+            image_url: img,
+            quantity: it.quantity || 1,
+            total_price: Number(it.total_price) || 0,
+            weight: Number(prod?.weight) || 0,
+            variants,
+            dimension: dim ? { length: dim.length, width: dim.width } : null,
+            uploaded_files: uploadedFilesForCart,
+          };
         }));
         setOrderedItems(items);
       } catch (e) {
@@ -364,7 +604,8 @@ const CheckoutPage = () => {
   }, [session?.user?.id, JSON.stringify(selectedCartIds)]);
 
   // Create Order in DB (orders, order_items, order_item_variants) and clear cart
-  const createOrderInDB = async () => {
+  // If provided, link to a payment_methods row via paymentId
+  const createOrderInDB = async (paymentId = null) => {
     if (!session?.user?.id) {
       alert("Please sign in to place an order.");
       return null;
@@ -393,14 +634,16 @@ const CheckoutPage = () => {
       }
 
       // Insert order
+      const insertPayload = {
+        user_id: session.user.id,
+        total_price: totalCeil,
+        shipping_id: shippingId,
+        address_id: selectedAddress.address_id || selectedAddressId,
+      };
+      if (paymentId) insertPayload.payment_id = paymentId;
       const { data: orderRow, error: orderErr } = await supabase
         .from("orders")
-        .insert({
-          user_id: session.user.id,
-          total_price: total,
-          shipping_id: shippingId,
-          address_id: selectedAddress.address_id || selectedAddressId,
-        })
+        .insert(insertPayload)
         .select("order_id")
         .single();
 
@@ -463,6 +706,62 @@ const CheckoutPage = () => {
         }
       }
 
+      // Decrement inventory based on purchased quantities (aggregate per combination)
+      try {
+        // 1) Build cart_id -> qty ordered
+        const qtyByCartId = new Map((orderedItems || []).map((it) => [it.id, Number(it.quantity || 0)]));
+        // 2) Resolve each cart_id to its combination_id using RPC and sum quantities per combination
+        const qtyByCombo = new Map(); // combination_id -> total ordered qty
+        for (const cartId of (selectedCartIds || [])) {
+          const orderedQty = Number(qtyByCartId.get(cartId) || 0);
+          if (!orderedQty || orderedQty <= 0) continue;
+          try {
+            const { data: invData, error: invErr } = await supabase.rpc('get_cart_inventory', { p_cart_id: cartId });
+            if (invErr || !Array.isArray(invData) || invData.length === 0) {
+              console.warn('get_cart_inventory missing for cart', cartId, invErr);
+              continue;
+            }
+            const comboId = invData[0]?.out_combination_id;
+            if (comboId == null) continue;
+            const prev = Number(qtyByCombo.get(comboId) || 0);
+            qtyByCombo.set(comboId, prev + orderedQty);
+          } catch (mapErr) {
+            console.warn('Failed to resolve combo for cart', cartId, mapErr);
+          }
+        }
+
+        // 3) For each combination, fetch inventory once and update with aggregated decrement
+        for (const [comboId, totalOrdered] of qtyByCombo.entries()) {
+          try {
+            const { data: invRow, error: fetchErr } = await supabase
+              .from('inventory')
+              .select('inventory_id, quantity')
+              .eq('combination_id', comboId)
+              .limit(1)
+              .maybeSingle();
+            if (fetchErr || !invRow || invRow.inventory_id == null) {
+              console.warn('Inventory fetch missing for combo', comboId, fetchErr);
+              continue;
+            }
+            const currentQty = Number(invRow.quantity || 0);
+            const newQty = Math.max(0, currentQty - Number(totalOrdered || 0));
+            if (newQty !== currentQty) {
+              const { error: updErr } = await supabase
+                .from('inventory')
+                .update({ quantity: newQty })
+                .eq('inventory_id', invRow.inventory_id);
+              if (updErr) {
+                console.warn('Failed to update inventory quantity for inventory_id', invRow.inventory_id, updErr);
+              }
+            }
+          } catch (updErr) {
+            console.warn('Inventory update error for combo', comboId, updErr);
+          }
+        }
+      } catch (invOuterErr) {
+        console.warn('Inventory decrement step failed', invOuterErr);
+      }
+
       // Clear purchased items from cart
       if (selectedCartIds.length > 0) {
         await supabase
@@ -476,6 +775,24 @@ const CheckoutPage = () => {
     } catch (e) {
       console.error("Unexpected error creating order", e);
       alert("Unexpected error creating order.");
+      return null;
+    }
+  };
+
+  // Record chosen payment method to Supabase (payment_methods table) and return the payment_id
+  const recordPaymentMethod = async (methodCode) => {
+    try {
+      if (!session?.user?.id) return null;
+      const payment_id = uuidv4();
+      const payload = { payment_id, user_id: session.user.id, method: String(methodCode || '').toLowerCase() };
+      const { error } = await supabase.from('payment_methods').insert(payload);
+      if (error) {
+        console.warn('Failed to record payment method', error);
+        return null;
+      }
+      return payment_id;
+    } catch (e) {
+      console.warn('Failed to record payment method', e);
       return null;
     }
   };
@@ -496,7 +813,7 @@ const CheckoutPage = () => {
           // clear any previous render
           paypalRef.current.innerHTML = "";
         } catch {}
-        const amount = total.toFixed(2);
+  const amount = totalCeil.toFixed(2);
         window.paypal
           .Buttons({
             style: {
@@ -587,20 +904,26 @@ const CheckoutPage = () => {
                 });
                 const result = await resp.json();
                 if (!resp.ok) throw new Error(result?.error || "Failed to capture order");
-                const created = await createOrderInDB();
+                const paymentId = await recordPaymentMethod('paypal');
+                const created = await createOrderInDB(paymentId);
                 if (created) {
+                  try { localStorage.removeItem('cartSelectedIds'); localStorage.removeItem('cartSubtotal'); } catch {}
+                  try { sessionStorage.setItem('lastPaymentMethod', 'PayPal'); } catch {}
                   alert("Payment captured successfully");
-                  navigate("/Thankyou-Cards");
+                  navigate(`/order-confirmation?order_id=${encodeURIComponent(created)}`);
                 }
               } catch (e) {
                 // Fallback to client-side capture
                 try {
                   const capture = await actions.order.capture();
                   console.info("Client capture result", capture);
-                  const created = await createOrderInDB();
+                  const paymentId = await recordPaymentMethod('paypal');
+                  const created = await createOrderInDB(paymentId);
                   if (created) {
+                    try { localStorage.removeItem('cartSelectedIds'); localStorage.removeItem('cartSubtotal'); } catch {}
+                    try { sessionStorage.setItem('lastPaymentMethod', 'PayPal'); } catch {}
                     alert("Payment captured successfully");
-                    navigate("/Thankyou-Cards");
+                    navigate(`/order-confirmation?order_id=${encodeURIComponent(created)}`);
                   }
                 } catch (fallbackErr) {
                   console.error("Client capture fallback failed", fallbackErr);
@@ -622,13 +945,9 @@ const CheckoutPage = () => {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [paymentMethod, total, selectedAddressId, addresses.length]);
+  }, [paymentMethod, totalCeil, selectedAddressId, addresses.length]);
 
   const handlePlaceOrderCOD = async () => {
-    if (!email) {
-      alert("Please enter your email");
-      return;
-    }
     const selectedAddress = addresses.find(a => (a.id || a.address_id) === selectedAddressId);
     if (!selectedAddress) {
       alert("Please select a shipping address");
@@ -643,10 +962,13 @@ const CheckoutPage = () => {
     }
     setPayLoading(true);
     try {
-      const created = await createOrderInDB();
+      const paymentId = await recordPaymentMethod('cod');
+      const created = await createOrderInDB(paymentId);
       if (created) {
+        try { localStorage.removeItem('cartSelectedIds'); localStorage.removeItem('cartSubtotal'); } catch {}
+        try { sessionStorage.setItem('lastPaymentMethod', 'Cash on Delivery'); } catch {}
         alert("Order placed with Cash on Delivery");
-        navigate("/Thankyou-Cards");
+        navigate(`/order-confirmation?order_id=${encodeURIComponent(created)}`);
       }
     } finally {
       setPayLoading(false);
@@ -688,33 +1010,21 @@ const CheckoutPage = () => {
       </div>
 
       {/* Main */}
-      <div className="min-h-screen px-[24px] md:px-[60px] lg:px-[100px] py-[30px] w-full flex flex-col bg-white ">
-        <div className="mt-2 grid grid-cols-2 lg:grid-cols-3 gap-8 px-[100px]">
+      <div className="min-h-screen px-[24px] md:px-[60px] lg:px-[100px] py-[30px] w-full items-center flex flex-col bg-white ">
+        <div className="mt-2 w-auto h-fit flex flex-row gap-8 ">
           
           
-          <div className="lg:col-span-2">
+          <div className="lg:col-span-2  w-[808px]">
             <p className="text-black font-bold text-3xl font-dm-sans mb-6">
               Checkout
             </p>
 
-            {/* Email */}
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Email Address
-              </label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="name@example.com"
-                className="w-full border rounded p-3"
-              />
-            </div>
+            {/* Email removed by request */}
 
             {/* 1. Shipping */}
-            <div className="mb-6 border rounded">
-              <div className="px-4 py-3 border-b bg-gray-50 font-semibold flex items-center justify-between">
-                <span>1. Shipping</span>
+            <div className="mb-6 ">
+              <div className="px-4 py-3 border-b  border-black font-semibold flex items-center justify-between">
+                <span className="text-[20px]">1. Shipping</span>
               </div>
               {/* Address selection cards */}
               <div className="p-4">
@@ -728,36 +1038,37 @@ const CheckoutPage = () => {
                     return (
                       <div
                         key={id}
-                        className={`relative flex-shrink-0 w-[320px] border rounded-lg p-4 cursor-pointer transition-colors ${selected ? 'border-[#171738] bg-white' : 'border-gray-300 bg-white'}`}
+                        className={`relative flex-shrink-0 w-[320px] border rounded-lg p-4 cursor-pointer transition-colors ${selected ? 'border-[#171738]' : 'border-gray-300'}`}
+                        style={{ backgroundColor: selected ? '#ECECEC' : '#FFFFFF' }}
                         onClick={() => setSelectedAddressId(id)}
                       >
                         {/* Edit */}
                         <button
-                          className="absolute top-2 right-2 text-xs px-3 py-1 border rounded"
+                          className="absolute top-2 bg-transparent border border-[#939393] right-2 text-xs px-3 py-1 border rounded"
                           onClick={(e) => { e.stopPropagation(); handleEditAddress(address); }}
                         >
                           Edit
                         </button>
                         {/* Radio */}
-                        <div className="flex items-start gap-3">
+                        <div className="flex items-center gap-6">
                           <input
-                            className="mt-1"
+                            className="mt-1 accent-black"
                             type="radio"
                             name="selAddress"
                             checked={selected}
                             onChange={() => setSelectedAddressId(id)}
                           />
                           <div>
-                            <div className="font-semibold text-[#171738]">
+                            <div className="font-semibold font-dm-sans text-[#171738]">
                               {(address.first_name || '') + (address.last_name ? ` ${address.last_name}` : '')}
                             </div>
-                            <div className="text-sm text-gray-700 leading-5 mt-1">
+                            <div className="text-sm text-gray-700 font-dm-sans leading-5 mt-1">
                               {address.street_address}{address.barangay ? `, ${address.barangay}` : ''}
                               {address.city ? `, ${address.city}` : ''}{address.province ? `, ${address.province}` : ''}
                               {address.postal_code ? ` ${address.postal_code}` : ''}
                             </div>
                             {address.phone_number && (
-                              <div className="text-sm text-gray-600 mt-2">Phone Number : +63 {String(address.phone_number).replace(/^\+?63/, '')}</div>
+                              <div className="text-sm text-gray-600 mt-2">Phone Number : +63 {formatDisplayPhone(address.phone_number)}</div>
                             )}
                           </div>
                         </div>
@@ -816,7 +1127,7 @@ const CheckoutPage = () => {
                     {addressSuccessMsg && <div className="text-green-600 font-dm-sans mb-2">{addressSuccessMsg}</div>}
                     {addressErrorMsg && <div className="text-red-600 font-dm-sans mb-2">{addressErrorMsg}</div>}
                     <form onSubmit={handleAddressSubmit} className="w-full">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+                      <div className="grid grid-cols-2 md:grid-cols-2 gap-4 mt-2">
                         <div>
                           <p className="text-[14px] mt-2 font-dm-sans">First Name</p>
                           <input type="text" className="w-full border border-[#3B5B92] rounded-md px-3 py-2 text-black bg-white" name="first_name" value={addressForm.first_name} onChange={handleAddressChange} />
@@ -833,7 +1144,7 @@ const CheckoutPage = () => {
                         <input type="text" className="w-full border border-[#3B5B92] rounded-md px-3 py-2 text-black bg-white mt-1" name="street_address" value={addressForm.street_address} onChange={(e)=>{ handleAddressChange(e); const v=String(e.target.value||''); setAddressStreetError(v.trim().length>0 && v.trim().length<5 ? 'Please enter at least 5 characters.' : ''); }} />
                         {addressStreetError && <p className="text-red-600 text-sm mt-1">{addressStreetError}</p>}
                       </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+                      <div className="grid grid-cols-2 md:grid-cols-2 gap-4 mt-2">
                         {/* Province */}
                         <div>
                           <p className="text-[14px] mt-2 font-dm-sans">Province</p>
@@ -906,16 +1217,33 @@ const CheckoutPage = () => {
                         <div className="md:col-span-2 flex gap-4 items-end">
                           <div className="flex-1">
                             <p className="text-[14px] font-dm-sans mb-1">Phone Number</p>
-                            <input type="text" className="w-full border border-[#3B5B92] rounded-md px-3 py-2 text-black bg-white" name="phone_number" value={addressForm.phone_number} onChange={e=>{ const value=e.target.value.replace(/[^0-9]/g,''); handleAddressChange({ target: { name:'phone_number', value, type:'text' } }); }} maxLength={11} />
+                            <div className="relative">
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600 select-none">+63</span>
+                              <input
+                                type="text"
+                                className="w-full border border-[#3B5B92] rounded-md pl-12 pr-3 py-2 text-black bg-white"
+                                name="phone_number"
+                                placeholder="9XXXXXXXXX"
+                                value={addressForm.phone_number}
+                                onChange={e=>{
+                                  const value=e.target.value.replace(/[^0-9]/g,'').slice(0,10);
+                                  handleAddressChange({ target: { name:'phone_number', value, type:'text' } });
+                                  setAddressPhoneError(validatePHMobileLocal10(value));
+                                }}
+                                maxLength={10}
+                              />
+                            </div>
+                            {addressPhoneError && <p className="text-red-600 text-sm mt-1">{addressPhoneError}</p>}
                           </div>
-                          <div className="flex-1">
+                          
+                        </div>
+                        <div className="flex-1">
                             <p className="text-[14px] font-dm-sans mb-1">Label As</p>
                             <div className="flex gap-3">
                               <button type="button" className={`w-full h-[42px] border border-[#3B5B92] rounded-md font-dm-sans text-[16px] ${addressForm.label==='Work'?'bg-[#eaeaea] text-[#6B7280]':'bg-white text-black'}`} style={{ pointerEvents: addressForm.label==='Work' ? 'none' : 'auto' }} onClick={()=>setAddressForm(f=>({...f, label:'Work'}))}>Work</button>
                               <button type="button" className={`w-full h-[42px] border border-[#3B5B92] rounded-md font-dm-sans text-[16px] ${addressForm.label==='Home'?'bg-[#eaeaea] text-[#6B7280]':'bg-white text-black'}`} style={{ pointerEvents: addressForm.label==='Home' ? 'none' : 'auto' }} onClick={()=>setAddressForm(f=>({...f, label:'Home'}))}>Home</button>
                             </div>
                           </div>
-                        </div>
                       </div>
                       <div className="flex justify-end mt-2">
                         <label className="flex items-center gap-2">
@@ -934,33 +1262,44 @@ const CheckoutPage = () => {
             </div>
 
             {/* 2. Delivery */}
-            <div className="mb-6 border rounded">
-              <div className="px-4 py-3 border-b bg-gray-50 font-semibold">
+            <div className="mb-6 ">
+              <div className="px-4 py-3 border-b border-black text-[20px] font-semibold">
                 2. Delivery
               </div>
               <div className="p-4 space-y-3">
                 {shippingMethods.length > 0 ? (
-                  shippingMethods.map((m) => (
-                    <label key={m.shipping_id} className="flex items-center justify-between border rounded p-3">
+                  shippingMethods.map((m) => {
+                    const optionPrice = Number((Number(m.base_rate || 0) + Number(m.rate_per_grams || 0) * totalWeightGrams).toFixed(2));
+                    return (
+                    <label
+                      key={m.shipping_id}
+                      className={`flex items-center justify-between border rounded p-3 ${selectedShippingId === m.shipping_id ? 'border-black' : 'border-gray-300'}`}
+                      style={{ backgroundColor: selectedShippingId === m.shipping_id ? '#ECECEC' : '#FFFFFF' }}
+                    >
                       <span className="flex items-center gap-3">
                         <input
                           type="radio"
                           name="delivery"
                           value={m.shipping_id}
+                          className="accent-black"
                           checked={selectedShippingId === m.shipping_id}
                           onChange={() => setSelectedShippingId(m.shipping_id)}
                         />
                         <span>
-                          <div className="font-medium">{m.name}</div>
-                          <div className="text-xs text-gray-600">Base rate applies; final may vary by weight</div>
+                          <div className="font-semibold">{m.name}</div>
+                          <div className="text-xs text-gray-600 italic">2-5 business days (within Luzon), 3–7 business days (Visayas & Mindanao)</div>
                         </span>
                       </span>
-                      <span className="font-semibold">₱{Number(m.base_rate || 0).toFixed(2)}</span>
+                      <span className="font-semibold">₱{optionPrice.toFixed(2)}</span>
                     </label>
-                  ))
+                    );
+                  })
                 ) : (
                   <>
-                    <label className="flex items-center justify-between border rounded p-3">
+                    <label
+                      className={`flex items-center justify-between border rounded p-3 ${shippingMethod === 'jnt' ? 'border-black' : 'border-gray-300'}`}
+                      style={{ backgroundColor: shippingMethod === 'jnt' ? '#ECECEC' : '#FFFFFF' }}
+                    >
                       <span className="flex items-center gap-3">
                         <input
                           type="radio"
@@ -970,13 +1309,16 @@ const CheckoutPage = () => {
                           onChange={() => setShippingMethod("jnt")}
                         />
                         <span>
-                          <div className="font-medium">J&T Express</div>
+                          <div className="font-semibold">J&T Express</div>
                           <div className="text-xs text-gray-600">3-5 business days (Metro Manila)</div>
                         </span>
                       </span>
                       <span className="font-semibold">₱120.00</span>
                     </label>
-                    <label className="flex items-center justify-between border rounded p-3">
+                    <label
+                      className={`flex items-center justify-between border rounded p-3 ${shippingMethod === 'lbc' ? 'border-black' : 'border-gray-300'}`}
+                      style={{ backgroundColor: shippingMethod === 'lbc' ? '#ECECEC' : '#FFFFFF' }}
+                    >
                       <span className="flex items-center gap-3">
                         <input
                           type="radio"
@@ -992,7 +1334,10 @@ const CheckoutPage = () => {
                       </span>
                       <span className="font-semibold">₱160.00</span>
                     </label>
-                    <label className="flex items-center justify-between border rounded p-3">
+                    <label
+                      className={`flex items-center justify-between border rounded p-3 ${shippingMethod === 'sdd' ? 'border-black' : 'border-gray-300'}`}
+                      style={{ backgroundColor: shippingMethod === 'sdd' ? '#ECECEC' : '#FFFFFF' }}
+                    >
                       <span className="flex items-center gap-3">
                         <input
                           type="radio"
@@ -1014,13 +1359,16 @@ const CheckoutPage = () => {
             </div>
 
             {/* 3. Payment */}
-            <div className="mb-6 border rounded">
-              <div className="px-4 py-3 border-b bg-gray-50 font-semibold">
+            <div className="mb-6">
+              <div className="px-4 py-3 border-b text-[20px] border-black font-semibold">
                 3. Payment
               </div>
               <div className="p-4 space-y-4">
                 {/* PayPal */}
-                <div className="border rounded">
+                <div
+                  className={`border rounded ${paymentMethod === 'paypal' ? 'border-black' : 'border-gray-300'}`}
+                  style={{ backgroundColor: paymentMethod === 'paypal' ? '#ECECEC' : '#FFFFFF' }}
+                >
                   <label className="w-full flex items-center justify-between px-3 py-2 cursor-pointer">
                     <span className="flex items-center gap-2">
                       <input
@@ -1030,7 +1378,7 @@ const CheckoutPage = () => {
                         checked={paymentMethod === "paypal"}
                         onChange={() => setPaymentMethod("paypal")}
                       />
-                      <span className="font-medium">PayPal or Card</span>
+                      <span className="font-semibold">PayPal or Card</span>
                     </span>
                     <img
                       src="https://www.paypalobjects.com/webstatic/icon/pp258.png"
@@ -1042,7 +1390,10 @@ const CheckoutPage = () => {
                 </div>
 
                 {/* COD */}
-                <div className="border rounded">
+                <div
+                  className={`border rounded ${paymentMethod === 'cod' ? 'border-black' : 'border-gray-300'}`}
+                  style={{ backgroundColor: paymentMethod === 'cod' ? '#ECECEC' : '#FFFFFF' }}
+                >
                   <label className="w-full flex items-center justify-between px-3 py-2 cursor-pointer">
                     <span className="flex items-center gap-2">
                       <input
@@ -1052,7 +1403,7 @@ const CheckoutPage = () => {
                         checked={paymentMethod === "cod"}
                         onChange={() => setPaymentMethod("cod")}
                       />
-                      <span className="font-medium">Cash on Delivery</span>
+                      <span className="font-semibold">Cash on Delivery</span>
                     </span>
                   </label>
                   {paymentMethod === "cod" && (
@@ -1062,78 +1413,19 @@ const CheckoutPage = () => {
                   )}
                 </div>
 
-                {/* Billing Address */}
-                <div className="border rounded p-3">
-                  <p className="text-sm font-medium text-gray-800 mb-2">Billing Address</p>
-                  <div className="space-y-3">
-                    <label
-                      className={`flex items-center gap-3 border rounded px-3 py-3 cursor-pointer ${
-                        sameAsShipping ? 'bg-gray-100 ' : 'bg-white'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="billingChoice"
-                        checked={sameAsShipping}
-                        onChange={() => setSameAsShipping(true)}
-                      />
-                      <span>Same as shipping address</span>
-                    </label>
-                    <label
-                      className={`flex items-center gap-3 border rounded px-3 py-3 cursor-pointer ${
-                        !sameAsShipping ? 'bg-gray-100 ' : 'bg-white'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="billingChoice"
-                        checked={!sameAsShipping}
-                        onChange={() => setSameAsShipping(false)}
-                      />
-                      <span>Use a different billing address</span>
-                    </label>
-                  </div>
-                  {!sameAsShipping && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-                      <input
-                        className="border rounded p-2"
-                        placeholder="Full name"
-                        value={billingName}
-                        onChange={(e) => setBillingName(e.target.value)}
-                      />
-                      <input
-                        className="border rounded p-2"
-                        placeholder="Address"
-                        value={billingAddress}
-                        onChange={(e) => setBillingAddress(e.target.value)}
-                      />
-                      <input
-                        className="border rounded p-2"
-                        placeholder="City"
-                        value={billingCity}
-                        onChange={(e) => setBillingCity(e.target.value)}
-                      />
-                      <input
-                        className="border rounded p-2"
-                        placeholder="ZIP"
-                        value={billingZip}
-                        onChange={(e) => setBillingZip(e.target.value)}
-                      />
-                    </div>
-                  )}
-                </div>
+                
 
                 {/* Action area: show PayPal Buttons or COD button */}
                 <div className="mt-2">
                   {paymentMethod === "cod" ? (
                     <button
                       onClick={handlePlaceOrderCOD}
-                      className="w-full md:w-auto px-6 py-3 bg-[#0F172A] text-white rounded"
+                      className="w-full md:w-auto px-6 py-3 bg-[#2B4269] font-dm-sans font-semibold text-white rounded"
                     >
-                      Pay Now
+                      Confirm
                     </button>
                   ) : (
-                    <div ref={paypalRef} className="w-full" />
+                    <div ref={paypalRef} className="w-full max-w-[420px] mx-auto" />
                   )}
                   {payLoading && (
                     <p className="text-sm text-gray-500 mt-2">Processing…</p>
@@ -1141,70 +1433,168 @@ const CheckoutPage = () => {
                 </div>
               </div>
             </div>
+
+            {/* Policies footer (left column bottom) */}
+            <div className="mt-8 pt-4 border-t border-gray-200">
+              <nav className="w-full flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-black">
+                <a href="#" className="underline text-black">Refund Policy</a>
+                <a href="#" className="underline text-black">Shipping</a>
+                <a href="#" className="underline text-black">Privacy Policy</a>
+                <a href="#" className="underline text-black">Terms of Service</a>
+                <a href="#" className="underline text-black">Contact</a>
+              </nav>
+            </div>
           </div>
 
           {/* Right: Items Ordered + Summary */}
-          <aside className="lg:col-span-1">
+          <div className="lg:col-span-1 w-[359px]">
             {/* Items Ordered */}
-            <div className="border rounded p-4 mb-6">
-              <div className="font-semibold mb-3">Item(s) Ordered</div>
+            <div className="border border-[#939393] rounded p-4 mb-6">
+              <div className="font-semibold text-[20px] text-center mb-5">Item(s) Ordered</div>
               {itemsLoading ? (
                 <div className="text-sm text-gray-500">Loading items…</div>
               ) : orderedItems.length === 0 ? (
                 <div className="text-sm text-gray-500">No items selected.</div>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-4 h-[190px] overflow-y-auto  pr-1">
                   {orderedItems.map((it) => (
-                    <div key={it.id} className="flex items-start gap-3">
+                    <div key={it.id} className="flex  items-center gap-3">
                       <img src={it.image_url || '/logo-icon/logo.png'} alt={it.name} className="w-14 h-14 rounded object-contain border bg-white" onError={(e)=>{ e.currentTarget.src = '/logo-icon/logo.png'; }} />
-                      <div className="flex-1">
-                        <div className="text-sm font-semibold text-[#171738]">{it.name}</div>
-                        <div className="text-xs text-gray-600">
-                          {it.dimension && (<>Size: {it.dimension.length}×{it.dimension.width} cm<br /></>)}
-                          {it.variants && it.variants.length > 0 && (
-                            <>
-                              {it.variants.slice(0,3).map((v, idx) => (
-                                <span key={idx}>{v.group ? `${v.group}: ` : ''}{v.value}{idx < Math.min(2, it.variants.length-1) ? ' · ' : ''}</span>
-                              ))}
-                              <br />
-                            </>
-                          )}
-                          Qty: {it.quantity}
+                      <div className="flex-1 items-center">
+                        <div className="text-sm font-semibold text-[#171738] mb-2">{it.name}</div>
+                        <div className="text-xs text-black">
+                          {(() => {
+                            // Priority order as provided
+                            const ORDER = [
+                              'Design',
+                              'Technique',
+                              'Printing',
+                              'Color',
+                              'Size',
+                              'Material',
+                              'Strap',
+                              'Type',
+                              'Accessories (Hook Clasp)',
+                              'Accessories Color',
+                              'Trim Color',
+                              'Base',
+                              'Hole',
+                              'Pieces',
+                              'Cut Style',
+                              'Size (Customize)',
+                              'Acrylic Pieces Quantity',
+                            ];
+                            const norm = (s) => String(s || '').trim();
+                            const labelFor = (group, value) => {
+                              const g = norm(group);
+                              const v = norm(value);
+                              if (/accessor/i.test(g) && /(hook|clasp)/i.test(v)) return 'Accessories (Hook Clasp)';
+                              return g || '—';
+                            };
+                            const indexFor = (label) => {
+                              const i = ORDER.findIndex((x) => x.toLowerCase() === String(label || '').toLowerCase());
+                              return i === -1 ? 999 : i;
+                            };
+
+                            // Build specs: start from variants
+                            const specs = [];
+                            // Prepend uploaded design thumbnail as first spec when available
+                            if (Array.isArray(it.uploaded_files) && it.uploaded_files.length > 0) {
+                              const first = it.uploaded_files[0];
+                              const imgUrl = first.image_url || '';
+                              specs.push({
+                                label: 'Design',
+                                group: 'Design',
+                                value: (
+                                  <span className="inline-flex items-center gap-2 border rounded px-2 py-1 bg-white">
+                                    <span className="w-6 h-6 overflow-hidden rounded bg-gray-100 flex items-center justify-center">
+                                      {imgUrl ? (
+                                        <img src={imgUrl} alt={first.file_name || 'design'} className="w-full h-full object-cover" />
+                                      ) : (
+                                        <img src="/logo-icon/image.svg" alt="file" className="w-3 h-3" />
+                                      )}
+                                    </span>
+                                    <span className="text-xs text-gray-600 truncate max-w-[140px]">{first.file_name || 'uploaded design'}</span>
+                                  </span>
+                                ),
+                              });
+                            }
+                            if (Array.isArray(it.variants)) {
+                              for (const v of it.variants) {
+                                const label = labelFor(v?.group, v?.value);
+                                const val = toColorNameIfHex(v?.group, v?.value);
+                                specs.push({ label, group: v?.group, value: val });
+                              }
+                            }
+                            // Include dimensions as "Size (Customize)" if present and not already present
+                            if (it.dimension && it.dimension.length != null && it.dimension.width != null) {
+                              const hasSizeCustomize = specs.some((s) => s.label.toLowerCase() === 'size (customize)');
+                              if (!hasSizeCustomize) {
+                                specs.push({ label: 'Size (Customize)', group: 'Size (Customize)', value: `${it.dimension.length}×${it.dimension.width} cm` });
+                              }
+                            }
+                            // Sort by priority order, then by label for stability
+                            specs.sort((a, b) => {
+                              const ai = indexFor(a.label);
+                              const bi = indexFor(b.label);
+                              if (ai !== bi) return ai - bi;
+                              return a.label.localeCompare(b.label);
+                            });
+
+                            return (
+                              <>
+                                {specs.map((s, idx) => (
+                                  <div key={`${idx}-${s.label}`}>
+                                    {String(s.label || '').toLowerCase() === 'design' ? (
+                                      s.value
+                                    ) : (
+                                      <>{s.label}: {s.value}</>
+                                    )}
+                                  </div>
+                                ))}
+                                <div>Qty: {it.quantity}</div>
+                              </>
+                            );
+                          })()}
                         </div>
-                        <div className="text-sm font-semibold mt-1">₱{Number(it.total_price).toFixed(2)}</div>
+                        <div className="text-[14px] font-semibold mt-1">₱{Number(it.total_price).toFixed(2)}</div>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
             </div>
-            <div className="border rounded p-4">
-              <div className="font-semibold mb-3">Order Summary</div>
+            <div className="border border-[#939393] rounded p-4">
+              <div className="font-semibold text-[20px] text-center mb-3">Order Summary</div>
               <div className="text-sm space-y-2">
-                <div className="flex justify-between">
+                <div className="flex justify-between  text-[16px] font-semibold text-gray-400">
                   <span>Subtotal</span>
-                  <span>₱{Number(subtotal).toFixed(2)}</span>
+                  <span className="text-black font-semibold">₱{Number(subtotal).toFixed(2)}</span>
                 </div>
-                <div className="flex justify-between">
+                <div className="flex text-[14px] justify-between font-semibold text-gray-400 italic">
+                  <span>Total weight</span>
+                  <span className="text-black font-semibold">{totalWeightGrams.toLocaleString()} g</span>
+                </div>
+                <div className="flex justify-between  text-[16px] font-semibold text-gray-400">
                   <span>Shipping</span>
-                  <span>₱{shippingCost.toFixed(2)}</span>
+                  <span className="text-black font-semibold">₱{shippingCost.toFixed(2)}</span>
                 </div>
-                <div className="flex justify-between text-gray-500">
+                <div className="flex justify-between  text-[16px] font-semibold text-gray-400">
                   <span>Taxes</span>
-                  <span>₱{taxes.toFixed(2)}</span>
+                  <span className="text-black font-semibold">₱{taxes.toFixed(2)}</span>
                 </div>
-                <div className="border-t pt-2 font-semibold flex justify-between">
+                <div className="border-t pt-2  text-[20px] font-semibold flex justify-between">
                   <span>Total</span>
-                  <span>₱{total.toFixed(2)}</span>
+                  <span className="text-black font-semibold">₱{totalCeil.toFixed(2)}</span>
                 </div>
               </div>
               {paymentMethod === "paypal" && (
                 <p className="text-xs text-gray-500 mt-3">
-                  Complete your payment using the PayPal button above.
+                  Complete your payment using the PayPal button.
                 </p>
               )}
             </div>
-          </aside>
+          </div>
         </div>
       </div>
     </div>

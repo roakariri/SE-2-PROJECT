@@ -149,8 +149,11 @@ import StampSeal from "./Stamp-Seal";
   import SweatshirtMockupTool from "./MT-Sweatshirt";
   import HoodieMockupTool from "./MT-Hoodie";
 
-//check out 
+//Order Pages
   import Checkout from "./Checkout";
+  import OrderConfirmation from "./Order-Confirmation";
+  import OrderPage from "./Order";
+
 
 
 
@@ -360,7 +363,12 @@ export const router = createBrowserRouter([
 
 //orders
   //checkout 
-  {path: "/checkout", element: <Checkout />},
+  {path: "/checkout", element: <PrivateRoute><Checkout /></PrivateRoute>},
+  // order confirmation
+  {path: "/order-confirmation", element: <PrivateRoute><OrderConfirmation /></PrivateRoute>},
+  //order page 
+  {path: "/order", element: <PrivateRoute><OrderPage /></PrivateRoute>},
+
 
 
 
