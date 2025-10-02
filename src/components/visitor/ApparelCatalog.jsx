@@ -406,8 +406,7 @@ const ApparelCatalog = () => {
                           onClick={async (e) => {
                           e.stopPropagation();
                           if (!session) {
-                            // Don't force navigation; show gentle prompt instead
-                            alert('Please sign in to add favorites');
+                            navigate('/signin');
                             return;
                           }
                           if (isFavorite) {

@@ -1437,11 +1437,11 @@ const CheckoutPage = () => {
             {/* Policies footer (left column bottom) */}
             <div className="mt-8 pt-4 border-t border-gray-200">
               <nav className="w-full flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-black">
-                <a href="#" className="underline text-black">Refund Policy</a>
-                <a href="#" className="underline text-black">Shipping</a>
-                <a href="#" className="underline text-black">Privacy Policy</a>
-                <a href="#" className="underline text-black">Terms of Service</a>
-                <a href="#" className="underline text-black">Contact</a>
+                <a href="/return-policy" className="underline text-black">Return Policy</a>
+                <a href="/shipping" className="underline text-black">Shipping</a>
+                <a href="/privacy-policy" className="underline text-black">Privacy Policy</a>
+                <a href="/terms-and-conditions" className="underline text-black">Terms of Service</a>
+                <a href="/contact-support" className="underline text-black">Contact</a>
               </nav>
             </div>
           </div>

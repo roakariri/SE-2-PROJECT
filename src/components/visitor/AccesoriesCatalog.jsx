@@ -417,8 +417,7 @@ const AccessoriesCatalog = () => {
                           onClick={async (e) => {
                             e.stopPropagation();
                             if (!session) {
-                              // Not forcing signin — show a gentle message instead
-                              alert('Please sign in to add favorites.');
+                              navigate('/signin');
                               return;
                             }
                             if (isFavorite) {

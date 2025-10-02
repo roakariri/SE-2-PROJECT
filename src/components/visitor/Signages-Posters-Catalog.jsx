@@ -409,7 +409,7 @@ const SignagesPostersCatalog = () => {
                           onClick={async (e) => {
                               e.stopPropagation();
                               if (!session) {
-                                alert('Please sign in to add favorites');
+                                navigate('/signin');
                                 return;
                               }
                               const user = session.user;

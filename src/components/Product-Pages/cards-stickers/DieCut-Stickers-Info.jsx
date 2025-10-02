@@ -33,6 +33,7 @@ const DieCutSticker = () => {
     const [quantity, setQuantity] = useState(1);
     const [variantGroups, setVariantGroups] = useState([]);
     const [selectedVariants, setSelectedVariants] = useState({});
+    const [stockInfo, setStockInfo] = useState(null);
     const [cartError, setCartError] = useState(null);
     const [cartSuccess, setCartSuccess] = useState(null);
     const [isAdding, setIsAdding] = useState(false);
@@ -422,6 +423,71 @@ const DieCutSticker = () => {
         setSelectedVariants(initial);
     }, [variantGroups]);
 
+    // Fetch stock info based on selected variants (Plastic-Bag logic)
+    useEffect(() => {
+        const fetchStockInfo = async () => {
+            if (!productId || !variantGroups.length) {
+                setStockInfo(null);
+                return;
+            }
+            const variantIds = Object.values(selectedVariants)
+                .map(v => v?.id)
+                .filter(Boolean);
+
+            if (variantIds.length !== variantGroups.length) {
+                setStockInfo(null);
+                return;
+            }
+
+            const sortedVariantIds = [...variantIds].map(n => Number(n)).sort((a, b) => a - b);
+
+            const { data: combinations, error: combError } = await supabase
+                .from('product_variant_combinations')
+                .select('combination_id, variants')
+                .eq('product_id', productId);
+
+            if (combError) {
+                setStockInfo(null);
+                return;
+            }
+
+            const match = (combinations || []).find(row => {
+                if (!row.variants || row.variants.length !== sortedVariantIds.length) return false;
+                const a = [...row.variants].map(v => Number(v)).sort((x, y) => x - y);
+                return a.every((v, i) => v === sortedVariantIds[i]);
+            });
+
+            if (!match) {
+                setStockInfo({ quantity: 0, low_stock_limit: 0 });
+                return;
+            }
+
+            const { data: inventory, error: invError } = await supabase
+                .from('inventory')
+                .select('quantity, low_stock_limit, status')
+                .eq('combination_id', match.combination_id)
+                .single();
+
+            if (invError || !inventory) {
+                setStockInfo({ quantity: 0, low_stock_limit: 0 });
+                return;
+            }
+
+            setStockInfo(inventory);
+        };
+        fetchStockInfo();
+    }, [productId, selectedVariants, variantGroups]);
+
+    // Clamp quantity when stock changes
+    useEffect(() => {
+        if (stockInfo && typeof stockInfo.quantity === 'number') {
+            setQuantity(q => {
+                if (stockInfo.quantity <= 0) return q;
+                return Math.min(q, stockInfo.quantity);
+            });
+        }
+    }, [stockInfo?.quantity]);
+
     // Cart editing state
     useEffect(() => {
         if (location.state?.fromCart && location.state?.cartRow) {
@@ -795,7 +861,10 @@ const DieCutSticker = () => {
     }, [productId]);
 
     const toggleDetails = () => setDetailsOpen((s) => !s);
-    const incrementQuantity = () => setQuantity((q) => q + 1);
+    const incrementQuantity = () => setQuantity((q) => {
+        const maxStock = stockInfo?.quantity ?? Infinity;
+        return Math.min(q + 1, maxStock);
+    });
     const decrementQuantity = () => setQuantity((q) => Math.max(1, q - 1));
 
     const selectVariant = (groupId, value) => {
@@ -957,6 +1026,24 @@ const DieCutSticker = () => {
                             {loading ? "" : `₱${totalPrice.toFixed(2)}`}
                             <p className="italic text-black text-[12px]">Shipping calculated at checkout.</p>
                         </div>
+                        {/* Stock status */}
+                        <div className="mb-2">
+                            {variantGroups.length === Object.values(selectedVariants).filter(v => v?.id).length ? (
+                                stockInfo ? (
+                                    stockInfo.quantity === 0 ? (
+                                        <span className="text-red-600 font-semibold">Out of Stocks</span>
+                                    ) : stockInfo.quantity <= 5 ? (
+                                        <span className="text-yellow-600 font-semibold">Low on Stocks: {stockInfo.quantity}</span>
+                                    ) : (
+                                        <span className="text-green-700 font-semibold">Stock: {stockInfo.quantity}</span>
+                                    )
+                                ) : (
+                                    <span className="text font-semibold">Checking stocks.</span>
+                                )
+                            ) : (
+                                <span className="text-gray-500">Select all variants to see stock.</span>
+                            )}
+                        </div>
                         <hr className="mb-6" />
 
             
@@ -977,7 +1064,7 @@ const DieCutSticker = () => {
                                                         className={`w-8 h-8 rounded cursor-pointer ${isSelected ? 'ring-2 ring-blue-500' : 'ring-1 ring-gray-300'} focus:outline-none focus:ring-0`}
                                                         style={{ backgroundColor: isHexColor ? val.value : '#000000' }}
                                                         onClick={() => selectVariant(techniqueGroup.id, val)}
-                                                        title={`${val.name} ${val.price > 0 ? `(+₱${val.price.toFixed(2)})` : ''}`}
+                                                        title={`${val.name} ${val.price > 0 ? `(+\u20b1${val.price.toFixed(2)})` : ''}`}
                                                     />
                                                 );
                                             }
@@ -1060,7 +1147,14 @@ const DieCutSticker = () => {
 
                         {/* footer actions pinned at bottom */}
                         <div className="flex items-center gap-4 mt-4">
-                            <button type="button" onClick={handleAddToCart} className="bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0">{cartSuccess ? cartSuccess : (fromCart ? 'UPDATE CART' : 'ADD TO CART')}</button>
+                            <button
+                                type="button"
+                                onClick={handleAddToCart}
+                                className="bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                                disabled={isAdding || (stockInfo && stockInfo.quantity <= 0)}
+                            >
+                                {cartSuccess ? cartSuccess : (fromCart ? 'UPDATE CART' : 'ADD TO CART')}
+                            </button>
                             {cartError && <div className="text-red-600 text-sm ml-2">{cartError}</div>}
                             <button
                                 type="button"

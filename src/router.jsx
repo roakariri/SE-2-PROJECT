@@ -154,6 +154,16 @@ import StampSeal from "./Stamp-Seal";
   import OrderConfirmation from "./Order-Confirmation";
   import OrderPage from "./Order";
 
+//Legal Compliances
+  import AboutUs from "./About-us";
+  import TermsAndConditions from "./Terms-and-Conditions";
+  import PrivacyPolicy from "./Privacy-Policy";
+  import FAQs from "./FAQs";
+  import Shipping from "./Shipping";
+  import OrderTracking from "./Order-Tracking";
+  import ContactSupport from "./Contact-Support";
+  import ReturnPolicy from "./Return-Policy";
+  import ThreeDPrintServices from "./3D-Print-Services";
 
 
 
@@ -375,6 +385,17 @@ export const router = createBrowserRouter([
 //Admin
   {path: "/Admin", element: <Admin />},
 
+
+//Legal Compliances
+  {path: "/about-us", element: <AboutUs />},
+  {path: "/terms-and-conditions", element: <TermsAndConditions />},
+  {path: "/privacy-policy", element: <PrivacyPolicy />},
+  {path: "/shipping", element: <Shipping />},
+  {path: "/order-tracking", element: <OrderTracking />},
+  {path: "/contact-support", element: <ContactSupport />},
+  {path: "/return-policy", element: <ReturnPolicy />},
+  {path: "/3d-print-services", element: <ThreeDPrintServices />},
+  {path: "/faqs", element: <FAQs />},
 ]);
 
 

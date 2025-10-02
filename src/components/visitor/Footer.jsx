@@ -24,25 +24,25 @@ const Footer = () => {
                 {/* Our Company */}
                 <div className="flex flex-col gap-1 min-w-[120px] ">
                     <p className="font-bold text-base mb-2 text-white font-dm-sans">Our Company</p>
-                    <p className="text-[15px] cursor-pointer hover:underline text-white font-dm-sans">About Us</p>
-                    <p className="text-[15px] cursor-pointer hover:underline text-white font-dm-sans">Terms & Conditions</p>
-                    <p className="text-[15px] cursor-pointer hover:underline text-white font-dm-sans">Privacy Policy</p>
+                    <a href="/about-us"><p className="text-[15px] cursor-pointer hover:underline text-white font-dm-sans">About Us</p></a>
+                    <a href="/terms-and-conditions"><p className="text-[15px] cursor-pointer hover:underline text-white font-dm-sans">Terms & Conditions</p></a>
+                    <a href="/privacy-policy"><p className="text-[15px] cursor-pointer hover:underline text-white font-dm-sans">Privacy Policy</p></a>
                 </div>
 
                 {/* Our Services */}
                 <div className="flex flex-col gap-1 min-w-[120px]">
                     <p className="font-bold text-base mb-2 text-white font-dm-sans">Our Services</p>
-                    <p className="text-sm cursor-pointer hover:underline text-white font-dm-sans">FAQs</p>
+                    <a href="/faqs"><p className="text-sm cursor-pointer hover:underline text-white font-dm-sans">FAQs</p></a>
 
-                    <p className="text-[15px] cursor-pointer hover:underline text-white font-dm-sans">Shipping</p>
-                    <p className="text-[15px] cursor-pointer hover:underline text-white font-dm-sans">Order Tracking</p>
-                    <p className="text-[15px] cursor-pointer hover:underline text-white font-dm-sans">Contact Support</p>
+                    <a href="/shipping"><p className="text-[15px] cursor-pointer hover:underline text-white font-dm-sans">Shipping</p></a>
+                    <a href="/order-tracking"><p className="text-[15px] cursor-pointer hover:underline text-white font-dm-sans">Order Tracking</p></a>
+                    <a href="/contact-support"><p className="text-[15px] cursor-pointer hover:underline text-white font-dm-sans">Contact Support</p></a>
                 </div>
 
                 {/* More Services */}
                 <div className="flex flex-col gap-1 min-w-[120px] laptop:mt-[25px] phone:mt-[-30px]">
-                    <p className="text-[15px] cursor-pointer hover:underline mt-2 text-white font-dm-sans">Returns Policy</p>
-                    <p className="text-[15px] cursor-pointer hover:underline text-white font-dm-sans">3D Print Services</p>
+                    <a href="/return-policy"><p className="text-[15px] cursor-pointer hover:underline mt-2 text-white font-dm-sans">Returns Policy</p></a>
+                    <a href="/3d-print-services"><p className="text-[15px] cursor-pointer hover:underline text-white font-dm-sans">3D Print Services</p></a>
 
                 </div>
 

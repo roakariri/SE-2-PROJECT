@@ -31,6 +31,7 @@ const LenticularCards = () => {
     const [lastFavResp, setLastFavResp] = useState(null);
     const [detailsOpen, setDetailsOpen] = useState(true);
     const [quantity, setQuantity] = useState(1);
+    const [stockInfo, setStockInfo] = useState(null);
     const [cartError, setCartError] = useState(null);
     const [cartSuccess, setCartSuccess] = useState(null);
     const [isAdding, setIsAdding] = useState(false);
@@ -625,7 +626,10 @@ const LenticularCards = () => {
     }, [fromCart, editingCartId]);
 
     const toggleDetails = () => setDetailsOpen((s) => !s);
-    const incrementQuantity = () => setQuantity((q) => q + 1);
+    const incrementQuantity = () => setQuantity((q) => {
+        const maxStock = stockInfo?.quantity ?? Infinity;
+        return Math.min(q + 1, maxStock);
+    });
     const decrementQuantity = () => setQuantity((q) => Math.max(1, q - 1));
 
     const selectVariant = (groupId, value) => {
@@ -656,6 +660,61 @@ const LenticularCards = () => {
     // Calculate unit price (base + variants) and multiply by quantity for total
     const unitPrice = (Number(price) || 0) + Object.values(selectedVariants).reduce((acc, val) => acc + (Number(val?.price) || 0), 0);
     const totalPrice = unitPrice * quantity;
+
+    // Fetch stock info based on selected variants
+    useEffect(() => {
+        const fetchStockInfo = async () => {
+            if (!productId || !variantGroups.length) {
+                setStockInfo(null);
+                return;
+            }
+            const variantIds = Object.values(selectedVariants)
+                .map(v => v?.id)
+                .filter(Boolean);
+
+            if (variantIds.length !== variantGroups.length) {
+                setStockInfo(null);
+                return;
+            }
+
+            const sortedVariantIds = [...variantIds].map(n => Number(n)).sort((a, b) => a - b);
+
+            const { data: combinations, error: combError } = await supabase
+                .from('product_variant_combinations')
+                .select('combination_id, variants')
+                .eq('product_id', productId);
+
+            if (combError) { setStockInfo(null); return; }
+
+            const match = (combinations || []).find(row => {
+                if (!row.variants || row.variants.length !== sortedVariantIds.length) return false;
+                const a = [...row.variants].map(v => Number(v)).sort((x, y) => x - y);
+                return a.every((v, i) => v === sortedVariantIds[i]);
+            });
+
+            if (!match) { setStockInfo({ quantity: 0, low_stock_limit: 0 }); return; }
+
+            const { data: inventory, error: invError } = await supabase
+                .from('inventory')
+                .select('quantity, low_stock_limit, status')
+                .eq('combination_id', match.combination_id)
+                .single();
+
+            if (invError || !inventory) { setStockInfo({ quantity: 0, low_stock_limit: 0 }); return; }
+            setStockInfo(inventory);
+        };
+        fetchStockInfo();
+    }, [productId, selectedVariants, variantGroups]);
+
+    // Clamp quantity when stock changes
+    useEffect(() => {
+        if (stockInfo && typeof stockInfo.quantity === 'number') {
+            setQuantity(q => {
+                if (stockInfo.quantity <= 0) return q;
+                return Math.min(q, stockInfo.quantity);
+            });
+        }
+    }, [stockInfo?.quantity]);
 
     // Add to Cart logic from Tote Bag
     // Add to Cart logic with cart editing support
@@ -996,9 +1055,27 @@ const LenticularCards = () => {
 
                         <div className="flex items-center gap-3 mb-4" aria-hidden />
 
-                        <div className="text-3xl text-[#EF7D66] font-bold mb-4">
+                        <div className="text-3xl text-[#EF7D66] font-bold mb-1">
                             {loading ? "" : `₱${totalPrice.toFixed(2)}`}
                             <p className="italic text-black text-[12px]">Shipping calculated at checkout.</p>
+                        </div>
+                        {/* Stock status */}
+                        <div className="mb-3">
+                            {variantGroups.length === Object.values(selectedVariants).filter(v => v?.id).length ? (
+                                stockInfo ? (
+                                    stockInfo.quantity === 0 ? (
+                                        <span className="text-red-600 font-semibold">Out of Stocks</span>
+                                    ) : stockInfo.quantity <= 5 ? (
+                                        <span className="text-yellow-600 font-semibold">Low on Stocks: {stockInfo.quantity}</span>
+                                    ) : (
+                                        <span className="text-green-700 font-semibold">Stock: {stockInfo.quantity}</span>
+                                    )
+                                ) : (
+                                    <span className="text font-semibold">Checking stocks.</span>
+                                )
+                            ) : (
+                                <span className="text-gray-500">Select all variants to see stock.</span>
+                            )}
                         </div>
                         <hr className="mb-6" />
 
@@ -1073,8 +1150,8 @@ const LenticularCards = () => {
                             <button
                                 type="button"
                                 onClick={handleAddToCart}
-                                disabled={isAdding}
-                                className={`bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0 ${isAdding ? 'opacity-60 pointer-events-none' : ''}`}
+                                disabled={isAdding || (stockInfo && stockInfo.quantity <= 0)}
+                                className={`bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0 ${(isAdding || (stockInfo && stockInfo.quantity <= 0)) ? 'opacity-60 pointer-events-none' : ''}`}
                             >
                                 {cartSuccess ? cartSuccess : (isAdding ? (fromCart ? 'UPDATING...' : 'ADDING...') : (fromCart ? 'UPDATE CART' : 'ADD TO CART'))}
                             </button>

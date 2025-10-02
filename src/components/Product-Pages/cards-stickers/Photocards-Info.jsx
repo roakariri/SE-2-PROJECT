@@ -35,6 +35,7 @@ const Photocards = () => {
     const [isAdding, setIsAdding] = useState(false);
     const [variantGroups, setVariantGroups] = useState([]);
     const [selectedVariants, setSelectedVariants] = useState({});
+    const [stockInfo, setStockInfo] = useState(null);
 
     // upload design state (added for UploadDesign integration)
     const [uploadedFileMetas, setUploadedFileMetas] = useState([]); // DB rows
@@ -227,6 +228,72 @@ const Photocards = () => {
         }
         setSelectedVariants(initial);
     }, [variantGroups]);
+
+    // Fetch stock info based on selected variants (same logic as Plastic-Bag)
+    useEffect(() => {
+        const fetchStockInfo = async () => {
+            if (!productId || !variantGroups.length) {
+                setStockInfo(null);
+                return;
+            }
+            const variantIds = Object.values(selectedVariants)
+                .map(v => v?.id)
+                .filter(Boolean);
+
+            if (variantIds.length !== variantGroups.length) {
+                setStockInfo(null);
+                return;
+            }
+
+            const sortedVariantIds = [...variantIds].map(n => Number(n)).sort((a, b) => a - b);
+
+            const { data: combinations, error: combError } = await supabase
+                .from('product_variant_combinations')
+                .select('combination_id, variants')
+                .eq('product_id', productId);
+
+            if (combError) {
+                setStockInfo(null);
+                return;
+            }
+
+            const match = (combinations || []).find(row => {
+                if (!row.variants || row.variants.length !== sortedVariantIds.length) return false;
+                const a = [...row.variants].map(v => Number(v)).sort((x, y) => x - y);
+                return a.every((v, i) => v === sortedVariantIds[i]);
+            });
+
+            if (!match) {
+                setStockInfo({ quantity: 0, low_stock_limit: 0 });
+                return;
+            }
+
+            const { data: inventory, error: invError } = await supabase
+                .from('inventory')
+                .select('quantity, low_stock_limit, status')
+                .eq('combination_id', match.combination_id)
+                .single();
+
+            if (invError || !inventory) {
+                setStockInfo({ quantity: 0, low_stock_limit: 0 });
+                return;
+            }
+
+            setStockInfo(inventory);
+        };
+
+        fetchStockInfo();
+    }, [productId, selectedVariants, variantGroups]);
+
+    // Clamp quantity when stock changes
+    useEffect(() => {
+        if (stockInfo && typeof stockInfo.quantity === 'number') {
+            setQuantity(q => {
+                if (stockInfo.quantity <= 0) return q;
+                return Math.min(q, stockInfo.quantity);
+            });
+        }
+    }, [stockInfo?.quantity]);
 
     // Resolve imageKey to a public URL (robust: accepts full urls, leading slashes, and tries common buckets)
     useEffect(() => {
@@ -625,7 +692,10 @@ const Photocards = () => {
 
     const toggleDetails = () => setDetailsOpen((s) => !s);
 
-    const incrementQuantity = () => setQuantity((q) => q + 1);
+    const incrementQuantity = () => setQuantity((q) => {
+        const maxStock = stockInfo?.quantity ?? Infinity;
+        return Math.min(q + 1, maxStock);
+    });
     const decrementQuantity = () => setQuantity((q) => Math.max(1, q - 1));
 
     // Calculate unit price (base + variants) and multiply by quantity for total
@@ -1003,6 +1073,24 @@ const Photocards = () => {
                             {loading ? "" : `₱${totalPrice.toFixed(2)}`}
                             <p className="italic text-black text-[12px]">Shipping calculated at checkout.</p>
                         </div>
+                        {/* Stock status (copied from Plastic-Bag just below shipping note) */}
+                        <div className="mb-2">
+                            {variantGroups.length === Object.values(selectedVariants).filter(v => v?.id).length ? (
+                                stockInfo ? (
+                                    stockInfo.quantity === 0 ? (
+                                        <span className="text-red-600 font-semibold">Out of Stocks</span>
+                                    ) : stockInfo.quantity <= 5 ? (
+                                        <span className="text-yellow-600 font-semibold">Low on Stocks: {stockInfo.quantity}</span>
+                                    ) : (
+                                        <span className="text-green-700 font-semibold">Stock: {stockInfo.quantity}</span>
+                                    )
+                                ) : (
+                                    <span className="text font-semibold">Checking stocks.</span>
+                                )
+                            ) : (
+                                <span className="text-gray-500">Select all variants to see stock.</span>
+                            )}
+                        </div>
                         <hr className="mb-6" />
 
                         <div className="mb-6">
@@ -1110,7 +1198,7 @@ const Photocards = () => {
                             <button
                                 type="button"
                                 onClick={handleAddToCart}
-                                disabled={isAdding}
+                                disabled={isAdding || (stockInfo && stockInfo.quantity <= 0)}
                                 className={`bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0 ${isAdding ? 'opacity-60 pointer-events-none' : ''}`}
                             >
                                 {cartSuccess ? cartSuccess : (isAdding ? (fromCart ? 'UPDATING...' : 'ADDING...') : (fromCart ? 'UPDATE CART' : 'ADD TO CART'))}
