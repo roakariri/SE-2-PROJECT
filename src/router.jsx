@@ -40,6 +40,7 @@ import Search from "./Search";
 // Importing the Account component
 import UserAccount from "./User-Account";
 import PrivateRoute from "./components/PrivateRoute";
+import AdminRoute from "./components/AdminRoute";
 
 
 import Product from "./Product"; // Importing the Product component
@@ -164,6 +165,9 @@ import StampSeal from "./Stamp-Seal";
   import ContactSupport from "./Contact-Support";
   import ReturnPolicy from "./Return-Policy";
   import ThreeDPrintServices from "./3D-Print-Services";
+
+//admin
+  import AdminLogin from "./Admin-Login"
 
 
 
@@ -383,7 +387,7 @@ export const router = createBrowserRouter([
 
 
 //Admin
-  {path: "/Admin", element: <Admin />},
+  {path: "/Admin", element: <AdminRoute><Admin /></AdminRoute>},
 
 
 //Legal Compliances
@@ -396,6 +400,10 @@ export const router = createBrowserRouter([
   {path: "/return-policy", element: <ReturnPolicy />},
   {path: "/3d-print-services", element: <ThreeDPrintServices />},
   {path: "/faqs", element: <FAQs />},
+
+
+//Admin login
+  {path: "/admin-login", element: <AdminLogin />},
 ]);
 
 

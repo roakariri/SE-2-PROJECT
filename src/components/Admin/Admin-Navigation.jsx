@@ -1,7 +1,14 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 const AdminNavigation = () => {
     const [isCollapsed, setIsCollapsed] = useState(false);
+    const navigate = useNavigate();
+
+    const handleLogout = () => {
+        localStorage.removeItem('adminLoggedIn');
+        navigate('/admin-login');
+    };
 
     const navigationItems = [
         { name: 'Dashboard', path: '/admin', iconActive: '/admin-icons/dashboard-icon.svg', iconInactive: '/admin-icons/dashboard-inactive.svg' },
@@ -126,16 +133,27 @@ const AdminNavigation = () => {
             <div className="p-4">
                 {!isCollapsed ? (
                     <div className="flex items-center space-x-3">
-                       
-                        
+                        <button
+                            onClick={handleLogout}
+                            className="flex items-center space-x-2 text-white hover:text-gray-300 transition-colors duration-200"
+                        >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                            </svg>
+                            <span className="font-dm-sans text-sm">Logout</span>
+                        </button>
                     </div>
                 ) : (
                     <div className="flex justify-center">
-                        <div className="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center">
-                            <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                        <button
+                            onClick={handleLogout}
+                            className="p-2 rounded hover:bg-white/5 text-white"
+                            title="Logout"
+                        >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                             </svg>
-                        </div>
+                        </button>
                     </div>
                 )}
             </div>

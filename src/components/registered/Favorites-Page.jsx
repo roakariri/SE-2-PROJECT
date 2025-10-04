@@ -145,7 +145,7 @@ const FavoritesPage = () => {
 
             {loading ? (
                 <div className="flex flex-col items-center font-dm-sans justify-center mt-[100px]">
-                    <p className="text-[20px] font-bold text-black">Loading...</p>
+                    <p className="text-gray-600 font-dm-sans font-semibold text-[20px]">Your Favorites is here...</p>
                 </div>
             ) : favorites.length === 0 ? (
                 <div className="flex flex-col items-center font-dm-sans justify-center mt-[100px]">

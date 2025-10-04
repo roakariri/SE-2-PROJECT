@@ -587,8 +587,8 @@ const CartPage = () => {
         <p className="text-black font-bold text-[36px] font-dm-sans">Cart</p>
 
         {loading ? (
-          <div className="flex items-center justify-center mt-24">
-            <p className="text-gray-600">Loading your cart...</p>
+          <div className="flex flex-col items-center justify-center mt-24">
+            <p className="text-gray-600 font-dm-sans font-semibold text-[20px]">Your Cart is here...</p>
           </div>
         ) : carts.length === 0 ? (
           <div className="flex flex-col items-center font-dm-sans justify-center mt-[100px]">
