@@ -1142,7 +1142,7 @@ const AdminContents = () => {
             <div>
                 <div style={{ display: selected === 'Dashboard' ? 'block' : 'none' }} className={containerClass}>
                     <h2 className="text-lg font-semibold mb-3">Dashboard</h2>
-                    <p className="text-gray-700">Overview and quick stats go here.</p>
+                    
                 </div>
 
                 <div style={{ display: selected === 'Stocks' ? 'block' : 'none' }} className={`${containerClass} mt-1`}>
