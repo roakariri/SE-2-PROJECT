@@ -130,24 +130,24 @@ const AdminNavigation = () => {
             </nav>
 
             {/* Footer */}
-            <div className="p-4">
+            <div className="mt-[280px] border border-black">
                 {!isCollapsed ? (
                     <div className="flex items-center space-x-3">
                         <button
                             onClick={handleLogout}
-                            className="flex items-center space-x-2 text-white hover:text-gray-300 transition-colors duration-200"
+                            className="flex items-center space-x-2 text-white bg-transparent"
                         >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg className="w-[25px] h-[25px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                             </svg>
-                            <span className="font-dm-sans text-sm">Logout</span>
+                            <span className="font-dm-sans text-[20px]">Logout</span>
                         </button>
                     </div>
                 ) : (
                     <div className="flex justify-center">
                         <button
                             onClick={handleLogout}
-                            className="p-2 rounded hover:bg-white/5 text-white"
+                            className="p-2 rounded bg-transparent text-white"
                             title="Logout"
                         >
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

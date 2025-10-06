@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../supabaseClient';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
@@ -117,7 +117,290 @@ const resolveImageUrl = (img) => {
     }
 };
 
-const StocksList = () => {
+const OrdersList = () => {
+    const [search, setSearch] = useState('');
+    const [rows, setRows] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
+
+    useEffect(() => {
+        let mounted = true;
+        const pageSize = 500; // large enough; adjust if needed
+        const load = async () => {
+            setLoading(true);
+            setError(null);
+            try {
+                let all = [];
+                let page = 0;
+                // Determine a valid order-by column
+                const orderCandidates = ['order_id', 'created_at', 'date_ordered', 'id'];
+                let chosenOrder = null;
+                for (const cand of orderCandidates) {
+                    try {
+                        const probe = await supabase
+                            .from('orders')
+                            .select('*')
+                            .order(cand, { ascending: false })
+                            .range(0, 0);
+                        if (!probe.error) { chosenOrder = cand; break; }
+                    } catch (e) {
+                        // ignore and try next candidate
+                    }
+                }
+
+                while (true) {
+                    const start = page * pageSize;
+                    const end = (page + 1) * pageSize - 1;
+                    let res;
+                    if (chosenOrder) {
+                        res = await supabase
+                            .from('orders')
+                            .select('*')
+                            .order(chosenOrder, { ascending: false })
+                            .range(start, end);
+                    } else {
+                        res = await supabase
+                            .from('orders')
+                            .select('*')
+                            .range(start, end);
+                    }
+                    if (res.error) throw res.error;
+                    const chunk = res.data || [];
+                    all = all.concat(chunk);
+                    if (chunk.length < pageSize) break;
+                    page += 1;
+                }
+
+                // Build a userId -> name map from related tables if available
+                const isUuid = (v) => typeof v === 'string' && /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i.test(v);
+                const userIds = Array.from(new Set((all || []).map(o => (
+                    o.user_id ?? o.customer_id ?? o.userId ?? o.customerId ?? null
+                )).filter(Boolean)));
+                const nameMap = {};
+                const avatarMap = {};
+                const deriveName = (rec) => {
+                    const first = rec.first_name ?? rec.given_name ?? rec.first ?? '';
+                    const last = rec.last_name ?? rec.family_name ?? rec.last ?? '';
+                    const fullPref = rec.display_name ?? rec.full_name ?? rec.name ?? `${first} ${last}`.trim();
+                    return (fullPref && fullPref !== ' ') ? fullPref : (rec.email ?? rec.username ?? rec.handle ?? '');
+                };
+
+                if (userIds.length > 0) {
+                    try {
+                        // Try profiles by user_id
+                        const p1 = await supabase
+                            .from('profiles')
+                            .select('user_id, id, display_name, full_name, name, first_name, last_name, email, avatar_url')
+                            .in('user_id', userIds);
+                        if (!p1.error && Array.isArray(p1.data)) {
+                            p1.data.forEach(r => {
+                                const nm = deriveName(r);
+                                if (r.user_id) nameMap[String(r.user_id)] = nm;
+                                if (r.id) nameMap[String(r.id)] = nm;
+                                if (r.user_id && r.avatar_url) avatarMap[String(r.user_id)] = r.avatar_url;
+                            });
+                        }
+                    } catch {}
+                    try {
+                        // Try profiles by id if user_id didn't cover
+                        const missing = userIds.filter(uid => nameMap[String(uid)] == null);
+                        if (missing.length > 0) {
+                            const p2 = await supabase
+                                .from('profiles')
+                                .select('user_id, id, display_name, full_name, name, first_name, last_name, email, avatar_url')
+                                .in('id', missing);
+                            if (!p2.error && Array.isArray(p2.data)) {
+                                p2.data.forEach(r => {
+                                    const nm = deriveName(r);
+                                    if (r.user_id) nameMap[String(r.user_id)] = nm;
+                                    if (r.id) nameMap[String(r.id)] = nm;
+                                    if (r.user_id && r.avatar_url) avatarMap[String(r.user_id)] = r.avatar_url;
+                                });
+                            }
+                        }
+                    } catch {}
+                    // Note: querying auth.users directly is not permitted from client.
+                    // Prefer a secure RPC (SECURITY DEFINER) that reads from auth.users.
+                    // Only attempt RPC when there is a Supabase auth session; otherwise skip to avoid 404/400 noise.
+                    try {
+                        const missingAuth = userIds.filter(uid => nameMap[String(uid)] == null);
+                        const rpcIds = missingAuth.map(x => String(x)).filter(isUuid);
+                        if (rpcIds.length > 0) {
+                            const { data: sessionData } = await supabase.auth.getSession();
+                            if (sessionData?.session) {
+                                const { data: rpcData, error: rpcErr } = await supabase.rpc('get_user_public_names', { ids: rpcIds });
+                                if (!rpcErr && Array.isArray(rpcData)) {
+                                    rpcData.forEach(r => {
+                                        if (r?.id && (r?.name || r?.email_local)) {
+                                            nameMap[String(r.id)] = r.name || r.email_local || nameMap[String(r.id)] || '';
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                    } catch {}
+                    try {
+                        // Try customers table by id
+                        const stillMissing = userIds.filter(uid => nameMap[String(uid)] == null);
+                        if (stillMissing.length > 0) {
+                            const c1 = await supabase
+                                .from('customers')
+                                .select('id, customer_id, full_name, name, first_name, last_name, email')
+                                .in('id', stillMissing);
+                            if (!c1.error && Array.isArray(c1.data)) {
+                                c1.data.forEach(r => {
+                                    const nm = deriveName(r);
+                                    if (r.customer_id) nameMap[String(r.customer_id)] = nm;
+                                    if (r.id) nameMap[String(r.id)] = nm;
+                                });
+                            }
+                        }
+                    } catch {}
+                    try {
+                        // Try customers table by customer_id
+                        const stillMissing2 = userIds.filter(uid => nameMap[String(uid)] == null);
+                        if (stillMissing2.length > 0) {
+                            const c2 = await supabase
+                                .from('customers')
+                                .select('id, customer_id, full_name, name, first_name, last_name, email')
+                                .in('customer_id', stillMissing2);
+                            if (!c2.error && Array.isArray(c2.data)) {
+                                c2.data.forEach(r => {
+                                    const nm = deriveName(r);
+                                    if (r.customer_id) nameMap[String(r.customer_id)] = nm;
+                                    if (r.id) nameMap[String(r.id)] = nm;
+                                });
+                            }
+                        }
+                    } catch {}
+                }
+
+                // Map flexible fields to UI shape
+                const mapped = (all || []).map(o => {
+                    const orderId = o.order_id ?? o.id ?? o.reference ?? o.number ?? null;
+                    const dateRaw = o.date_ordered ?? o.created_at ?? o.createdAt ?? o.placed_at ?? null;
+                    const status = o.status ?? o.order_status ?? 'In Progress';
+                    const amount = o.total_amount ?? o.total ?? o.amount ?? 0;
+                    const uId = o.user_id ?? o.customer_id ?? o.userId ?? o.customerId ?? null;
+
+                    // Base fallback from inline fields
+                    const first = o.customer_first_name ?? o.first_name ?? o.first ?? '';
+                    const last = o.customer_last_name ?? o.last_name ?? o.last ?? '';
+                    let customer = o.customer_name ?? o.name ?? `${first} ${last}`.trim();
+                    if (!customer && uId != null) {
+                        const nm = nameMap[String(uId)];
+                        if (nm) customer = nm;
+                    }
+
+                    // Format date to YYYY-MM-DD
+                    let date = '';
+                    try {
+                        if (dateRaw) {
+                            const d = new Date(dateRaw);
+                            if (!isNaN(d)) date = d.toISOString().slice(0, 10);
+                        }
+                    } catch {}
+
+                    return { id: orderId, customer: customer || '—', date, status, amount: Number(amount || 0) };
+                }).filter(r => r.id != null);
+
+                if (mounted) setRows(mapped);
+            } catch (e) {
+                if (mounted) setError(e?.message || String(e));
+            } finally {
+                if (mounted) setLoading(false);
+            }
+        };
+
+        load();
+        return () => { mounted = false; };
+    }, []);
+
+    const filtered = rows.filter(r =>
+        String(r.id).toLowerCase().includes(search.toLowerCase()) ||
+        (r.customer || '').toLowerCase().includes(search.toLowerCase())
+    );
+
+    const statusBadge = (s) => {
+        const base = 'inline-flex items-center px-2 py-1 rounded text-sm';
+        if (s === 'Delivered') return <span className={`${base} bg-green-100 text-green-800`}>Delivered</span>;
+        if (s === 'Cancelled') return <span className={`${base} bg-red-100 text-red-700`}>Cancelled</span>;
+        return <span className={`${base} bg-yellow-100 text-yellow-800`}>In Progress</span>;
+    };
+
+    const peso = (n) => `₱${Number(n).toFixed(2)}`;
+
+    return (
+        <div className="p-4">
+            <div className="flex items-center justify-between mb-3">
+                <h2 className="text-[24px] font-bold text-gray-900">Orders</h2>
+                <div className="relative w-[241px]">
+                    <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
+                        <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
+                            <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 3.473 9.8l3.613 3.614a.75.75 0 1 0 1.06-1.06l-3.614-3.614A5.5 5.5 0 0 0 9 3.5Zm-4 5.5a4 4 0 1 1 8 0 4 4 0 0 1-8 0Z" clipRule="evenodd" />
+                        </svg>
+                    </span>
+                    <input
+                        type="text"
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Search order"
+                        className="w-[241px] pl-9 pr-3 py-2 border rounded-md text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-black/20"
+                    />
+                </div>
+            </div>
+
+            {error && (
+                <div className="mb-2 text-red-600 text-sm">{error}</div>
+            )}
+            {loading && (
+                <div className="mb-2 text-gray-600 text-sm">Loading orders…</div>
+            )}
+
+            <div className="overflow-x-auto">
+                <table className="w-full table-fixed rounded-md">
+                    <colgroup>
+                        <col style={{ width: '16%' }} />
+                        <col style={{ width: '22%' }} />
+                        <col style={{ width: '18%' }} />
+                        <col style={{ width: '18%' }} />
+                        <col style={{ width: '16%' }} />
+                        <col style={{ width: '10%' }} />
+                    </colgroup>
+                    <thead className="sticky top-0 bg-[#DFE7F4]">
+                        <tr className="text-left text-[16px] text-gray-600">
+                            <th className="px-4 py-2">Order ID</th>
+                            <th className="px-4 py-2">Customer</th>
+                            <th className="px-4 py-2">Date Ordered</th>
+                            <th className="px-4 py-2">Status</th>
+                            <th className="px-4 py-2">Total Amount</th>
+                            <th className="px-4 py-2">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {filtered.map((r) => (
+                            <tr key={r.id} className="border-t">
+                                <td className="px-4 py-3 align-top text-[#2B4269] font-medium">{`Order #${r.id}`}</td>
+                                <td className="px-4 py-3 align-top flex items-center gap-2">
+                                    <img src="/logo-icon/profile-icon.svg" alt="" aria-hidden className="w-6 h-6 rounded-full" />
+                                    <span className="text-gray-800">{r.customer}</span>
+                                </td>
+                                <td className="px-4 py-3 align-top text-gray-700">{r.date}</td>
+                                <td className="px-4 py-3 align-top">{statusBadge(r.status)}</td>
+                                <td className="px-4 py-3 align-top text-gray-800">{peso(r.amount)}</td>
+                                <td className="px-4 py-3 align-top">
+                                    <button className="px-3 py-1 rounded-md border text-sm text-gray-700 hover:bg-gray-50">View</button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+};
+
+const StocksList = ({ externalSearch = '' }) => {
     const [rows, setRows] = useState([]);
     const [loading, setLoading] = useState(false);
     const [editingInventory, setEditingInventory] = useState(null);
@@ -127,6 +410,18 @@ const StocksList = () => {
     const [selectedCategory, setSelectedCategory] = useState('All');
     const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
+    const catMenuRef = useRef(null);
+
+    // Close the category dropdown when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (e) => {
+            if (showCategoryDropdown && catMenuRef.current && !catMenuRef.current.contains(e.target)) {
+                setShowCategoryDropdown(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [showCategoryDropdown]);
 
     useEffect(() => {
         let mounted = true;
@@ -231,7 +526,7 @@ const StocksList = () => {
                                 if (!vvErr && Array.isArray(vvData)) {
                                     vvData.forEach(vv => {
                                         const id = vv.variant_value_id ?? vv.id;
-                                        const valueName = vv.value_name || '';
+                                    setCategories(cats);
                                         const groupName = vv?.variant_groups?.name || (vv?.variant_group_id != null ? String(vv.variant_group_id) : '');
                                         pvvMap[String(id)] = { valueName, groupName, price: 0, variant_value_id: id };
                                     });
@@ -315,7 +610,14 @@ const StocksList = () => {
                             return display;
                         }).filter(Boolean);
 
-                        const variantDesc = variantParts.length ? variantParts.join(', ') : (Array.isArray(combo?.variants) ? combo.variants.join(', ') : combo?.variants || '');
+                        // Keep both a list (for line-by-line rendering) and a string (fallback)
+                        const variantList = variantParts.length
+                            ? variantParts
+                            : (Array.isArray(combo?.variants)
+                                ? combo.variants.map(v => String(v))
+                                : (combo?.variants != null ? [String(combo.variants)] : []));
+
+                        const variantDesc = variantList.length ? variantList.join(', ') : '';
 
                         const basePrice = Number(price ?? 0);
                         const totalPrice = basePrice + variantPriceTotal;
@@ -329,6 +631,7 @@ const StocksList = () => {
                             updated_at: inv.updated_at,
                             product: { id: product?.id, name: productName, category, category_id, price: totalPrice, image, image_url: resolvedFromImageUrl, image_key: rawImageUrl, basePrice },
                             variantDesc,
+                            variantList,
                         });
                     }
 
@@ -366,7 +669,7 @@ const StocksList = () => {
                         }
                         const cats = Array.from(new Set((mapped || []).map(r => r.product?.category).filter(Boolean)));
                         cats.sort();
-                        setCategories(['All', ...cats]);
+                        setCategories(cats);
                     }
                 };
 
@@ -509,55 +812,83 @@ const StocksList = () => {
     if (selectedCategory && selectedCategory !== 'All') {
         filteredRows = filteredRows.filter(r => (r.product?.category || '') === selectedCategory);
     }
-    if (searchQuery && String(searchQuery).trim() !== '') {
-        const q = String(searchQuery).trim().toLowerCase();
+    const effectiveSearch = (externalSearch && String(externalSearch).trim() !== '') ? externalSearch : searchQuery;
+    if (effectiveSearch && String(effectiveSearch).trim() !== '') {
+        const q = String(effectiveSearch).trim().toLowerCase();
         filteredRows = filteredRows.filter(r => (r.product?.name || '').toLowerCase().includes(q));
     }
 
     return (
         <div>
-            <div className="flex items-center justify-between mb-3">
-                <div />
-                <div className="relative">
-                    <button className="bg-[#2B4269] text-white border px-3 py-1 rounded-md text-sm" onClick={() => setShowCategoryDropdown(s => !s)}>
-                        Category: {selectedCategory}
-                    </button>
-                    {showCategoryDropdown && (
-                        <div className="absolute right-0 mt-1 bg-white border rounded shadow-md z-10 w-48">
-                            {categories.map(cat => (
-                                <div key={cat} className={`px-3 py-2 hover:bg-gray-100 bg-wh cursor-pointer ${cat === selectedCategory ? 'font-semibold' : ''}`} onClick={() => { setSelectedCategory(cat); setShowCategoryDropdown(false); }}>
-                                    {cat}
+           
+        <div className="overflow-x-auto p-0">
+            <div className="max-h-[65vh] overflow-y-auto">
+                <table className="w-full table-fixed rounded rounded-md ">
+                    <colgroup>
+                        <col style={{ width: '15%' }} />
+                        <col style={{ width: '12%' }} />
+                        <col style={{ width: '10%' }} />
+                        <col style={{ width: '10%' }} />
+                        <col style={{ width: '8%' }} />
+                        <col style={{ width: '8%' }} />
+                        <col style={{ width: '10%' }} />
+                    </colgroup>
+                    <thead className="sticky top-0 bg-[#DFE7F4] ">
+                        <tr className="text-left text-[16px] text-gray-600">
+                            <th className="px-4 py-2">Product Name</th>
+                            <th className="px-4 py-2 ">
+                                <div className="flex items-center gap-2">
+                                    <span>Category</span>
+                                    <div className="relative p-0 z-30" ref={catMenuRef}>
+                                        <button
+                                            type="button"
+                                            aria-label="Filter by category"
+                                            onClick={() => setShowCategoryDropdown((s) => !s)}
+                                            className="inline-flex items-center justify-center h-6 w-6 bg-transparent rounded hover:bg-black/5 focus:outline-none focus:ring-2 focus:ring-black/20"
+                                        >
+                                            <svg
+                                                aria-hidden="true"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                className="h-4 w-4 text-gray-600"
+                                            >
+                                                <path d="M6 9l6 6 6-6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                            </svg>
+                                           
+                                        </button>
+                                        {showCategoryDropdown && (
+                                            <div className="absolute left-0 mt-2 w-44 rounded-md border bg-white shadow z-20">
+                                                <div className="max-h-60 overflow-y-auto py-1">
+                                                    <button
+                                                        className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 ${selectedCategory === 'All' ? 'font-semibold' : ''}`}
+                                                        onClick={() => { setSelectedCategory('All'); setShowCategoryDropdown(false); }}
+                                                    >
+                                                        All categories
+                                                    </button>
+                                                    {categories.map((c) => (
+                                                        <button
+                                                            key={c}
+                                                            className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 ${selectedCategory === c ? 'font-semibold' : ''}`}
+                                                            onClick={() => { setSelectedCategory(c); setShowCategoryDropdown(false); }}
+                                                        >
+                                                            {c}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            <div className="mb-4 flex justify-end">
-                <input
-                    type="text"
-                    className="w-64 px-3 py-2 border rounded text-sm"
-                    placeholder="Search products by name..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                />
-            </div>
-
-            <div className="overflow-x-auto">
-            <table className="w-full table-auto">
-                <thead>
-                    <tr className="text-left text-sm text-gray-600">
-                        <th className="px-4 py-2">Product Name</th>
-                        <th className="px-4 py-2">Category</th>
-                        <th className="px-4 py-2">Price</th>
-                        <th className="px-4 py-2">Variant</th>
-                        <th className="px-4 py-2">Stock</th>
-                        <th className="px-4 py-2">Status</th>
-                        <th className="px-4 py-2">Action</th>
-                    </tr>
-                </thead>
-                <tbody>
+                            </th>
+                            <th className="px-4 py-2 ">Price</th>
+                            <th className="px-4 py-2 ">Variant</th>
+                            <th className="px-4 py-2 ">Stock</th>
+                            <th className="px-4 py-2 ">Status</th>
+                            <th className="px-4 py-2 ">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
                     {filteredRows.map(r => (
                         <tr key={r.inventory_id || r.combination_id} className="border-t">
                             <td className="px-4 py-3 align-top">
@@ -594,9 +925,47 @@ const StocksList = () => {
 
                             <td className="px-4 py-3 align-top text-gray-800">{r.product?.price != null ? `₱${Number(r.product.price).toFixed(2)}` : '—'}</td>
 
-                            <td className="px-4 py-3 align-top text-gray-700">{r.variantDesc || '—'}</td>
+                            <td className="px-4 py-3 align-top text-gray-700">
+                                {Array.isArray(r.variantList) && r.variantList.length > 0 ? (
+                                    <div className="flex flex-col gap-0.5">
+                                        {r.variantList.map((v, idx) => (
+                                            <span key={idx} className="block">{v}</span>
+                                        ))}
+                                    </div>
+                                ) : (r.variantDesc || '—')}
+                            </td>
 
-                            <td className="px-4 py-3 align-top text-gray-800">{r.quantity ?? 0}</td>
+                            <td className="px-8 py-3 align-top text-gray-800">
+                                {editingInventory && (editingInventory.inventory_id === r.inventory_id || editingInventory.combination_id === r.combination_id) ? (
+                                    <div className="flex items-center border rounded-md overflow-hidden w-fit">
+                                        <button className="px-2" onClick={() => setEditQuantity(q => {
+                                            const cur = Number(q) || 0;
+                                            return Math.max(0, cur - 1);
+                                        })}>-</button>
+                                        <input
+                                            className="w-16 text-center px-2"
+                                            type="number"
+                                            value={editQuantity}
+                                            onFocus={() => { if (editQuantity === 0) setEditQuantity(''); }}
+                                            onBlur={() => { if (editQuantity === '') setEditQuantity(0); }}
+                                            onChange={(e) => {
+                                                const raw = e.target.value;
+                                                if (raw === '') { setEditQuantity(''); return; }
+                                                const num = Number(raw);
+                                                if (Number.isNaN(num)) return;
+                                                const clamped = Math.min(20, Math.max(0, Math.floor(num)));
+                                                setEditQuantity(clamped);
+                                            }}
+                                        />
+                                        <button className="px-2" onClick={() => setEditQuantity(q => {
+                                            const cur = Number(q) || 0;
+                                            return Math.min(20, cur + 1);
+                                        })}>+</button>
+                                    </div>
+                                ) : (
+                                    r.quantity ?? 0
+                                )}
+                            </td>
 
                             <td className="px-4 py-3 align-top">
                                 {((r.quantity ?? 0) <= 0) ? (
@@ -611,38 +980,10 @@ const StocksList = () => {
                             <td className="px-4 py-3 align-top">
                                 {editingInventory && (editingInventory.inventory_id === r.inventory_id || editingInventory.combination_id === r.combination_id) ? (
                                     <div className="flex items-center gap-2">
-                                        <div className="flex items-center border rounded-md overflow-hidden">
-                                            <button className="px-2" onClick={() => setEditQuantity(q => {
-                                                const cur = Number(q) || 0;
-                                                return Math.max(0, cur - 1);
-                                            })}>-</button>
-                                            <input
-                                                className="w-16 text-center px-2"
-                                                type="number"
-                                                value={editQuantity}
-                                                onFocus={() => { if (editQuantity === 0) setEditQuantity(''); }}
-                                                onBlur={() => { if (editQuantity === '') setEditQuantity(0); }}
-                                                onChange={(e) => {
-                                                    const raw = e.target.value;
-                                                    // allow clearing the field so admin can type new number (prevents leading zeros)
-                                                    if (raw === '') { setEditQuantity(''); return; }
-                                                    const num = Number(raw);
-                                                    if (Number.isNaN(num)) return;
-                                                    // clamp to 0..20
-                                                    const clamped = Math.min(20, Math.max(0, Math.floor(num)));
-                                                    setEditQuantity(clamped);
-                                                }}
-                                            />
-                                            <button className="px-2" onClick={() => setEditQuantity(q => {
-                                                const cur = Number(q) || 0;
-                                                return Math.min(20, cur + 1);
-                                            })}>+</button>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <button
-                                                className="bg-green-600 text-white px-3 py-1 rounded text-sm"
-                                                disabled={editLoading}
-                                                onClick={async () => {
+                                        <button
+                                            className="bg-green-600 text-white px-3 py-1 rounded text-sm"
+                                            disabled={editLoading}
+                                            onClick={async () => {
                                                         try {
                                                                     setEditLoading(true);
                                                                     // Ensure quantity is within allowed bounds 0..20
@@ -732,16 +1073,15 @@ const StocksList = () => {
                                                         } finally {
                                                             setEditLoading(false);
                                                         }
-                                                    }}
-                                            >
-                                                {editLoading ? 'Updating...' : 'UPDATE'}
-                                            </button>
-                                            <button className="bg-red-600 text-white px-3 py-1 rounded text-sm" onClick={() => setEditingInventory(null)}>CANCEL</button>
-                                        </div>
+                                            }}
+                                        >
+                                            {editLoading ? 'Updating...' : 'UPDATE'}
+                                        </button>
+                                        <button className="bg-red-600 text-white px-3 py-1 rounded text-sm" onClick={() => setEditingInventory(null)}>CANCEL</button>
                                     </div>
                                 ) : (
                                     <button
-                                        className="bg-blue-700 text-white px-3 py-2 rounded-md text-sm"
+                                        className="bg-[#2B4269] text-white px-3 py-2 rounded-md text-sm"
                                         onClick={() => window.dispatchEvent(new CustomEvent('edit-stock', { detail: { inventory: r } }))}
                                     >
                                         Edit Stock
@@ -750,8 +1090,9 @@ const StocksList = () => {
                             </td>
                         </tr>
                     ))}
-                </tbody>
-            </table>
+                                    </tbody>
+                                </table>
+                            </div>
         </div>
     </div>
     );
@@ -759,6 +1100,7 @@ const StocksList = () => {
 
 const AdminContents = () => {
     const [selected, setSelected] = useState('Dashboard');
+    const [stocksSearch, setStocksSearch] = useState('');
 
     useEffect(() => {
         const handler = (e) => {
@@ -769,12 +1111,32 @@ const AdminContents = () => {
         return () => window.removeEventListener('admin-nav-select', handler);
     }, []);
 
-    const containerClass = 'p-6 bg-white rounded-lg shadow-sm border border-gray-200';
+    const containerClass = 'bg-white border border-black';
 
     return (
         <div className="flex-1 ml-[263px] p-8 bg-gray-50 min-h-screen">
             <div className="mb-6">
-                <p className="text-[32px] font-bold font-dm-sans text-gray-900">{selected}</p>
+                <div className="flex items-center justify-between gap-3 ">
+                    <p className="text-[32px] font-bold font-dm-sans text-gray-900">{selected}</p>
+                    {selected === 'Stocks' && (
+                        <div className="flex flex-col  gap-2 w-full max-w-md  items-end">
+                            <div className="relative w-[241px] ">
+                                <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
+                                    <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
+                                        <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 3.473 9.8l3.613 3.614a.75.75 0 1 0 1.06-1.06l-3.614-3.614A5.5 5.5 0 0 0 9 3.5Zm-4 5.5a4 4 0 1 1 8 0 4 4 0 0 1-8 0Z" clipRule="evenodd" />
+                                    </svg>
+                                </span>
+                                <input
+                                    type="text"
+                                    value={stocksSearch}
+                                    onChange={(e) => setStocksSearch(e.target.value)}
+                                    placeholder="Search product name"
+                                    className="w-[241px] pl-9 pr-3 py-2 border rounded-md text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-black/20"
+                                />
+                            </div>
+                        </div>
+                    )}
+                </div>
             </div>
 
             <div>
@@ -784,12 +1146,16 @@ const AdminContents = () => {
                 </div>
 
                 <div style={{ display: selected === 'Stocks' ? 'block' : 'none' }} className={`${containerClass} mt-1`}>
-                    <StocksList />
+                    <StocksList externalSearch={stocksSearch} />
                 </div>
 
                 <div style={{ display: selected === 'Products' ? 'block' : 'none' }} className={`${containerClass} mt-6`}>
                     <h2 className="text-lg font-semibold mb-3">Products</h2>
                     <p className="text-gray-700">Manage products in this container.</p>
+                </div>
+
+                <div style={{ display: selected === 'Orders' ? 'block' : 'none' }} className={`${containerClass} mt-6`}>
+                    <OrdersList />
                 </div>
             </div>
         </div>
