@@ -397,7 +397,11 @@ const ApparelCatalog = () => {
                           } else {
                             const route = product.route || product.routes;
                             if (route) navigate(route);
-                            else navigate('/product', { state: { product } });
+                            else {
+                              const slugify = (str='') => str.toString().toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'');
+                              const slug = slugify(product.name || product.id);
+                              navigate(`/p/${slug}`);
+                            }
                           }
                         }}
                       />
@@ -440,10 +444,13 @@ const ApparelCatalog = () => {
                         } else if (product.route) {
                           navigate(product.route);
                         } else {
-                          if (!session) { navigate('/signin'); return; }
                           const route = product.route || product.routes;
                           if (route) navigate(route);
-                          else navigate('/product', { state: { product } });
+                          else {
+                            const slugify = (str='') => str.toString().toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'');
+                            const slug = slugify(product.name || product.id);
+                            navigate(`/p/${slug}`);
+                          }
                         }
                       }}
                     >

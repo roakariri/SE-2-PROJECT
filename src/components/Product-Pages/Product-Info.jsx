@@ -1,8 +1,8 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useState, useRef } from "react";
-import { supabase } from "../../../supabaseClient";
-import { UserAuth } from "../../../context/AuthContext";
-import UploadDesign from '../../UploadDesign';
+import { supabase } from "../../supabaseClient";
+import { UserAuth } from "../../context/AuthContext";
+import UploadDesign from '../UploadDesign';
 
 
 const ProductInfo = () => {
@@ -33,41 +33,73 @@ const ProductInfo = () => {
     const [variantGroups, setVariantGroups] = useState([]);
     const [selectedVariants, setSelectedVariants] = useState({});
 
-    const slug = location.pathname.split('/').filter(Boolean).pop();
+    // If we're on /p/:slug use that param; otherwise fall back to last path segment
+    const pathParts = location.pathname.split('/').filter(Boolean);
+    const slug = pathParts[pathParts[0] === 'p' && pathParts.length >= 2 ? 1 : pathParts.length - 1];
 
     useEffect(() => {
         let isMounted = true;
         const fetchProduct = async () => {
             setLoading(true);
-            if (!slug) {
-                setLoading(false);
-                return;
-            }
             try {
-                let { data, error } = await supabase
-                    .from('products')
-                    .select('id, name, starting_price, image_url')
-                    .eq('route', slug)
-                    .single();
+                const nav = location?.state || {};
+                const hintedId = nav.productId || nav.product?.id || null;
+                let data = null; let error = null;
 
-                if (error || !data) {
-                    const fallback = await supabase
+                // 1) If we were passed a productId via navigate state, use it (most reliable)
+                if (hintedId) {
+                    const byId = await supabase
+                        .from('products')
+                        .select('id, name, starting_price, image_url')
+                        .eq('id', hintedId)
+                        .single();
+                    data = byId.data; error = byId.error;
+                }
+
+                // 2) If not found and we have a slug from URL, try route == slug
+                if ((!data || error) && slug) {
+                    const byRoute = await supabase
+                        .from('products')
+                        .select('id, name, starting_price, image_url')
+                        .eq('route', slug)
+                        .single();
+                    if (!byRoute.error && byRoute.data) { data = byRoute.data; error = null; }
+                }
+
+                // 3) Try slug column
+                if ((!data || error) && slug) {
+                    const bySlug = await supabase
                         .from('products')
                         .select('id, name, starting_price, image_url')
                         .eq('slug', slug)
                         .single();
-                    data = fallback.data;
-                    error = fallback.error;
+                    if (!bySlug.error && bySlug.data) { data = bySlug.data; error = null; }
+                }
+
+                // 4) Last resort: try name ILIKE de-slugified text
+                if ((!data || error) && slug) {
+                    const guess = slug.replace(/-/g, ' ').trim();
+                    const { data: byName, error: nameErr } = await supabase
+                        .from('products')
+                        .select('id, name, starting_price, image_url')
+                        .ilike('name', `%${guess}%`)
+                        .limit(1)
+                        .maybeSingle();
+                    if (!nameErr && byName) { data = byName; error = null; }
                 }
 
                 if (!isMounted) return;
                 if (error) {
                     console.error('Error fetching product:', error.message || error);
-                } else if (data) {
+                }
+                if (data) {
                     setProductId(data.id ?? null);
                     setProductName(data.name || "");
                     setPrice(data.starting_price ?? null);
                     setImageKey(data.image_url || "");
+                } else {
+                    // Ensure UI unblocks even if not found
+                    setProductName("");
                 }
             } catch (err) {
                 if (!isMounted) return;
@@ -78,7 +110,7 @@ const ProductInfo = () => {
         };
         fetchProduct();
         return () => { isMounted = false; };
-    }, [slug]);
+    }, [slug, location?.state]);
 
     // Fetch variants with nested joins
     useEffect(() => {

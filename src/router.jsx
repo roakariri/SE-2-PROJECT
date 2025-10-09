@@ -44,6 +44,7 @@ import AdminRoute from "./components/AdminRoute";
 
 
 import Product from "./Product"; // Importing the Product component
+import ProductInfo from "./components/Product-Pages/Product-Info";
 
 // Importing the Favorites component
 import Favorites from "./Favorites";
@@ -218,6 +219,8 @@ export const router = createBrowserRouter([
 
   // Product routes
   { path: "/product", element: <PrivateRoute><Product /></PrivateRoute> },
+  // Generic product info by slug (public)
+  { path: "/p/:slug", element: <ProductInfo /> },
 
   //Favorites routes
     {path: "/favorites", element: <PrivateRoute><Favorites /></PrivateRoute>},

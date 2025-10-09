@@ -386,7 +386,11 @@ const ThreeDPrintsCatalog = () => {
                                // Allow unauthenticated users to view product pages
                                const route = product.route || product.routes;
                                if (route) navigate(route);
-                               else navigate('/product', { state: { product } });
+                               else {
+                                 const slugify = (str='') => str.toString().toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'');
+                                 const slug = slugify(product.name || product.id);
+                                 navigate(`/p/${slug}`);
+                               }
                              }}
 
                            />
@@ -431,7 +435,11 @@ const ThreeDPrintsCatalog = () => {
                                  // Allow unauthenticated users to view product pages
                                  const route = product.route || product.routes;
                                  if (route) navigate(route);
-                                 else navigate('/product', { state: { product } });
+                                 else {
+                                   const slugify = (str='') => str.toString().toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'');
+                                   const slug = slugify(product.name || product.id);
+                                   navigate(`/p/${slug}`);
+                                 }
                                }}
                            >
                                {product.name}

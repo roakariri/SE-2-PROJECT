@@ -174,7 +174,11 @@ const FavoritesPage = () => {
                                                                                     }
                                                                                     const route = product.route || product.routes;
                                                                                     if (route) navigate(route);
-                                                                                    else navigate('/product', { state: { product } });
+                                                                                    else {
+                                                                                        const slugify = (str='') => str.toString().toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'');
+                                                                                        const slug = slugify(product.name || product.id);
+                                                                                        navigate(`/p/${slug}`);
+                                                                                    }
                                                                                 }}
                                     />
                                     {/* Heart icon: red by default, click to remove from favorites */}
@@ -211,7 +215,11 @@ const FavoritesPage = () => {
                                                                             }
                                                                             const route = product.route || product.routes;
                                                                             if (route) navigate(route);
-                                                                            else navigate('/product', { state: { product } });
+                                                                            else {
+                                                                                const slugify = (str='') => str.toString().toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'');
+                                                                                const slug = slugify(product.name || product.id);
+                                                                                navigate(`/p/${slug}`);
+                                                                            }
                                                                         }}
                                 >
                                     {product.name}

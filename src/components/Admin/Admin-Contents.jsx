@@ -1,13 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '../../supabaseClient';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
 
-// Small color name map reused from Cart page for hex -> friendly name
+// Small color name map reused across pages for hex -> friendly name
 const colorNames = {
     "#c40233": "Red",
     "#000000": "Black",
     "#ffffff": "White",
+    "#faf9f6": "Off-White",
     "#ede8d0": "Beige",
     "#808080": "Gray",
     "#228b22": "Green",
@@ -21,10 +22,329 @@ const colorNames = {
 
 const normalizeHexCode = (value) => {
     if (!value) return null;
-    let normalized = String(value).trim().toLowerCase();
-    if (!normalized.startsWith('#')) normalized = `#${normalized}`;
+    let s = String(value).trim().toLowerCase();
+    if (!s.startsWith('#')) s = `#${s}`;
+    // Expand 3-digit hex like #fff -> #ffffff
+    const shortHex = /^#[0-9a-f]{3}$/i;
+    if (shortHex.test(s)) {
+        const r = s[1], g = s[2], b = s[3];
+        s = `#${r}${r}${g}${g}${b}${b}`;
+    }
     const hexRegex = /^#[0-9a-f]{6}$/i;
-    return hexRegex.test(normalized) ? normalized : value;
+    return hexRegex.test(s) ? s : value;
+};
+
+// Reusable modal wrapper
+const Modal = ({ open, onClose, children }) => {
+    if (!open) return null;
+    return (
+        <div className="fixed inset-0 z-[100]">
+            <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+            <div className="absolute inset-0 flex items-start justify-center overflow-y-auto">
+                <div className="mt-16 mb-8 w-[680px] max-w-[95vw] bg-white rounded-md shadow-lg border">
+                    {children}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// Add Product Modal content
+const AddProductModal = ({ open, onClose, onSubmit }) => {
+    const [name, setName] = useState('');
+    const [categoriesAll, setCategoriesAll] = useState([]);
+    const [category, setCategory] = useState('');
+    const [startingPrice, setStartingPrice] = useState('');
+    const [status, setStatus] = useState('Active');
+    const [details, setDetails] = useState('');
+    const [images, setImages] = useState([]); // placeholder for future upload
+    // DB-sourced variant groups and values
+    const [allVariantGroups, setAllVariantGroups] = useState([]); // [{id,name}]
+    const [variantValueMap, setVariantValueMap] = useState({}); // { groupId: [value_name] }
+    // one empty variant group row by default, with two empty options
+    const [variantGroups, setVariantGroups] = useState([
+        { id: 1, groupId: '', groupName: '', options: [{ name: '', price: '' }, { name: '', price: '' }] }
+    ]);
+
+    useEffect(() => {
+        if (!open) return;
+        let cancelled = false;
+        const loadCatsAndVariants = async () => {
+            try {
+                // Categories
+                const { data: catData } = await supabase
+                    .from('product_categories')
+                    .select('id, name')
+                    .order('name', { ascending: true });
+                if (Array.isArray(catData)) {
+                    const names = catData.map(c => c.name).filter(Boolean);
+                    if (!cancelled) {
+                        setCategoriesAll(names);
+                        if (!category && names.length) setCategory(names[0]);
+                    }
+                }
+            } catch {}
+            try {
+                // Variant groups
+                const { data: vg } = await supabase
+                    .from('variant_groups')
+                    .select('variant_group_id, name')
+                    .order('name', { ascending: true });
+                if (!cancelled && Array.isArray(vg)) {
+                    setAllVariantGroups(vg.map(g => ({ id: String(g.variant_group_id ?? g.id ?? ''), name: g.name || String(g.variant_group_id) })));
+                }
+            } catch {}
+            try {
+                // Variant values for suggestions
+                const { data: vv } = await supabase
+                    .from('variant_values')
+                    .select('variant_value_id, value_name, variant_group_id');
+                if (!cancelled && Array.isArray(vv)) {
+                    const map = {};
+                    vv.forEach(row => {
+                        const gid = String(row.variant_group_id ?? '');
+                        if (!gid) return;
+                        if (!map[gid]) map[gid] = new Set();
+                        if (row.value_name) map[gid].add(String(row.value_name));
+                    });
+                    const obj = {};
+                    Object.entries(map).forEach(([k, set]) => { obj[k] = Array.from(set).sort((a,b) => a.localeCompare(b)); });
+                    setVariantValueMap(obj);
+                }
+            } catch {}
+        };
+        loadCatsAndVariants();
+        return () => { cancelled = true; };
+    }, [open]);
+
+    useEffect(() => {
+        const onEsc = (e) => { if (e.key === 'Escape') onClose?.(); };
+        if (open) window.addEventListener('keydown', onEsc);
+        return () => window.removeEventListener('keydown', onEsc);
+    }, [open, onClose]);
+
+    const addVariantGroup = () => {
+        setVariantGroups(v => [...v, { id: (v[v.length-1]?.id || 0) + 1, groupId: '', groupName: '', options: [{ name: '', price: '' }, { name: '', price: '' }] }]);
+    };
+    const removeVariantGroup = (id) => setVariantGroups(v => v.filter(g => g.id !== id));
+    const updateVariantGroup = (id, groupId) => setVariantGroups(v => v.map(g => {
+        if (g.id !== id) return g;
+        const vv = allVariantGroups.find(x => String(x.id) === String(groupId));
+        return { ...g, groupId: groupId, groupName: vv?.name || '' };
+    }));
+    const updateVariantOptionName = (id, idx, val) => setVariantGroups(v => v.map(g => g.id === id ? { ...g, options: g.options.map((o,i) => i===idx ? { ...o, name: val } : o) } : g));
+    const updateVariantOptionPrice = (id, idx, val) => setVariantGroups(v => v.map(g => g.id === id ? { ...g, options: g.options.map((o,i) => i===idx ? { ...o, price: val } : o) } : g));
+    const addVariantOption = (id) => setVariantGroups(v => v.map(g => g.id === id ? { ...g, options: [...g.options, { name: '', price: '' }] } : g));
+    const removeVariantOption = (id, idx) => setVariantGroups(v => v.map(g => g.id === id ? { ...g, options: g.options.filter((_,i) => i!==idx) } : g));
+
+    const handleSubmit = () => {
+        const payload = {
+            name: name.trim(),
+            category,
+            starting_price: startingPrice === '' ? null : Number(startingPrice),
+            status,
+            details,
+            images,
+            variants: variantGroups.map(g => ({
+                group_id: g.groupId || null,
+                group_name: g.groupName || '',
+                options: g.options
+                    .map(o => ({ name: (o.name || '').trim(), price: (o.price === '' ? null : Number(o.price)) }))
+                    .filter(o => o.name)
+            })).filter(g => g.group_id || g.group_name || (g.options && g.options.length))
+        };
+        onSubmit?.(payload);
+        onClose?.();
+    };
+
+    // Shared section divider
+    const Divider = () => <div className="my-4 border-t" />;
+
+    return (
+        <Modal open={open} onClose={onClose}>
+            <div className="p-5">
+                {/* Title and Category */}
+                <div className="mb-4">
+                    <input
+                        type="text"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        placeholder=""
+                        className="w-full border-2 border-[#2B4269] rounded-md px-3 py-2"
+                    />
+                </div>
+                <div className="mb-2">
+                    <label className="font-semibold text-[#2B4269] mr-2">Category:</label>
+                    <select
+                        value={category}
+                        onChange={(e) => setCategory(e.target.value)}
+                        className="inline-block border border-[#2B4269] rounded px-3 py-1"
+                    >
+                        {categoriesAll.map(c => (<option key={c} value={c}>{c}</option>))}
+                    </select>
+                </div>
+
+                <Divider />
+
+                {/* Variants */}
+                <div className="mb-2">
+                    <div className="font-semibold text-[#2B4269] mb-2">Variants</div>
+                    {variantGroups.map(group => {
+                        const suggestions = group.groupId ? (variantValueMap[String(group.groupId)] || []) : [];
+                        const datalistId = `variant-suggestions-${group.id}`;
+                        return (
+                            <div key={group.id} className="mb-3">
+                                <div className="flex items-start gap-3 mb-2">
+                                    <div className="w-56 flex items-center gap-2">
+                                        <select
+                                            value={group.groupId}
+                                            onChange={(e) => updateVariantGroup(group.id, e.target.value)}
+                                            className="w-full border-2 border-[#2B4269] rounded px-3 py-1"
+                                        >
+                                            <option value="">Select variant</option>
+                                            {allVariantGroups.map(g => (
+                                                <option key={g.id} value={g.id}>{g.name}</option>
+                                            ))}
+                                        </select>
+                                        <button
+                                            type="button"
+                                            className="text-gray-500 hover:text-red-600"
+                                            onClick={() => removeVariantGroup(group.id)}
+                                            aria-label="Remove variant group"
+                                        >
+                                            ×
+                                        </button>
+                                    </div>
+                                    <div className="flex-1">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            {group.options.map((opt, idx) => (
+                                                <div key={idx} className="flex items-center gap-2">
+                                                    <div className="relative">
+                                                        <input
+                                                            list={datalistId}
+                                                            value={opt.name}
+                                                            onChange={(e) => updateVariantOptionName(group.id, idx, e.target.value)}
+                                                            className="w-44 border-2 border-[#2B4269] rounded px-3 py-1"
+                                                        />
+                                                        {suggestions.length > 0 && (
+                                                            <datalist id={datalistId}>
+                                                                {suggestions.map(s => (<option key={s} value={s} />))}
+                                                            </datalist>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex items-center gap-1">
+                                                        <span className="text-gray-600">₱</span>
+                                                        <input
+                                                            type="number"
+                                                            min="0"
+                                                            value={opt.price}
+                                                            onChange={(e) => updateVariantOptionPrice(group.id, idx, e.target.value)}
+                                                            className="w-24 border-2 border-[#2B4269] rounded px-2 py-1"
+                                                        />
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        className="text-gray-500 hover:text-red-600"
+                                                        onClick={() => removeVariantOption(group.id, idx)}
+                                                        aria-label="Remove option"
+                                                    >
+                                                        ×
+                                                    </button>
+                                                </div>
+                                            ))}
+                                            <button
+                                                type="button"
+                                                className="border border-dashed rounded px-3 py-1 text-gray-600"
+                                                onClick={() => addVariantOption(group.id)}
+                                            >
+                                                Add option
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })}
+                    <button
+                        type="button"
+                        className="w-full border rounded px-3 py-2 text-gray-500"
+                        onClick={addVariantGroup}
+                    >
+                        Add Variant
+                    </button>
+                </div>
+
+                <Divider />
+
+                {/* Pricing */}
+                <div className="mb-2">
+                    <div className="font-semibold text-[#2B4269] mb-2">Pricing</div>
+                    <label className="block text-sm text-gray-700 mb-1">Starting Price</label>
+                    <div className="flex items-center gap-2">
+                        <span className="text-gray-600">₱</span>
+                        <input
+                            type="number"
+                            min="0"
+                            value={startingPrice}
+                            onChange={(e) => setStartingPrice(e.target.value)}
+                            className="w-40 border-2 border-[#2B4269] rounded px-3 py-1"
+                        />
+                    </div>
+                </div>
+
+                <Divider />
+
+                {/* Product Status */}
+                <div className="mb-4">
+                    <div className="font-semibold text-[#2B4269] mb-2">Product Status</div>
+                    <label className="block text-sm text-gray-700 mb-1">Status</label>
+                    <select
+                        value={status}
+                        onChange={(e) => setStatus(e.target.value)}
+                        className="border border-[#2B4269] rounded px-3 py-1"
+                    >
+                        <option value="Active">Active</option>
+                        <option value="Inactive">Inactive</option>
+                    </select>
+                </div>
+
+                <Divider />
+
+                {/* Images and Details (second screenshot style) */}
+                <div className="mb-2">
+                    <div className="font-semibold text-[#2B4269] mb-2">Images</div>
+                    <div className="w-24 h-24 border-2 border-dashed rounded flex items-center justify-center text-sm text-gray-500">Add Image</div>
+                </div>
+                <div className="mb-6">
+                    <div className="font-semibold text-[#2B4269] mb-2">Product Details</div>
+                    <textarea
+                        value={details}
+                        onChange={(e) => setDetails(e.target.value)}
+                        placeholder="Write the details of the product"
+                        className="w-full min-h-[140px] border-2 border-[#2B4269] rounded px-3 py-2"
+                    />
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center justify-between gap-3 pt-2 border-t">
+                    <button
+                        type="button"
+                        className="flex-1 bg-green-600 hover:bg-green-700 text-white rounded px-4 py-2 font-semibold"
+                        onClick={handleSubmit}
+                    >
+                        ADD
+                    </button>
+                    <button
+                        type="button"
+                        className="flex-1 bg-[#9E3E3E] hover:bg-[#7e3232] text-white rounded px-4 py-2 font-semibold"
+                        onClick={onClose}
+                    >
+                        CANCEL
+                    </button>
+                </div>
+            </div>
+        </Modal>
+    );
 };
 
 // Resolve image key like Cap-Info: accept full URLs or plain keys, try a list of buckets
@@ -93,30 +413,6 @@ const resolveImageKeyAsync = async (img) => {
     }
 };
 
-// Synchronous best-effort resolver used in render paths to avoid async/await.
-// It will return a publicUrl when possible (getPublicUrl is synchronous in the client).
-const resolveImageUrl = (img) => {
-    if (!img) return null;
-    try {
-        const s = String(img).trim();
-        if (s.startsWith('http://') || s.startsWith('https://')) return s;
-        const key = s.replace(/^\//, '');
-        const parts = key.split('/');
-        if (parts.length < 2) return s;
-        const bucket = parts.shift();
-        const path = parts.join('/');
-        try {
-            const res = supabase.storage.from(bucket).getPublicUrl(path);
-            const publicUrl = res?.data?.publicUrl || res?.publicUrl || null;
-            return publicUrl || s;
-        } catch (e) {
-            return s;
-        }
-    } catch (e) {
-        return null;
-    }
-};
-
 const OrdersList = () => {
     const [search, setSearch] = useState('');
     const [rows, setRows] = useState([]);
@@ -173,25 +469,108 @@ const OrdersList = () => {
 
                 // Build a userId -> name map from related tables if available
                 const isUuid = (v) => typeof v === 'string' && /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i.test(v);
-                const userIds = Array.from(new Set((all || []).map(o => (
-                    o.user_id ?? o.customer_id ?? o.userId ?? o.customerId ?? null
-                )).filter(Boolean)));
+                const safeLower = (s) => (typeof s === 'string' ? s.toLowerCase() : '');
+                const pickFirst = (...vals) => vals.find(v => v != null && String(v).trim() !== '');
+
+                const extractUserId = (o) => {
+                    if (!o || typeof o !== 'object') return null;
+                    const direct = pickFirst(o.user_id, o.customer_id, o.userId, o.customerId, o.auth_user_id, o.authUserId, o.account_user_id);
+                    if (isUuid(String(direct || ''))) return String(direct);
+                    for (const k of Object.keys(o)) {
+                        try {
+                            const lk = safeLower(k);
+                            if ((lk.includes('user') || lk.includes('customer')) && lk.includes('id')) {
+                                const val = o[k];
+                                if (typeof val === 'string' && isUuid(val)) return val;
+                            }
+                        } catch {}
+                    }
+                    const nestedCandidates = [o.user, o.customer, o.account, o.buyer, o.owner, o.created_by];
+                    for (const obj of nestedCandidates) {
+                        if (obj && typeof obj === 'object') {
+                            const cand = extractUserId(obj);
+                            if (cand) return cand;
+                        }
+                    }
+                    return null;
+                };
+
+                const extractOrderEmail = (o) => {
+                    if (!o || typeof o !== 'object') return '';
+                    const direct = pickFirst(o.customer_email, o.email, o.contact_email, o.buyer_email, o.payer_email, o.user_email);
+                    if (typeof direct === 'string' && direct.includes('@')) return direct;
+                    for (const k of Object.keys(o)) {
+                        const lk = safeLower(k);
+                        if (lk.includes('email')) {
+                            const val = o[k];
+                            if (typeof val === 'string' && val.includes('@')) return val;
+                        }
+                    }
+                    const nested = [o.customer, o.billing, o.shipping, o.contact, o.account];
+                    for (const obj of nested) {
+                        const v = extractOrderEmail(obj);
+                        if (v) return v;
+                    }
+                    return '';
+                };
+
+                const extractOrderName = (o) => {
+                    if (!o || typeof o !== 'object') return '';
+                    const first = pickFirst(o.customer_first_name, o.first_name, o.first, o.given_name);
+                    const last = pickFirst(o.customer_last_name, o.last_name, o.last, o.family_name);
+                    const combo = [first, last].filter(Boolean).join(' ').trim();
+                    const direct = pickFirst(
+                        o.customer_name, o.display_name, o.full_name, o.name,
+                        o.recipient_name, o.contact_name, o.shipping_name, o.billing_name, o.buyer_name, o.account_name,
+                        o.customer_full_name,
+                        combo
+                    );
+                    if (direct) return String(direct).trim();
+                    const nested = [o.customer, o.billing, o.shipping, o.contact, o.account];
+                    for (const obj of nested) {
+                        const v = extractOrderName(obj);
+                        if (v) return v;
+                    }
+                    return '';
+                };
+
+                const userIdsRaw = Array.from(new Set((all || []).map(extractUserId).filter(Boolean)));
+                const userIds = userIdsRaw;
+                const userIdsUuid = userIdsRaw.filter(isUuid);
                 const nameMap = {};
                 const avatarMap = {};
+                const emailToName = {};
                 const deriveName = (rec) => {
                     const first = rec.first_name ?? rec.given_name ?? rec.first ?? '';
                     const last = rec.last_name ?? rec.family_name ?? rec.last ?? '';
+                    const emailLocal = typeof rec.email === 'string' ? rec.email.split('@')[0] : '';
                     const fullPref = rec.display_name ?? rec.full_name ?? rec.name ?? `${first} ${last}`.trim();
-                    return (fullPref && fullPref !== ' ') ? fullPref : (rec.email ?? rec.username ?? rec.handle ?? '');
+                    return (fullPref && fullPref !== ' ') ? fullPref : (emailLocal || rec.username || rec.handle || '');
                 };
 
-                if (userIds.length > 0) {
+                // Seed with the current session user like Account page does
+                try {
+                    const { data: { session } } = await supabase.auth.getSession();
+                    const u = session?.user;
+                    if (u?.id) {
+                        const meta = u.user_metadata || {};
+                        let displayName = meta.display_name || meta.full_name || meta.name || '';
+                        if (!displayName) {
+                            const emailLocal = (u.email || '').split('@')[0];
+                            displayName = emailLocal || 'User';
+                        }
+                        // only set if not already mapped; profiles (below) will override if present
+                        if (nameMap[String(u.id)] == null) nameMap[String(u.id)] = displayName;
+                    }
+                } catch {}
+
+                if (userIdsUuid.length > 0) {
                     try {
                         // Try profiles by user_id
                         const p1 = await supabase
                             .from('profiles')
                             .select('user_id, id, display_name, full_name, name, first_name, last_name, email, avatar_url')
-                            .in('user_id', userIds);
+                            .in('user_id', userIdsUuid);
                         if (!p1.error && Array.isArray(p1.data)) {
                             p1.data.forEach(r => {
                                 const nm = deriveName(r);
@@ -203,7 +582,7 @@ const OrdersList = () => {
                     } catch {}
                     try {
                         // Try profiles by id if user_id didn't cover
-                        const missing = userIds.filter(uid => nameMap[String(uid)] == null);
+                        const missing = userIdsUuid.filter(uid => nameMap[String(uid)] == null);
                         if (missing.length > 0) {
                             const p2 = await supabase
                                 .from('profiles')
@@ -223,25 +602,44 @@ const OrdersList = () => {
                     // Prefer a secure RPC (SECURITY DEFINER) that reads from auth.users.
                     // Only attempt RPC when there is a Supabase auth session; otherwise skip to avoid 404/400 noise.
                     try {
-                        const missingAuth = userIds.filter(uid => nameMap[String(uid)] == null);
-                        const rpcIds = missingAuth.map(x => String(x)).filter(isUuid);
+                        const missingAuth = userIdsUuid.filter(uid => nameMap[String(uid)] == null);
+                        const rpcIds = missingAuth.map(x => String(x));
                         if (rpcIds.length > 0) {
-                            const { data: sessionData } = await supabase.auth.getSession();
-                            if (sessionData?.session) {
-                                const { data: rpcData, error: rpcErr } = await supabase.rpc('get_user_public_names', { ids: rpcIds });
-                                if (!rpcErr && Array.isArray(rpcData)) {
-                                    rpcData.forEach(r => {
-                                        if (r?.id && (r?.name || r?.email_local)) {
-                                            nameMap[String(r.id)] = r.name || r.email_local || nameMap[String(r.id)] || '';
-                                        }
-                                    });
-                                }
+                            const { data: rpcData, error: rpcErr } = await supabase.rpc('get_user_public_names', { ids: rpcIds });
+                            if (rpcErr) {
+                                try { console.warn('[OrdersList] get_user_public_names RPC error:', rpcErr); } catch {}
+                            }
+                            if (!rpcErr && Array.isArray(rpcData)) {
+                                rpcData.forEach(r => {
+                                    if (r?.id && (r?.name || r?.email_local)) {
+                                        nameMap[String(r.id)] = r.name || r.email_local || nameMap[String(r.id)] || '';
+                                    }
+                                });
+                            }
+                        }
+                    } catch {}
+                    try {
+                        // Try auth.users directly for display_name
+                        const stillMissingAuth = userIdsUuid.filter(uid => nameMap[String(uid)] == null);
+                        if (stillMissingAuth.length > 0) {
+                            // Note: querying auth.users directly may not be permitted from client
+                            const { data: authData, error: authErr } = await supabase
+                                .from('auth.users')
+                                .select('id, raw_user_meta_data')
+                                .in('id', stillMissingAuth);
+                            if (!authErr && Array.isArray(authData)) {
+                                authData.forEach(r => {
+                                    const displayName = r.raw_user_meta_data?.display_name;
+                                    if (displayName) {
+                                        nameMap[String(r.id)] = displayName;
+                                    }
+                                });
                             }
                         }
                     } catch {}
                     try {
                         // Try customers table by id
-                        const stillMissing = userIds.filter(uid => nameMap[String(uid)] == null);
+                        const stillMissing = userIdsUuid.filter(uid => nameMap[String(uid)] == null);
                         if (stillMissing.length > 0) {
                             const c1 = await supabase
                                 .from('customers')
@@ -258,7 +656,7 @@ const OrdersList = () => {
                     } catch {}
                     try {
                         // Try customers table by customer_id
-                        const stillMissing2 = userIds.filter(uid => nameMap[String(uid)] == null);
+                        const stillMissing2 = userIdsUuid.filter(uid => nameMap[String(uid)] == null);
                         if (stillMissing2.length > 0) {
                             const c2 = await supabase
                                 .from('customers')
@@ -273,7 +671,130 @@ const OrdersList = () => {
                             }
                         }
                     } catch {}
+                    try {
+                        // Try addresses by user_id for any still-missing user IDs
+                        const stillMissingUsers = userIdsUuid.filter(uid => nameMap[String(uid)] == null);
+                        if (stillMissingUsers.length > 0) {
+                            const aByUser = await supabase
+                                .from('addresses')
+                                .select('user_id, full_name, name, contact_name, first_name, last_name, email')
+                                .in('user_id', stillMissingUsers);
+                            if (!aByUser.error && Array.isArray(aByUser.data)) {
+                                aByUser.data.forEach(r => {
+                                    const nm = deriveName(r) || r.contact_name || [r.first_name, r.last_name].filter(Boolean).join(' ').trim();
+                                    if (r?.user_id && nm) nameMap[String(r.user_id)] = nm;
+                                });
+                            }
+                        }
+                    } catch {}
+                    try {
+                        // Try custom users table (if exists) by id as last resort
+                        const stillMissingUsers2 = userIdsUuid.filter(uid => nameMap[String(uid)] == null);
+                        if (stillMissingUsers2.length > 0) {
+                            const u1 = await supabase
+                                .from('users')
+                                .select('id, display_name, full_name, name, first_name, last_name, email')
+                                .in('id', stillMissingUsers2);
+                            if (!u1.error && Array.isArray(u1.data)) {
+                                u1.data.forEach(r => {
+                                    const nm = deriveName(r);
+                                    if (r?.id && nm) nameMap[String(r.id)] = nm;
+                                });
+                            }
+                        }
+                    } catch {}
                 }
+
+                // Also attempt resolution by email when orders contain emails but not user IDs
+                try {
+                    const orderEmails = Array.from(new Set((all || [])
+                        .map(extractOrderEmail)
+                        .filter(e => typeof e === 'string' && e.includes('@'))
+                    ));
+                    if (orderEmails.length > 0) {
+                        try {
+                            const pByEmail = await supabase
+                                .from('profiles')
+                                .select('email, display_name, full_name, name, first_name, last_name')
+                                .in('email', orderEmails);
+                            if (!pByEmail.error && Array.isArray(pByEmail.data)) {
+                                pByEmail.data.forEach(r => {
+                                    if (!r?.email) return;
+                                    const nm = deriveName(r);
+                                    emailToName[String(r.email).toLowerCase()] = nm;
+                                });
+                            }
+                        } catch {}
+                        try {
+                            const cByEmail = await supabase
+                                .from('customers')
+                                .select('email, full_name, name, first_name, last_name')
+                                .in('email', orderEmails);
+                            if (!cByEmail.error && Array.isArray(cByEmail.data)) {
+                                cByEmail.data.forEach(r => {
+                                    if (!r?.email) return;
+                                    const nm = deriveName(r);
+                                    if (!emailToName[String(r.email).toLowerCase()]) {
+                                        emailToName[String(r.email).toLowerCase()] = nm;
+                                    }
+                                });
+                            }
+                        } catch {}
+                        // Fallback via secure RPC reading from auth.users when email-only orders exist
+                        try {
+                            const missingEmails = orderEmails
+                                .map(e => String(e).toLowerCase())
+                                .filter(e => !emailToName[e]);
+                            if (missingEmails.length > 0) {
+                                const { data: rpcEmailData, error: rpcEmailErr } = await supabase.rpc('get_user_names_by_emails', { emails: missingEmails });
+                                if (rpcEmailErr) { try { console.warn('[OrdersList] get_user_names_by_emails RPC error:', rpcEmailErr); } catch {} }
+                                if (!rpcEmailErr && Array.isArray(rpcEmailData)) {
+                                    rpcEmailData.forEach(r => {
+                                        const key = String(r?.email || '').toLowerCase();
+                                        const nm = r?.name || r?.email_local || '';
+                                        if (key && nm && !emailToName[key]) emailToName[key] = nm;
+                                    });
+                                }
+                            }
+                        } catch {}
+                    }
+                } catch {}
+
+                // Fallback: resolve names via addresses table (by address_id and by user_id)
+                const addressNameById = {};
+                const addressNameByUser = {};
+                try {
+                    const addressIdsRaw = Array.from(new Set((all || []).map(o => o?.address_id).filter(v => v !== null && v !== undefined)));
+                    if (addressIdsRaw.length > 0) {
+                        const idsAsString = addressIdsRaw.map(v => String(v));
+                        // Try multiple variants: match on id and address_id; do not assume UUID type
+                        const picks = [];
+                        try {
+                            const q1 = await supabase
+                                .from('addresses')
+                                .select('id, address_id, user_id, full_name, name, contact_name, first_name, last_name, email')
+                                .in('id', idsAsString);
+                            if (!q1.error && Array.isArray(q1.data)) picks.push(...q1.data);
+                        } catch {}
+                        try {
+                            const q2 = await supabase
+                                .from('addresses')
+                                .select('id, address_id, user_id, full_name, name, contact_name, first_name, last_name, email')
+                                .in('address_id', idsAsString);
+                            if (!q2.error && Array.isArray(q2.data)) picks.push(...q2.data);
+                        } catch {}
+                        // De-duplicate by primary identifiers
+                        const seen = new Set();
+                        picks.forEach(r => {
+                            const key = String(r?.id ?? r?.address_id ?? Math.random());
+                            if (seen.has(key)) return; seen.add(key);
+                            const nm = deriveName(r) || r.contact_name || [r.first_name, r.last_name].filter(Boolean).join(' ').trim();
+                            const idKey = r?.id != null ? String(r.id) : (r?.address_id != null ? String(r.address_id) : null);
+                            if (idKey && nm) addressNameById[idKey] = nm;
+                            if (r?.user_id && nm && !addressNameByUser[String(r.user_id)]) addressNameByUser[String(r.user_id)] = nm;
+                        });
+                    }
+                } catch {}
 
                 // Map flexible fields to UI shape
                 const mapped = (all || []).map(o => {
@@ -281,16 +802,37 @@ const OrdersList = () => {
                     const dateRaw = o.date_ordered ?? o.created_at ?? o.createdAt ?? o.placed_at ?? null;
                     const status = o.status ?? o.order_status ?? 'In Progress';
                     const amount = o.total_amount ?? o.total ?? o.amount ?? 0;
-                    const uId = o.user_id ?? o.customer_id ?? o.userId ?? o.customerId ?? null;
-
-                    // Base fallback from inline fields
-                    const first = o.customer_first_name ?? o.first_name ?? o.first ?? '';
-                    const last = o.customer_last_name ?? o.last_name ?? o.last ?? '';
-                    let customer = o.customer_name ?? o.name ?? `${first} ${last}`.trim();
-                    if (!customer && uId != null) {
-                        const nm = nameMap[String(uId)];
-                        if (nm) customer = nm;
+                    const uId = extractUserId(o);
+                    // Prefer profile/auth-derived names first (like Account page), then inline order fields
+                    let customer = '';
+                    if (uId != null && nameMap[String(uId)]) {
+                        customer = nameMap[String(uId)];
                     }
+                    // Address-derived name by user_id
+                    if (!customer && uId != null && addressNameByUser[String(uId)]) {
+                        customer = addressNameByUser[String(uId)];
+                    }
+                    // Address-derived name by address_id on the order
+                    if (!customer && o?.address_id && addressNameById[String(o.address_id)]) {
+                        customer = addressNameById[String(o.address_id)];
+                    }
+                    if (!customer) {
+                        // Try an email on the order itself
+                        const orderEmail = extractOrderEmail(o);
+                        if (orderEmail) {
+                            const key = String(orderEmail).toLowerCase();
+                            if (emailToName[key]) {
+                                customer = emailToName[key];
+                            } else {
+                                const local = String(orderEmail).split('@')[0];
+                                if (local) customer = local;
+                            }
+                        }
+                    }
+                    if (!customer) {
+                        customer = extractOrderName(o);
+                    }
+                    if (!customer) customer = 'Customer';
 
                     // Format date to YYYY-MM-DD
                     let date = '';
@@ -301,10 +843,19 @@ const OrdersList = () => {
                         }
                     } catch {}
 
-                    return { id: orderId, customer: customer || '—', date, status, amount: Number(amount || 0) };
+                    return { id: orderId, customer: customer || 'Customer', date, status, amount: Number(amount || 0) };
                 }).filter(r => r.id != null);
 
-                if (mounted) setRows(mapped);
+                if (mounted) {
+                    try {
+                        const resolvedCount = Object.keys(nameMap).length;
+                        const totalUsers = userIdsUuid.length;
+                        const sampleEmails = Object.keys(emailToName).slice(0, 3);
+                        console.debug('[OrdersList] name resolution', { totalOrders: all.length, totalUsers, resolvedCount, sampleEmails });
+                        console.debug('[OrdersList] sample rows', (mapped || []).slice(0, 5));
+                    } catch {}
+                    setRows(mapped);
+                }
             } catch (e) {
                 if (mounted) setError(e?.message || String(e));
             } finally {
@@ -393,8 +944,457 @@ const OrdersList = () => {
                                 </td>
                             </tr>
                         ))}
-                    </tbody>
-                </table>
+                        </tbody>
+                        </table>
+                    </div>
+            </div>
+    );
+};
+
+// Admin > Products: list all products across all categories from products table
+const ProductsList = ({ externalSearch = '' }) => {
+    const [rows, setRows] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
+    // Category filter states (mirror StocksList)
+    const [categories, setCategories] = useState([]);
+    const [categoriesAll, setCategoriesAll] = useState([]);
+    const [selectedCategories, setSelectedCategories] = useState([]);
+    const [categoryDraft, setCategoryDraft] = useState([]);
+    const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
+    const catMenuRef = useRef(null);
+    // Status filter (Active/Inactive only for Products)
+    const [showStatusDropdown, setShowStatusDropdown] = useState(false);
+    const [statusFilters, setStatusFilters] = useState([]); // ['Active','Inactive']
+    const [statusDraft, setStatusDraft] = useState([]);
+    const statusMenuRef = useRef(null);
+
+    // Small helper for status badge — same scheme as Stocks tab
+    const statusBadge = (s) => {
+        const base = 'inline-flex items-center px-2 py-1 rounded text-sm';
+        if (s === 'Out of Stock') return <span className={`${base} bg-red-100 text-red-700`}>Out of Stock</span>;
+        if (s === 'Low Stock') return <span className={`${base} bg-yellow-100 text-yellow-800`}>Low Stock</span>;
+        return <span className={`${base} bg-green-100 text-green-800`}>Active</span>;
+    };
+
+    useEffect(() => {
+        let mounted = true;
+        const load = async () => {
+            setLoading(true);
+            setError(null);
+            try {
+                // 1) Fetch all products (paged) with their category
+                const pageSize = 1000;
+                let page = 0;
+                let allProducts = [];
+                while (true) {
+                    const start = page * pageSize;
+                    const end = (page + 1) * pageSize - 1;
+                    const { data, error } = await supabase
+                        .from('products')
+                        .select('id, name, starting_price, image_url, product_types(id, name, category_id, product_categories(id, name))')
+                        .order('id', { ascending: false })
+                        .range(start, end);
+                    if (error) throw error;
+                    const chunk = data || [];
+                    allProducts = allProducts.concat(chunk);
+                    if (chunk.length < pageSize) break;
+                    page += 1;
+                }
+
+                // 2) Fetch inventory with joined product_id to aggregate total stock per product
+                //    and derive a product-level status matching the Stocks tab.
+                const productAgg = {}; // { [productId]: { total: number, lowStock: boolean } }
+                try {
+                    const invPageSize = 1000;
+                    let invPage = 0;
+                    const allInv = [];
+                    while (true) {
+                        const start = invPage * invPageSize;
+                        const end = (invPage + 1) * invPageSize - 1;
+                        const { data: inv, error: invErr } = await supabase
+                            .from('inventory')
+                            .select('combination_id, quantity, low_stock_limit, product_variant_combinations(product_id)')
+                            .range(start, end);
+                        if (invErr) throw invErr;
+                        const chunk = inv || [];
+                        allInv.push(...chunk);
+                        if (chunk.length < invPageSize) break;
+                        invPage += 1;
+                    }
+
+                    // Build a set of combination_ids that still need product_id mapping
+                    const missingComboIds = new Set();
+                    for (const row of allInv) {
+                        const hasJoin = !!(row?.product_variant_combinations?.product_id
+                            ?? (Array.isArray(row?.product_variant_combinations) ? row.product_variant_combinations[0]?.product_id : null));
+                        if (!hasJoin && row?.combination_id != null) missingComboIds.add(String(row.combination_id));
+                    }
+
+                    let comboToProduct = {};
+                    if (missingComboIds.size > 0) {
+                        try {
+                            const ids = Array.from(missingComboIds);
+                            const batchSize = 1000;
+                            for (let i = 0; i < ids.length; i += batchSize) {
+                                const batch = ids.slice(i, i + batchSize);
+                                const { data: combos, error: cErr } = await supabase
+                                    .from('product_variant_combinations')
+                                    .select('combination_id, product_id')
+                                    .in('combination_id', batch);
+                                if (!cErr && Array.isArray(combos)) {
+                                    combos.forEach(c => { if (c?.combination_id != null && c?.product_id != null) comboToProduct[String(c.combination_id)] = String(c.product_id); });
+                                }
+                            }
+                        } catch {}
+                    }
+
+                    // Aggregate totals per product by summing all variant (combination) stocks
+                    for (const row of allInv) {
+                        const q = Number(row?.quantity || 0);
+                        const low = row?.low_stock_limit != null ? Number(row.low_stock_limit) : null;
+                        let pid = row?.product_variant_combinations?.product_id
+                            ?? (Array.isArray(row?.product_variant_combinations) ? row.product_variant_combinations[0]?.product_id : null);
+                        if (pid == null && row?.combination_id != null) {
+                            const mapped = comboToProduct[String(row.combination_id)];
+                            if (mapped != null) pid = mapped;
+                        }
+                        if (pid != null) {
+                            const key = String(pid);
+                            const agg = productAgg[key] || { total: 0, lowStock: false };
+                            agg.total += q;
+                            if (q > 0 && low != null && q <= low) agg.lowStock = true;
+                            productAgg[key] = agg;
+                        }
+                    }
+                } catch (e) {
+                    // Non-fatal: if we fail to load inventory, default to 0 stock
+                }
+
+                // 3) Map products to UI rows
+                const mapped = (allProducts || []).map(p => {
+                    const pt = Array.isArray(p?.product_types) ? p.product_types[0] : p?.product_types;
+                    const category = pt?.product_categories?.name || pt?.name || '';
+                    const productId = p?.id;
+                    const agg = productAgg[String(productId)] || { total: 0, lowStock: false };
+                    const stock = agg.total || 0;
+                    // Derive status like Stocks tab
+                    let status = 'Active';
+                    if (stock <= 0) status = 'Out of Stock';
+                    else if (agg.lowStock) status = 'Low Stock';
+                    return {
+                        id: productId,
+                        name: p?.name || '',
+                        category,
+                        price: p?.starting_price ?? null,
+                        image_key: p?.image_url || null,
+                        status,
+                        total_stock: stock,
+                    };
+                });
+
+                if (mounted) {
+                    setRows(mapped);
+                    try {
+                        const cats = Array.from(new Set((mapped || []).map(r => r.category).filter(Boolean))).sort((a,b) => String(a).localeCompare(String(b)));
+                        setCategories(cats);
+                    } catch {}
+                }
+            } catch (e) {
+                if (mounted) setError(e?.message || String(e));
+            } finally {
+                if (mounted) setLoading(false);
+            }
+        };
+
+        load();
+
+        // Realtime refresh when products or inventory change
+        const channel = supabase.channel('public:admin-products');
+        try {
+            channel
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => load())
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, () => load())
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'product_variant_combinations' }, () => load())
+                .subscribe();
+        } catch {}
+        return () => { try { channel.unsubscribe(); } catch {} mounted = false; };
+    }, []);
+
+    // Load all categories for dropdown (so unavailable ones render disabled but visible)
+    useEffect(() => {
+        let cancelled = false;
+        const loadCats = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('product_categories')
+                    .select('id, name')
+                    .order('name', { ascending: true });
+                if (!error && Array.isArray(data)) {
+                    if (!cancelled) setCategoriesAll(data.map(c => c.name).filter(Boolean));
+                }
+            } catch {}
+        };
+        loadCats();
+        return () => { cancelled = true; };
+    }, []);
+
+    // Close the category dropdown when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (e) => {
+            if (showCategoryDropdown && catMenuRef.current && !catMenuRef.current.contains(e.target)) {
+                setShowCategoryDropdown(false);
+                setCategoryDraft(selectedCategories); // revert draft on outside click
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [showCategoryDropdown, selectedCategories]);
+
+    // Close the status dropdown when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (e) => {
+            if (showStatusDropdown && statusMenuRef.current && !statusMenuRef.current.contains(e.target)) {
+                setShowStatusDropdown(false);
+                setStatusDraft(statusFilters);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [showStatusDropdown, statusFilters]);
+
+    const q = String(externalSearch || '').trim().toLowerCase();
+    let filtered = rows;
+    // Apply category filters first
+    if (Array.isArray(selectedCategories) && selectedCategories.length > 0) {
+        const setSel = new Set(selectedCategories);
+        filtered = filtered.filter(r => setSel.has(r.category || ''));
+    }
+    // Apply Active/Inactive status filter
+    if (Array.isArray(statusFilters) && statusFilters.length > 0) {
+        const setSt = new Set(statusFilters);
+        filtered = filtered.filter(r => {
+            const isActive = r.status === 'Active';
+            const label = isActive ? 'Active' : 'Inactive';
+            return setSt.has(label);
+        });
+    }
+    // Then apply search filter
+    if (q !== '') {
+        filtered = filtered.filter(r =>
+            (r.name || '').toLowerCase().includes(q) || (r.category || '').toLowerCase().includes(q)
+        );
+    }
+
+    const peso = (n) => n == null ? '—' : `₱${Number(n).toFixed(2)}`;
+
+    return (
+        <div className="">
+            {error && <div className="mb-2 text-red-600 text-sm">{error}</div>}
+            {loading && <div className="mb-2 text-gray-600 text-sm">Loading products…</div>}
+            <div className="overflow-x-auto p-0">
+                <div className="h-[700px] overflow-y-auto">
+                    <table className="w-full table-fixed rounded-md">
+                        <colgroup>
+                            <col style={{ width: '20%' }} />
+                            <col style={{ width: '10%' }} />
+                            <col style={{ width: '10%' }} />
+                            <col style={{ width: '10%' }} />
+                            <col style={{ width: '10%' }} />
+                            <col style={{ width: '10%' }} />
+                        </colgroup>
+                        <thead className="sticky  top-0 bg-[#DFE7F4]">
+                        <tr className="text-left h-[41px] p-5 text-[16px] text-gray-600">
+                            <th className="px-4 py-2">Product Name</th>
+                            <th className="px-4 py-2 ">
+                                <div className="flex items-center gap-2">
+                                    <span>Category</span>
+                                    <div className="relative p-0 z-30" ref={catMenuRef}>
+                                        <button
+                                            type="button"
+                                            aria-label="Filter by category"
+                                            onClick={() => { setCategoryDraft(selectedCategories); setShowCategoryDropdown((s) => !s); }}
+                                            className="bg-transparent focus:outline-none border border-black"
+                                        >
+                                            <svg
+                                                aria-hidden="true"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                className="h-4 w-4  text-gray-600"
+                                            >
+                                                <path d="M6 9l6 6 6-6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                            </svg>
+                                        </button>
+                                        {showCategoryDropdown && (
+                                            <div className="absolute left-[-80px] mt-2 w-80 max-w-[22rem] rounded-md border bg-white shadow z-20">
+                                                <div className="p-3">
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="font-medium text-gray-800">Select Category</span>
+                                                    </div>
+                                                    <div className="max-h-60 overflow-y-auto py-1 pr-1">
+                                                        <div className="flex flex-wrap gap-2">
+                                                            {(categoriesAll.length > 0 ? categoriesAll : categories).map(name => {
+                                                                const available = categories.includes(name);
+                                                                const active = categoryDraft.includes(name);
+                                                                const base = "px-3 py-1 rounded-full border border-black text-sm";
+                                                                if (!available) {
+                                                                    return (
+                                                                        <button key={name} type="button" disabled className={`${base} bg-gray-200 text-gray-400 cursor-not-allowed`}>{name}</button>
+                                                                    );
+                                                                }
+                                                                return (
+                                                                    <button
+                                                                        key={name}
+                                                                        type="button"
+                                                                        onClick={() => setCategoryDraft(d => (d.includes(name) ? d.filter(x => x !== name) : [...d, name]))}
+                                                                        className={`${base} ${active ? 'bg-[#2B4269] text-white border-[#2B4269]' : 'text-gray-700 hover:bg-gray-50'}`}
+                                                                    >
+                                                                        {name}
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center justify-between mt-3 pt-2 border-t">
+                                                        <button
+                                                            type="button"
+                                                            className="px-3 py-1 border border-black rounded-md border text-sm text-red-600 hover:bg-red-50"
+                                                            onClick={() => { setCategoryDraft([]); setSelectedCategories([]); setShowCategoryDropdown(false); }}
+                                                        >
+                                                            Reset
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            className="px-3 py-1 rounded-md bg-[#2B4269] text-white text-sm"
+                                                            onClick={() => { setSelectedCategories(categoryDraft); setShowCategoryDropdown(false); }}
+                                                        >
+                                                            Apply
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </th>
+                            <th className="px-4 py-2 ml-[100px]">Starting Price</th>
+                            <th className="px-4 py-2">Total Stock</th>
+                            <th className="px-4 py-2 ">
+                                <div className="flex items-center gap-2">
+                                    <span>Status</span>
+                                    <div className="relative p-0 z-30" ref={statusMenuRef}>
+                                        <button
+                                            type="button"
+                                            aria-label="Filter by status"
+                                            onClick={() => { setStatusDraft(statusFilters); setShowStatusDropdown(s => !s); }}
+                                            className="bg-transparent focus:outline-none border border-black"
+                                        >
+                                            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="h-4 w-4 text-gray-600">
+                                                <path d="M6 9l6 6 6-6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                            </svg>
+                                        </button>
+                                        {showStatusDropdown && (
+                                            <div className="absolute left-[-50px] mt-2 w-[244px] rounded-md border bg-white shadow z-20">
+                                                <div className="p-3">
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="font-medium text-black ">Select Status</span>
+                                                    </div>
+                                                    <div className="max-h-60 overflow-y-auto py-1 pr-1">
+                                                        <div className="flex flex-wrap gap-2">
+                                                            {['Active','Inactive'].map(name => {
+                                                                const available = rows.some(r => {
+                                                                    const isActive = r.status === 'Active';
+                                                                    return name === 'Active' ? isActive : !isActive;
+                                                                });
+                                                                const active = statusDraft.includes(name);
+                                                                const base = "px-3 py-1 rounded-full border border-black text-sm";
+                                                                if (!available) {
+                                                                    return (
+                                                                        <button key={name} type="button" disabled className={`${base} bg-gray-200 text-gray-400 cursor-not-allowed`}>{name}</button>
+                                                                    );
+                                                                }
+                                                                return (
+                                                                    <button
+                                                                        key={name}
+                                                                        type="button"
+                                                                        onClick={() => setStatusDraft(d => (d.includes(name) ? d.filter(x => x !== name) : [...d, name]))}
+                                                                        className={`${base} ${active ? 'bg-[#2B4269] text-white border-[#2B4269]' : 'text-gray-700 hover:bg-gray-50'}`}
+                                                                    >
+                                                                        {name}
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center justify-between mt-3 pt-2 border-t">
+                                                        <button
+                                                            type="button"
+                                                            className="px-3 py-1 rounded-md border border-black text-sm text-red-600 hover:bg-red-50"
+                                                            onClick={() => { setStatusDraft([]); setStatusFilters([]); setShowStatusDropdown(false); }}
+                                                        >
+                                                            Reset
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            className="px-3 py-1 rounded-md bg-[#2B4269] text-white text-sm"
+                                                            onClick={() => { setStatusFilters(statusDraft); setShowStatusDropdown(false); }}
+                                                        >
+                                                            Apply
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </th>
+                            <th className="px-4 py-2"></th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {filtered.map(p => (
+                            <tr key={p.id} className="border-t">
+                                <td className="px-4 py-3 align-top">
+                                    <div className="flex items-center gap-3">
+                                        <img
+                                            src={(() => {
+                                                const key = p.image_key;
+                                                if (!key) return '/apparel-images/caps.png';
+                                                const categoryName = (p.category || '').toLowerCase();
+                                                try {
+                                                    if (categoryName.includes('apparel')) return supabase.storage.from('apparel-images').getPublicUrl(key).data.publicUrl;
+                                                    else if (categoryName.includes('accessories')) return supabase.storage.from('accessoriesdecorations-images').getPublicUrl(key).data.publicUrl;
+                                                    else if (categoryName.includes('signage') || categoryName.includes('poster')) return supabase.storage.from('signage-posters-images').getPublicUrl(key).data.publicUrl;
+                                                    else if (categoryName.includes('cards') || categoryName.includes('sticker')) return supabase.storage.from('cards-stickers-images').getPublicUrl(key).data.publicUrl;
+                                                    else if (categoryName.includes('packaging')) return supabase.storage.from('packaging-images').getPublicUrl(key).data.publicUrl;
+                                                    else if (categoryName.includes('3d print')) return supabase.storage.from('3d-prints-images').getPublicUrl(key).data.publicUrl;
+                                                    else return supabase.storage.from('apparel-images').getPublicUrl(key).data.publicUrl;
+                                                } catch (e) {
+                                                    return '/apparel-images/caps.png';
+                                                }
+                                            })()}
+                                            alt={p.name || 'product'}
+                                            className="w-14 h-14 object-cover rounded"
+                                            onError={(e) => { try { e.currentTarget.src = '/apparel-images/caps.png'; } catch (ee) {} }}
+                                        />
+                                        <div>
+                                            <div className="text-gray-900 font-medium">{p.name || '—'}</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td className="px-4 py-3 align-center  text-gray-700">{p.category || '—'}</td>
+                                <td className="px-4 py-3 align-center text-gray-800">{peso(p.price)}</td>
+                                <td className="px-8 py-3 align-center text-gray-800">{p.total_stock ?? 0}</td>
+                                <td className="px-4 py-3 align-center">{statusBadge(p.status)}</td>
+                                <td className="px-4 py-3 align-center">
+                                    <button className="px-3 py-1 rounded-md border text-sm text-gray-700 hover:bg-gray-50">View</button>
+                                </td>
+                            </tr>
+                        ))}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     );
@@ -406,22 +1406,110 @@ const StocksList = ({ externalSearch = '' }) => {
     const [editingInventory, setEditingInventory] = useState(null);
     const [editQuantity, setEditQuantity] = useState(0);
     const [editLoading, setEditLoading] = useState(false);
-    const [categories, setCategories] = useState([]);
-    const [selectedCategory, setSelectedCategory] = useState('All');
+    const [categories, setCategories] = useState([]); // available in current rows
+    const [categoriesAll, setCategoriesAll] = useState([]); // all categories from DB
+    const [selectedCategories, setSelectedCategories] = useState([]); // applied filters (multi)
+    const [categoryDraft, setCategoryDraft] = useState([]); // pre-apply selection
     const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const catMenuRef = useRef(null);
+    // Status filter states
+    const [showStatusDropdown, setShowStatusDropdown] = useState(false);
+    const [statusFilters, setStatusFilters] = useState([]); // ['Active','Low Stock','Out of Stock']
+    const [statusDraft, setStatusDraft] = useState([]);
+    const statusMenuRef = useRef(null);
+    // Variant filter states
+    const [showVariantDropdown, setShowVariantDropdown] = useState(false);
+    const [variantFilters, setVariantFilters] = useState([]); // applied filters
+    const [variantDraft, setVariantDraft] = useState([]); // selections before apply
+    const variantMenuRef = useRef(null);
+    const [variantGroups, setVariantGroups] = useState([]); // [{ id, name, values: [valueName] }]
 
     // Close the category dropdown when clicking outside
     useEffect(() => {
         const handleClickOutside = (e) => {
             if (showCategoryDropdown && catMenuRef.current && !catMenuRef.current.contains(e.target)) {
                 setShowCategoryDropdown(false);
+                setCategoryDraft(selectedCategories); // revert draft on outside click
+            }
+            if (showVariantDropdown && variantMenuRef.current && !variantMenuRef.current.contains(e.target)) {
+                setShowVariantDropdown(false);
+                setVariantDraft(variantFilters); // revert any un-applied changes when closing by outside click
             }
         };
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, [showCategoryDropdown]);
+    }, [showCategoryDropdown, showVariantDropdown, variantFilters, selectedCategories]);
+
+    // Close the status dropdown on outside click
+    useEffect(() => {
+        const handleClickOutside = (e) => {
+            if (showStatusDropdown && statusMenuRef.current && !statusMenuRef.current.contains(e.target)) {
+                setShowStatusDropdown(false);
+                setStatusDraft(statusFilters);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [showStatusDropdown, statusFilters]);
+
+    // Load all product categories for the dropdown (so we can show disabled ones too)
+    useEffect(() => {
+        let cancelled = false;
+        const loadCats = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('product_categories')
+                    .select('id, name')
+                    .order('name', { ascending: true });
+                if (!error && Array.isArray(data)) {
+                    if (!cancelled) setCategoriesAll(data.map(c => c.name).filter(Boolean));
+                }
+            } catch (e) { /* ignore */ }
+        };
+        loadCats();
+        return () => { cancelled = true; };
+    }, []);
+
+    // Load all variant groups and their values for the Variant filter dropdown
+    useEffect(() => {
+        let cancelled = false;
+        const loadVariantGroups = async () => {
+            try {
+                const { data: groups, error: gErr } = await supabase
+                    .from('variant_groups')
+                    .select('variant_group_id, name')
+                    .order('name', { ascending: true });
+                if (gErr) throw gErr;
+                const { data: values, error: vErr } = await supabase
+                    .from('variant_values')
+                    .select('variant_value_id, value_name, variant_group_id')
+                    .order('value_name', { ascending: true });
+                if (vErr) throw vErr;
+
+                const mapped = (groups || []).map(g => {
+                    const gid = g.variant_group_id ?? g.id;
+                    let vals = (values || []).filter(v => String(v.variant_group_id) === String(gid)).map(v => v.value_name).filter(Boolean);
+                    const groupName = (g.name || '').toLowerCase();
+                    if (groupName.includes('color') || groupName.includes('colour') || groupName.includes('strap')) {
+                        vals = vals.map(v => {
+                            const n = normalizeHexCode(v);
+                            return colorNames[n] || colorNames[String(v).trim().toLowerCase()] || v;
+                        });
+                    }
+                    // dedupe and sort
+                    const uniq = Array.from(new Set(vals)).sort((a,b) => String(a).localeCompare(String(b)));
+                    return { id: gid, name: g.name || String(gid), values: uniq };
+                }).filter(grp => (grp.values && grp.values.length > 0));
+                if (!cancelled) setVariantGroups(mapped);
+            } catch (e) {
+                // Non-fatal; keep dropdown empty if it fails
+                if (!cancelled) setVariantGroups([]);
+            }
+        };
+        loadVariantGroups();
+        return () => { cancelled = true; };
+    }, []);
 
     useEffect(() => {
         let mounted = true;
@@ -526,7 +1614,6 @@ const StocksList = ({ externalSearch = '' }) => {
                                 if (!vvErr && Array.isArray(vvData)) {
                                     vvData.forEach(vv => {
                                         const id = vv.variant_value_id ?? vv.id;
-                                    setCategories(cats);
                                         const groupName = vv?.variant_groups?.name || (vv?.variant_group_id != null ? String(vv.variant_group_id) : '');
                                         pvvMap[String(id)] = { valueName, groupName, price: 0, variant_value_id: id };
                                     });
@@ -601,7 +1688,7 @@ const StocksList = ({ externalSearch = '' }) => {
                             const m = scoped || global || null;
                             let display = m?.valueName || String(vId);
                             const group = (m?.groupName || '').toLowerCase();
-                            if (group.includes('color') || group.includes('colour')) {
+                            if (group.includes('color') || group.includes('colour') || group.includes('strap')) {
                                 const normalized = normalizeHexCode(display);
                                 display = colorNames[normalized] || colorNames[display] || display;
                             }
@@ -806,23 +1893,53 @@ const StocksList = ({ externalSearch = '' }) => {
         };
     }, []);
 
-    if (loading) return <div className="text-gray-600">Loading inventory...</div>;
+    // Render loading state inside JSX to keep hook order consistent
+
+    // Build unique variant options from current rows
+    const uniqueVariants = useMemo(() => {
+        const set = new Set();
+        (rows || []).forEach(r => {
+            if (Array.isArray(r.variantList)) r.variantList.forEach(v => { if (v) set.add(String(v)); });
+        });
+        return Array.from(set).sort((a,b) => a.localeCompare(b));
+    }, [rows]);
 
     let filteredRows = rows;
-    if (selectedCategory && selectedCategory !== 'All') {
-        filteredRows = filteredRows.filter(r => (r.product?.category || '') === selectedCategory);
+    if (Array.isArray(selectedCategories) && selectedCategories.length > 0) {
+        const setSel = new Set(selectedCategories);
+        filteredRows = filteredRows.filter(r => setSel.has(r.product?.category || ''));
+    }
+    // Helper to compute status per row
+    const computeStatus = (r) => {
+        const q = Number(r.quantity ?? 0);
+        const low = r.low_stock_limit != null ? Number(r.low_stock_limit) : null;
+        if (q <= 0) return 'Out of Stock';
+        if (low != null && q <= low) return 'Low Stock';
+        return 'Active';
+    };
+    // Filter by selected statuses
+    if (Array.isArray(statusFilters) && statusFilters.length > 0) {
+        const setSt = new Set(statusFilters);
+        filteredRows = filteredRows.filter(r => setSt.has(computeStatus(r)));
     }
     const effectiveSearch = (externalSearch && String(externalSearch).trim() !== '') ? externalSearch : searchQuery;
     if (effectiveSearch && String(effectiveSearch).trim() !== '') {
         const q = String(effectiveSearch).trim().toLowerCase();
         filteredRows = filteredRows.filter(r => (r.product?.name || '').toLowerCase().includes(q));
     }
+    if (Array.isArray(variantFilters) && variantFilters.length > 0) {
+        filteredRows = filteredRows.filter(r => {
+            const list = Array.isArray(r.variantList) ? r.variantList.map(String) : [];
+            return list.some(v => variantFilters.includes(v));
+        });
+    }
 
     return (
         <div>
+            {loading && (<div className="text-gray-600 px-4 py-2">Loading inventory...</div>)}
            
         <div className="overflow-x-auto p-0">
-            <div className="max-h-[65vh] overflow-y-auto">
+            <div className="h-[700px] overflow-y-auto">
                 <table className="w-full table-fixed rounded rounded-md ">
                     <colgroup>
                         <col style={{ width: '15%' }} />
@@ -833,7 +1950,7 @@ const StocksList = ({ externalSearch = '' }) => {
                         <col style={{ width: '8%' }} />
                         <col style={{ width: '10%' }} />
                     </colgroup>
-                    <thead className="sticky top-0 bg-[#DFE7F4] ">
+                    <thead className="sticky h-[41px] top-0 bg-[#DFE7F4] ">
                         <tr className="text-left text-[16px] text-gray-600">
                             <th className="px-4 py-2">Product Name</th>
                             <th className="px-4 py-2 ">
@@ -843,38 +1960,66 @@ const StocksList = ({ externalSearch = '' }) => {
                                         <button
                                             type="button"
                                             aria-label="Filter by category"
-                                            onClick={() => setShowCategoryDropdown((s) => !s)}
-                                            className="inline-flex items-center justify-center h-6 w-6 bg-transparent rounded hover:bg-black/5 focus:outline-none focus:ring-2 focus:ring-black/20"
+                                            onClick={() => { setCategoryDraft(selectedCategories); setShowCategoryDropdown((s) => !s); }}
+                                            className="bg-transparent focus:outline-none border border-black"
                                         >
                                             <svg
                                                 aria-hidden="true"
                                                 viewBox="0 0 24 24"
                                                 fill="none"
                                                 stroke="currentColor"
-                                                className="h-4 w-4 text-gray-600"
+                                                className="h-4 w-4  text-gray-600"
                                             >
                                                 <path d="M6 9l6 6 6-6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                                             </svg>
                                            
                                         </button>
                                         {showCategoryDropdown && (
-                                            <div className="absolute left-0 mt-2 w-44 rounded-md border bg-white shadow z-20">
-                                                <div className="max-h-60 overflow-y-auto py-1">
-                                                    <button
-                                                        className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 ${selectedCategory === 'All' ? 'font-semibold' : ''}`}
-                                                        onClick={() => { setSelectedCategory('All'); setShowCategoryDropdown(false); }}
-                                                    >
-                                                        All categories
-                                                    </button>
-                                                    {categories.map((c) => (
+                                            <div className="absolute left-[-80px] mt-2 w-80 max-w-[22rem] rounded-md border bg-white shadow z-20">
+                                                <div className="p-3">
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="font-medium text-gray-800">Select Category</span>
+                                                    </div>
+                                                    <div className="max-h-60 overflow-y-auto py-1 pr-1">
+                                                        <div className="flex flex-wrap gap-2">
+                                                            {(categoriesAll.length > 0 ? categoriesAll : categories).map(name => {
+                                                                const available = categories.includes(name);
+                                                                const active = categoryDraft.includes(name);
+                                                                const base = "px-3 py-1 rounded-full border border-black text-sm";
+                                                                if (!available) {
+                                                                    return (
+                                                                        <button key={name} type="button" disabled className={`${base} bg-gray-200 text-gray-400 cursor-not-allowed`}>{name}</button>
+                                                                    );
+                                                                }
+                                                                return (
+                                                                    <button
+                                                                        key={name}
+                                                                        type="button"
+                                                                        onClick={() => setCategoryDraft(d => (d.includes(name) ? d.filter(x => x !== name) : [...d, name]))}
+                                                                        className={`${base} ${active ? 'bg-[#2B4269] text-white border-[#2B4269]' : 'text-gray-700 hover:bg-gray-50'}`}
+                                                                    >
+                                                                        {name}
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center justify-between mt-3 pt-2 border-t">
                                                         <button
-                                                            key={c}
-                                                            className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 ${selectedCategory === c ? 'font-semibold' : ''}`}
-                                                            onClick={() => { setSelectedCategory(c); setShowCategoryDropdown(false); }}
+                                                            type="button"
+                                                            className="px-3 py-1 border border-black rounded-md border text-sm text-red-600 hover:bg-red-50"
+                                                            onClick={() => { setCategoryDraft([]); setSelectedCategories([]); setShowCategoryDropdown(false); }}
                                                         >
-                                                            {c}
+                                                            Reset
                                                         </button>
-                                                    ))}
+                                                        <button
+                                                            type="button"
+                                                            className="px-3 py-1 rounded-md bg-[#2B4269] text-white text-sm"
+                                                            onClick={() => { setSelectedCategories(categoryDraft); setShowCategoryDropdown(false); }}
+                                                        >
+                                                            Apply
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             </div>
                                         )}
@@ -882,10 +2027,168 @@ const StocksList = ({ externalSearch = '' }) => {
                                 </div>
                             </th>
                             <th className="px-4 py-2 ">Price</th>
-                            <th className="px-4 py-2 ">Variant</th>
+                            <th className="px-4 py-2 ">
+                                <div className="flex items-center gap-2">
+                                    <span>Variant</span>
+                                    <div className="relative p-0 z-30" ref={variantMenuRef}>
+                                        <button
+                                            type="button"
+                                            aria-label="Filter by variant"
+                                            onClick={() => {
+                                                setShowVariantDropdown(s => !s);
+                                                // initialize draft from applied filters when opening
+                                                setVariantDraft(prev => (prev && prev.length ? prev : variantFilters));
+                                            }}
+                                            className="bg-transparent focus:outline-none border border-black"
+                                        >
+                                            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="h-4 w-4 text-gray-600">
+                                                <path d="M6 9l6 6 6-6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                            </svg>
+                                        </button>
+                                        {showVariantDropdown && (
+                                            <div className="absolute left-[-70px] mt-2 w-[414px] rounded-md border bg-white shadow z-20">
+                                                <div className="p-3">
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="font-medium text-gray-800">Select Variant</span>
+                                                    </div>
+                                                    <div className="max-h-60 overflow-y-auto py-1 pr-1">
+                                                        {Array.isArray(variantGroups) && variantGroups.length > 0 ? (
+                                                            variantGroups.map(group => (
+                                                                <div key={group.id} className="mb-3">
+                                                                    <div className="text-[13px] font-semibold text-black mb-2">{String(group.name || '').toUpperCase()}</div>
+                                                                    <div className="flex flex-wrap gap-2">
+                                                                        {group.values.map(v => {
+                                                                            const active = variantDraft.includes(v);
+                                                                            return (
+                                                                                <button
+                                                                                    key={`${group.id}-${v}`}
+                                                                                    type="button"
+                                                                                    onClick={() => setVariantDraft(d => (d.includes(v) ? d.filter(x => x !== v) : [...d, v]))}
+                                                                                    className={`px-3 py-1 rounded-full border border-black text-sm ${active ? 'bg-[#2B4269] text-white border-[#2B4269]' : 'text-gray-700 hover:bg-gray-50'}`}
+                                                                                >
+                                                                                    {v}
+                                                                                </button>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                </div>
+                                                            ))
+                                                        ) : (
+                                                            <div className="flex flex-wrap gap-2">
+                                                                {uniqueVariants.length === 0 ? (
+                                                                    <span className="text-sm text-gray-500">No variants</span>
+                                                                ) : uniqueVariants.map(v => {
+                                                                    const active = variantDraft.includes(v);
+                                                                    return (
+                                                                        <button
+                                                                            key={v}
+                                                                            type="button"
+                                                                            onClick={() => setVariantDraft(d => (d.includes(v) ? d.filter(x => x !== v) : [...d, v]))}
+                                                                            className={`px-3 py-1 rounded-full border text-sm ${active ? 'bg-[#2B4269] text-white border-[#2B4269]' : 'text-gray-700 hover:bg-gray-50'}`}
+                                                                        >
+                                                                            {v}
+                                                                        </button>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex items-center justify-between mt-3 pt-2 border-t">
+                                                        <button
+                                                            type="button"
+                                                            className="px-3 py-1 rounded-md border border-black text-sm text-red-600 hover:bg-red-50"
+                                                            onClick={() => { setVariantDraft([]); setVariantFilters([]); setShowVariantDropdown(false); }}
+                                                        >
+                                                            Reset
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            className="px-3 py-1 rounded-md bg-[#2B4269] text-white text-sm"
+                                                            onClick={() => { setVariantFilters(variantDraft); setShowVariantDropdown(false); }}
+                                                        >
+                                                            Apply
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </th>
                             <th className="px-4 py-2 ">Stock</th>
-                            <th className="px-4 py-2 ">Status</th>
-                            <th className="px-4 py-2 ">Action</th>
+                            <th className="px-4 py-2 ">
+                                <div className="flex items-center gap-2">
+                                    <span>Status</span>
+                                    <div className="relative p-0 z-30" ref={statusMenuRef}>
+                                        <button
+                                            type="button"
+                                            aria-label="Filter by status"
+                                            onClick={() => { setStatusDraft(statusFilters); setShowStatusDropdown(s => !s); }}
+                                            className="bg-transparent focus:outline-none border border-black"
+                                        >
+                                            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="h-4 w-4 text-gray-600">
+                                                <path d="M6 9l6 6 6-6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                            </svg>
+                                        </button>
+                                        {showStatusDropdown && (
+                                            <div className="absolute left-[-50px] mt-2 w-40 max-w-[22rem] rounded-md border bg-white shadow z-20">
+                                                <div className="p-3">
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="font-medium text-gray-800">Select Status</span>
+                                                    </div>
+                                                    <div className="max-h-60 overflow-y-auto py-1 pr-1">
+                                                        <div className="flex flex-wrap gap-2">
+                                                            {['Active','Low Stock','Out of Stock'].map(name => {
+                                                                const available = rows.some(r => {
+                                                                    const q = Number(r.quantity ?? 0);
+                                                                    const low = r.low_stock_limit != null ? Number(r.low_stock_limit) : null;
+                                                                    if (name === 'Out of Stock') return q <= 0;
+                                                                    if (name === 'Low Stock') return q > 0 && low != null && q <= low;
+                                                                    return (q > 0 && !(low != null && q <= low)); // Active
+                                                                });
+                                                                const active = statusDraft.includes(name);
+                                                                const base = "px-3 py-1 rounded-full border text-sm";
+                                                                if (!available) {
+                                                                    return (
+                                                                        <button key={name} type="button" disabled className={`${base} bg-gray-200 text-gray-400 cursor-not-allowed`}>{name}</button>
+                                                                    );
+                                                                }
+                                                                return (
+                                                                    <button
+                                                                        key={name}
+                                                                        type="button"
+                                                                        onClick={() => setStatusDraft(d => (d.includes(name) ? d.filter(x => x !== name) : [...d, name]))}
+                                                                        className={`${base} ${active ? 'bg-[#2B4269] text-white border-[#2B4269]' : 'text-gray-700 hover:bg-gray-50'}`}
+                                                                    >
+                                                                        {name}
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center justify-between mt-3 pt-2 border-t">
+                                                        <button
+                                                            type="button"
+                                                            className="px-3 py-1 rounded-md border text-sm text-red-600 hover:bg-red-50"
+                                                            onClick={() => { setStatusDraft([]); setStatusFilters([]); setShowStatusDropdown(false); }}
+                                                        >
+                                                            Reset
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            className="px-3 py-1 rounded-md bg-[#2B4269] text-white text-sm"
+                                                            onClick={() => { setStatusFilters(statusDraft); setShowStatusDropdown(false); }}
+                                                        >
+                                                            Apply
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </th>
+                            <th className="px-4 py-2 "></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -921,11 +2224,11 @@ const StocksList = ({ externalSearch = '' }) => {
                                 </div>
                             </td>
 
-                            <td className="px-4 py-3 align-top text-gray-700">{r.product?.category || '—'}</td>
+                            <td className="px-4 py-3 align-center text-gray-700">{r.product?.category || '—'}</td>
 
-                            <td className="px-4 py-3 align-top text-gray-800">{r.product?.price != null ? `₱${Number(r.product.price).toFixed(2)}` : '—'}</td>
+                            <td className="px-4 py-3 align-center text-gray-800">{r.product?.price != null ? `₱${Number(r.product.price).toFixed(2)}` : '—'}</td>
 
-                            <td className="px-4 py-3 align-top text-gray-700">
+                            <td className="px-4 py-3 align-center text-gray-700">
                                 {Array.isArray(r.variantList) && r.variantList.length > 0 ? (
                                     <div className="flex flex-col gap-0.5">
                                         {r.variantList.map((v, idx) => (
@@ -935,7 +2238,7 @@ const StocksList = ({ externalSearch = '' }) => {
                                 ) : (r.variantDesc || '—')}
                             </td>
 
-                            <td className="px-8 py-3 align-top text-gray-800">
+                            <td className="px-8 py-3 align-centertext-gray-800">
                                 {editingInventory && (editingInventory.inventory_id === r.inventory_id || editingInventory.combination_id === r.combination_id) ? (
                                     <div className="flex items-center border rounded-md overflow-hidden w-fit">
                                         <button className="px-2" onClick={() => setEditQuantity(q => {
@@ -967,7 +2270,7 @@ const StocksList = ({ externalSearch = '' }) => {
                                 )}
                             </td>
 
-                            <td className="px-4 py-3 align-top">
+                            <td className="px-4 py-3 align-center">
                                 {((r.quantity ?? 0) <= 0) ? (
                                     <span className="inline-flex items-center px-2 py-1 rounded text-sm bg-red-100 text-red-700">Out of Stock</span>
                                 ) : ((r.low_stock_limit != null && (r.quantity ?? 0) <= r.low_stock_limit) ? (
@@ -1101,6 +2404,129 @@ const StocksList = ({ externalSearch = '' }) => {
 const AdminContents = () => {
     const [selected, setSelected] = useState('Dashboard');
     const [stocksSearch, setStocksSearch] = useState('');
+    const [productsSearch, setProductsSearch] = useState('');
+    const [showAddProduct, setShowAddProduct] = useState(false);
+
+    // Create product and link variants in Supabase
+    const createProductInSupabase = async (payload) => {
+        const { name, category, starting_price, images, variants } = payload || {};
+        // 1) Resolve category_id
+        let categoryId = null;
+        try {
+            if (category) {
+                const { data: cats } = await supabase
+                    .from('product_categories')
+                    .select('id, name')
+                    .ilike('name', category)
+                    .limit(1);
+                if (Array.isArray(cats) && cats[0]?.id != null) categoryId = cats[0].id;
+            }
+        } catch {}
+        // 2) Resolve a product_type_id within that category (pick first if multiple)
+        let productTypeId = null;
+        try {
+            if (categoryId != null) {
+                const { data: pts } = await supabase
+                    .from('product_types')
+                    .select('id, category_id')
+                    .eq('category_id', categoryId)
+                    .limit(1);
+                if (Array.isArray(pts) && pts[0]?.id != null) productTypeId = pts[0].id;
+            }
+        } catch {}
+
+        // 3) Insert product
+        const productInsert = {
+            name: name || '',
+            starting_price: starting_price == null ? null : Number(starting_price),
+            image_url: null,
+            product_type_id: productTypeId || null,
+        };
+        let productId = null;
+        const { data: productRows, error: productErr } = await supabase
+            .from('products')
+            .insert(productInsert)
+            .select('id')
+            .single();
+        if (productErr) throw productErr;
+        productId = productRows?.id;
+        if (!productId) throw new Error('Product insert did not return id');
+
+        // 4) Link variant options to this product via product_variant_values
+        if (Array.isArray(variants)) {
+            for (const grp of variants) {
+                const grpId = grp?.group_id || null;
+                const grpName = grp?.group_name || null;
+                if (!grpId && !grpName) continue;
+                for (const opt of (grp.options || [])) {
+                    const optName = (opt?.name || '').trim();
+                    if (!optName) continue;
+                    const optPrice = (opt?.price == null || opt?.price === '') ? null : Number(opt.price);
+                    // Find or create variant_values for this group/name
+                    let variantValueId = null;
+                    // Try by group id first
+                    try {
+                        if (grpId) {
+                            const { data: vv } = await supabase
+                                .from('variant_values')
+                                .select('variant_value_id')
+                                .eq('variant_group_id', grpId)
+                                .ilike('value_name', optName)
+                                .limit(1);
+                            if (Array.isArray(vv) && vv[0]?.variant_value_id != null) variantValueId = vv[0].variant_value_id;
+                        }
+                    } catch {}
+                    // If not found and we only have group name, try resolve group by name
+                    let resolvedGroupId = grpId;
+                    if (!variantValueId && !resolvedGroupId && grpName) {
+                        try {
+                            const { data: g } = await supabase
+                                .from('variant_groups')
+                                .select('variant_group_id, name')
+                                .ilike('name', grpName)
+                                .limit(1);
+                            if (Array.isArray(g) && g[0]?.variant_group_id != null) resolvedGroupId = g[0].variant_group_id;
+                        } catch {}
+                    }
+                    if (!variantValueId && resolvedGroupId) {
+                        try {
+                            const { data: vv2 } = await supabase
+                                .from('variant_values')
+                                .select('variant_value_id')
+                                .eq('variant_group_id', resolvedGroupId)
+                                .ilike('value_name', optName)
+                                .limit(1);
+                            if (Array.isArray(vv2) && vv2[0]?.variant_value_id != null) variantValueId = vv2[0].variant_value_id;
+                        } catch {}
+                    }
+                    // If still not found, attempt to create variant_values under resolvedGroupId
+                    if (!variantValueId && resolvedGroupId) {
+                        try {
+                            const { data: created, error: cErr } = await supabase
+                                .from('variant_values')
+                                .insert({ value_name: optName, variant_group_id: resolvedGroupId })
+                                .select('variant_value_id')
+                                .single();
+                            if (!cErr && created?.variant_value_id != null) variantValueId = created.variant_value_id;
+                        } catch {}
+                    }
+                    if (!variantValueId) continue; // skip if cannot resolve
+
+                    // Insert product_variant_values
+                    try {
+                        await supabase
+                            .from('product_variant_values')
+                            .insert({ product_id: productId, variant_value_id: variantValueId, price: optPrice });
+                    } catch {}
+                }
+            }
+        }
+
+        // Optional: you may create product_variant_combinations here based on selections.
+        // For now, skip creating combinations/inventory; totals will be 0 until stock is added.
+
+        return productId;
+    };
 
     useEffect(() => {
         const handler = (e) => {
@@ -1108,12 +2534,18 @@ const AdminContents = () => {
             if (sec) setSelected(sec);
         };
         window.addEventListener('admin-nav-select', handler);
-        return () => window.removeEventListener('admin-nav-select', handler);
+        const addHandler = () => setShowAddProduct(true);
+        window.addEventListener('admin-products-add', addHandler);
+        return () => {
+            window.removeEventListener('admin-nav-select', handler);
+            window.removeEventListener('admin-products-add', addHandler);
+        };
     }, []);
 
     const containerClass = 'bg-white border border-black';
 
     return (
+        <>
         <div className="flex-1 ml-[263px] p-8 bg-gray-50 min-h-screen">
             <div className="mb-6">
                 <div className="flex items-center justify-between gap-3 ">
@@ -1136,6 +2568,40 @@ const AdminContents = () => {
                             </div>
                         </div>
                     )}
+                    {selected === 'Products' && (
+                        <div className="flex items-center gap-3 w-full max-w-md justify-end">
+                            <div className="relative w-[241px]">
+                                <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
+                                    <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
+                                        <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 3.473 9.8l3.613 3.614a.75.75 0 1 0 1.06-1.06l-3.614-3.614A5.5 5.5 0 0 0 9 3.5Zm-4 5.5a4 4 0 1 1 8 0 4 4 0 0 1-8 0Z" clipRule="evenodd" />
+                                    </svg>
+                                </span>
+                                <input
+                                    type="text"
+                                    value={productsSearch}
+                                    onChange={(e) => setProductsSearch(e.target.value)}
+                                    placeholder="Search product name"
+                                    className="w-[241px] pl-9 pr-3 py-2 border rounded-md text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-black/20"
+                                />
+                            </div>
+                            <button
+                                type="button"
+                                className="inline-flex items-center gap-2 px-4 py-2 border border-[#2B4269] text-[#2B4269] rounded-md text-sm font-medium hover:bg-[#2B4269]/5"
+                                onClick={() => window.dispatchEvent(new CustomEvent('admin-products-add'))}
+                            >
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    viewBox="0 0 24 24"
+                                    fill="currentColor"
+                                    className="w-5 h-5"
+                                    aria-hidden="true"
+                                >
+                                    <path d="M12 5c.414 0 .75.336.75.75V11.25H18.25a.75.75 0 0 1 0 1.5H12.75V18.25a.75.75 0 0 1-1.5 0V12.75H5.75a.75.75 0 0 1 0-1.5h5.5V5.75c0-.414.336-.75.75-.75Z" />
+                                </svg>
+                                <span>Add Product</span>
+                            </button>
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -1150,8 +2616,7 @@ const AdminContents = () => {
                 </div>
 
                 <div style={{ display: selected === 'Products' ? 'block' : 'none' }} className={`${containerClass} mt-6`}>
-                    <h2 className="text-lg font-semibold mb-3">Products</h2>
-                    <p className="text-gray-700">Manage products in this container.</p>
+                    <ProductsList externalSearch={productsSearch} />
                 </div>
 
                 <div style={{ display: selected === 'Orders' ? 'block' : 'none' }} className={`${containerClass} mt-6`}>
@@ -1159,6 +2624,21 @@ const AdminContents = () => {
                 </div>
             </div>
         </div>
+        <AddProductModal
+            open={showAddProduct}
+            onClose={() => setShowAddProduct(false)}
+            onSubmit={async (payload) => {
+                try {
+                    const id = await createProductInSupabase(payload);
+                    try { window.dispatchEvent(new CustomEvent('admin-products-refresh')); } catch {}
+                    window.alert('Product added');
+                } catch (e) {
+                    console.error('Failed to add product', e);
+                    window.alert('Failed to add product: ' + (e?.message || String(e)));
+                }
+            }}
+        />
+        </>
     );
 };
 

@@ -42,7 +42,8 @@ const HomePage = () => {
         || '';
       const categorySlug = slugify(categoryName || 'product');
       const productSlug = slugify(product?.name || product?.id);
-      return `/${categorySlug}/${productSlug}`;
+      // Prefer the new fallback detail route so it always resolves
+      return `/p/${productSlug}`;
     };
     const headExists = async (url) => {
       try {
