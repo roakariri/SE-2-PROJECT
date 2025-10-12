@@ -1427,10 +1427,10 @@ const StampSeal = () => {
                     >
                         <ul className="text-sm text-gray-700 space-y-2 text-black text-[16px] font-dm-sans">
                             <li><p className="mb-2 text-[16px] font-normal text-black font-dm-sans">Product Name:  {productName || 'Custom Rounded T-shirt'}</p></li>
-                            <li><p className="m-0 font-normal text-black text-[16px] font-dm-sans">Printing Color: CMYK</p></li>
-                            <li><p className="m-0 font-normal text-black text-[16px] font-dm-sans">Material: Cotton </p></li>
-                            <li><p className="m-0 font-normal text-black text-[16px] font-dm-sans">Size: 75x100 cm, 120x150 cm</p></li>
-                            
+                            <li><p className="m-0 font-normal text-black text-[16px] font-dm-sans">Shape: Round</p></li>
+                            <li><p className="m-0 font-normal text-black text-[16px] font-dm-sans">Stamp Head Material: Brass </p></li>
+                            <li><p className="m-0 font-normal text-black text-[16px] font-dm-sans">Handle Material: Polished wood with ergonomic grip</p></li>
+                            <li><p className="m-0 font-normal text-black text-[16px] font-dm-sans">Size: 3 cm</p></li>
                         </ul>
                     </div>
                 </div>
