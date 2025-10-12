@@ -193,7 +193,7 @@ const Navigation = () => {
             <div className="flex items-center gap-2 phone:gap-[45px] laptop:gap-1 justify-center phone:mt-1 laptop:mt-0 biggest:mr-[-300px]">
                 <button
                 className="flex items-center focus:outline-none focus:ring-0 font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]"
-                onClick={() => navigate("/projects")}
+                onClick={() => navigate("/mockup-tool")}
                 onMouseEnter={() => setIsProjectsHovered(true)}
                 onMouseLeave={() => setIsProjectsHovered(false)}
                 >
@@ -206,7 +206,7 @@ const Navigation = () => {
                         alt="Projects"
                         className=" transition duration-200 w-5 h-5 laptop:w-5 laptop:h-5"
                     />
-                <span className="hidden semi-bigscreen:inline ml-2 font-dm-sans">My Projects</span>
+                <span className="hidden semi-bigscreen:inline ml-2 font-dm-sans">Mockup Tool</span>
                 </button>
 
                 <button

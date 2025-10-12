@@ -167,7 +167,7 @@ const Header = () => {
                         alt="Projects"
                         className=" transition duration-200 w-5 h-5 laptop:w-5 laptop:h-5"
                     />
-                <span className="hidden semi-bigscreen:inline ml-2 font-dm-sans">My Projects</span>
+                <span className="hidden semi-bigscreen:inline ml-2 font-dm-sans">Mockup Tool</span>
                 </button>
 
                 <button

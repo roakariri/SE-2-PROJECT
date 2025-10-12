@@ -2,21 +2,21 @@ import { UserAuth } from "./context/AuthContext";
 import Header from "./components/visitor/Header";
 import Navigation from "./components/registered/Navigation";
 import Footer from "./components/visitor/Footer";
-import ProjectsPage from "./components/registered/Projects-Page";
+import MockupPage from "./components/registered/Mockup-Page";
 
 
 
 
 
-function Projects() {
+function Mockup() {
     const { session } = UserAuth();
     return (
         <div className="font-dm-sans">
             {session ? <Navigation /> : <Header />}
-            <ProjectsPage />
+            <MockupPage />
             <Footer />
         </div>
     );
 }
 
-export default Projects;
+export default Mockup;

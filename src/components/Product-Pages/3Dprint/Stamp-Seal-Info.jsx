@@ -1101,7 +1101,7 @@ const StampSeal = () => {
             <div className="max-w-[1201px] mx-auto mt-8 flex flex-col">
                 <div className="phone:p-2 tablet:p-2">
                     <p className="pt-5 font-dm-sans">
-                        <Link to="/Homepage" className="text-gray-600">Home </Link>/ <Link to="/signage-posters" className="text-gray-600">Signage & Posters </Link>
+                        <Link to="/Homepage" className="text-gray-600">Home </Link>/ <Link to="/3d-prints-services" className="text-gray-600">3D Print Services</Link>
                     </p>
                 </div>
 

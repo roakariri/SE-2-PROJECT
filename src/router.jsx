@@ -53,7 +53,7 @@ import Favorites from "./Favorites";
 import Cart from "./Cart";
 
 //importing the Projects Component
-import Projects from "./Projects";
+import Mockup from "./Mockup";
 
 // Importing the Deals Component
 import Deals from "./Deals";
@@ -229,7 +229,7 @@ export const router = createBrowserRouter([
     {path: "/cart", element: <PrivateRoute><Cart /></PrivateRoute>},
 
     //Projects Routes
-  {path: "/projects", element: <PrivateRoute><Projects /></PrivateRoute>},
+  {path: "/mockup-tool", element: <PrivateRoute><Mockup /></PrivateRoute>},
 
    //Deals Routes
     {path: "/deals", element: <Deals />},
