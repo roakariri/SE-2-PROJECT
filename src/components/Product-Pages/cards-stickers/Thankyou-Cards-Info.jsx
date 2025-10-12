@@ -483,45 +483,112 @@ const ThankyouCards = () => {
     }, []);
 
     // Reviews
+    const [reviews, setReviews] = useState([]);
     const [reviewsCount, setReviewsCount] = useState(0);
     const [averageRating, setAverageRating] = useState(null);
     const [reviewsLoading, setReviewsLoading] = useState(false);
     const [reviewsAvailable, setReviewsAvailable] = useState(false);
+    const [reviewAuthors, setReviewAuthors] = useState({});
+    const [verifiedBuyerMap, setVerifiedBuyerMap] = useState({});
+    const [isReviewFormOpen, setIsReviewFormOpen] = useState(false);
+    const [reviewRating, setReviewRating] = useState(0);
+    const [reviewHoverRating, setReviewHoverRating] = useState(null);
+    const [reviewText, setReviewText] = useState('');
+    const [reviewFiles, setReviewFiles] = useState([]);
+    const [reviewUploadError, setReviewUploadError] = useState('');
+    const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+    const [isLightboxOpen, setIsLightboxOpen] = useState(false);
+    const [lightboxItems, setLightboxItems] = useState([]);
+    const [lightboxIdx, setLightboxIdx] = useState(0);
+    const reviewFileInputRef = useRef(null);
 
     useEffect(() => {
         let isMounted = true;
         const fetchReviews = async () => {
             if (!productId) return;
+            console.log('[Thankyou-Cards-Info] fetching reviews for product:', productId);
             setReviewsLoading(true);
             try {
                 const { data, error } = await supabase
-                    .from('reviews')
-                    .select('rating')
-                    .eq('product_id', productId);
+                    .from('user_reviews')
+                    .select(`
+                        id,
+                        user_id,
+                        rating,
+                        comment,
+                        image_1_url,
+                        image_2_url,
+                        image_3_url,
+                        created_at
+                    `)
+                    .eq('product_id', productId)
+                    .order('created_at', { ascending: false });
 
                 if (!isMounted) return;
                 if (error) {
-                    console.warn('[Cap-Info] reviews query error:', error.message || error);
+                    console.warn('[Thankyou-Cards-Info] reviews query error:', error.message || error);
                     setReviewsAvailable(false);
+                    setReviews([]);
                     setReviewsCount(0);
                     setAverageRating(null);
+                    setReviewAuthors({});
+                    setVerifiedBuyerMap({});
                 } else if (Array.isArray(data) && data.length > 0) {
+                    console.log('[Thankyou-Cards-Info] fetched reviews:', data.length);
+                    setReviews(data);
+                    setReviewsCount(data.length);
                     const ratings = data.map((r) => Number(r.rating) || 0);
                     const sum = ratings.reduce((a, b) => a + b, 0);
                     const avg = ratings.length ? sum / ratings.length : null;
-                    setReviewsAvailable(true);
-                    setReviewsCount(ratings.length);
                     setAverageRating(avg);
-                } else {
                     setReviewsAvailable(true);
+
+                    // Fetch user names
+                    const userIds = [...new Set(data.map(r => r.user_id).filter(Boolean))];
+                    if (userIds.length > 0) {
+                        const { data: profiles, error: profilesError } = await supabase
+                            .from('profiles')
+                            .select('id, full_name')
+                            .in('id', userIds);
+                        if (!profilesError && profiles) {
+                            const authors = {};
+                            profiles.forEach(p => {
+                                authors[p.id] = p.full_name || `User-${String(p.id).slice(0, 8)}`;
+                            });
+                            setReviewAuthors(authors);
+                        }
+
+                        // Check verified buyers
+                        const { data: orders, error: ordersError } = await supabase
+                            .from('order_items')
+                            .select('user_id')
+                            .eq('product_id', productId)
+                            .in('user_id', userIds);
+                        if (!ordersError && orders) {
+                            const verified = {};
+                            orders.forEach(o => {
+                                verified[o.user_id] = true;
+                            });
+                            setVerifiedBuyerMap(verified);
+                        }
+                    }
+                } else {
+                    console.log('[Thankyou-Cards-Info] no reviews found');
+                    setReviewsAvailable(true);
+                    setReviews([]);
                     setReviewsCount(0);
                     setAverageRating(null);
+                    setReviewAuthors({});
+                    setVerifiedBuyerMap({});
                 }
             } catch (err) {
-                console.error('[Cap-Info] unexpected error fetching reviews:', err);
+                console.error('[Thankyou-Cards-Info] unexpected error fetching reviews:', err);
                 setReviewsAvailable(false);
+                setReviews([]);
                 setReviewsCount(0);
                 setAverageRating(null);
+                setReviewAuthors({});
+                setVerifiedBuyerMap({});
             } finally {
                 if (isMounted) setReviewsLoading(false);
             }
@@ -529,6 +596,178 @@ const ThankyouCards = () => {
         fetchReviews();
         return () => { isMounted = false; };
     }, [productId]);
+
+    // Helper functions for reviews
+    const maskName = (name) => {
+        if (!name || name.length <= 2) return name;
+        const first = name.charAt(0);
+        const last = name.charAt(name.length - 1);
+        const middle = '*'.repeat(name.length - 2);
+        return `${first}${middle}${last}`;
+    };
+
+    const parseReviewDate = (dateStr) => {
+        if (!dateStr) return null;
+        try {
+            return new Date(dateStr);
+        } catch {
+            return null;
+        }
+    };
+
+    const formatTimeAgo = (date) => {
+        if (!date) return '';
+        const now = new Date();
+        const diffMs = now - date;
+        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+        if (diffDays === 0) return 'Today';
+        if (diffDays === 1) return 'Yesterday';
+        if (diffDays < 7) return `${diffDays} days ago`;
+        if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
+        if (diffDays < 365) return `${Math.floor(diffDays / 30)} months ago`;
+        return `${Math.floor(diffDays / 365)} years ago`;
+    };
+
+    // Review form handlers
+    const openReviewForm = () => {
+        const userId = session?.user?.id;
+        if (!userId) {
+            alert('Please log in to write a review.');
+            return;
+        }
+        setIsReviewFormOpen(true);
+    };
+
+    const cancelReview = () => {
+        setIsReviewFormOpen(false);
+        setReviewRating(0);
+        setReviewHoverRating(null);
+        setReviewText('');
+        setReviewFiles([]);
+        setReviewUploadError('');
+    };
+
+    const onPickReviewFiles = (e) => {
+        const files = Array.from(e.target.files || []);
+        if (files.length + (reviewFiles?.length || 0) > 3) {
+            setReviewUploadError('Maximum 3 images allowed.');
+            return;
+        }
+        const validFiles = [];
+        const errors = [];
+        files.forEach(f => {
+            if (f.size > 5 * 1024 * 1024) {
+                errors.push(`${f.name} is too large (max 5MB)`);
+            } else if (!['image/png', 'image/jpeg', 'image/svg+xml'].includes(f.type) && !f.name.toLowerCase().endsWith('.svg')) {
+                errors.push(`${f.name} is not a supported image format`);
+            } else {
+                validFiles.push(f);
+            }
+        });
+        if (errors.length > 0) {
+            setReviewUploadError(errors.join('; '));
+        } else {
+            setReviewUploadError('');
+            setReviewFiles(prev => [...(prev || []), ...validFiles]);
+        }
+    };
+
+    const removeReviewFileAt = (idx) => {
+        setReviewFiles(prev => prev.filter((_, i) => i !== idx));
+        setReviewUploadError('');
+    };
+
+    const submitReview = async () => {
+        const userId = await getCurrentUserId();
+        if (!userId || !reviewRating) return;
+
+        setIsSubmittingReview(true);
+        try {
+            const uploadUrls = [];
+            if (reviewFiles && reviewFiles.length > 0) {
+                for (const file of reviewFiles) {
+                    const fileExt = file.name.split('.').pop();
+                    const fileName = `${uuidv4()}.${fileExt}`;
+                    const { data: uploadData, error: uploadError } = await supabase.storage
+                        .from('reviews')
+                        .upload(fileName, file);
+                    if (uploadError) throw uploadError;
+                    const { data: urlData } = supabase.storage
+                        .from('reviews')
+                        .getPublicUrl(fileName);
+                    uploadUrls.push(urlData.publicUrl);
+                }
+            }
+
+            const reviewData = {
+                user_id: userId,
+                product_id: productId,
+                rating: reviewRating,
+                comment: reviewText.trim() || null,
+                image_1_url: uploadUrls[0] || null,
+                image_2_url: uploadUrls[1] || null,
+                image_3_url: uploadUrls[2] || null,
+            };
+
+            const { error: insertError } = await supabase
+                .from('user_reviews')
+                .insert(reviewData);
+            if (insertError) throw insertError;
+
+            console.log('[Thankyou-Cards-Info] review submitted successfully');
+            // Refresh reviews
+            const { data: newReviews, error: refetchError } = await supabase
+                .from('user_reviews')
+                .select(`
+                    id,
+                    user_id,
+                    rating,
+                    comment,
+                    image_1_url,
+                    image_2_url,
+                    image_3_url,
+                    created_at
+                `)
+                .eq('product_id', productId)
+                .order('created_at', { ascending: false });
+            if (!refetchError && newReviews) {
+                setReviews(newReviews);
+                setReviewsCount(newReviews.length);
+                const ratings = newReviews.map((r) => Number(r.rating) || 0);
+                const sum = ratings.reduce((a, b) => a + b, 0);
+                const avg = ratings.length ? sum / ratings.length : null;
+                setAverageRating(avg);
+            }
+
+            cancelReview();
+        } catch (err) {
+            console.error('[Thankyou-Cards-Info] error submitting review:', err);
+            setReviewUploadError('Failed to submit review. Please try again.');
+        } finally {
+            setIsSubmittingReview(false);
+        }
+    };
+
+    // Lightbox handlers
+    const openLightbox = (images, idx) => {
+        setLightboxItems(images);
+        setLightboxIdx(idx);
+        setIsLightboxOpen(true);
+    };
+
+    const closeLightbox = () => {
+        setIsLightboxOpen(false);
+        setLightboxItems([]);
+        setLightboxIdx(0);
+    };
+
+    const nextLightbox = () => {
+        setLightboxIdx(prev => (prev + 1) % lightboxItems.length);
+    };
+
+    const prevLightbox = () => {
+        setLightboxIdx(prev => (prev - 1 + lightboxItems.length) % lightboxItems.length);
+    };
 
     // Cart editing: Check if coming from cart for editing
     useEffect(() => {
@@ -1015,7 +1254,7 @@ const ThankyouCards = () => {
                         <h1 className="text-[36px] font-bold text-[#111233] mt-4  mb-2">{loading ? "" : productName}</h1>
                         {/*stars*/}
                         <div className="flex flex-row gap-2">
-                            <div className="flex items-center gap-2 text-gray-300" aria-hidden>
+                            <div className="flex items-center gap-2 text-yellow-400" aria-hidden>
                                 {Array.from({ length: 5 }).map((_, i) => {
                                     const fillStar = reviewsAvailable && averageRating != null && (i < Math.round(averageRating));
                                     return (
@@ -1242,31 +1481,252 @@ const ThankyouCards = () => {
 
             {/* Customer Reviews */}
             <div className="max-w-[1200px] mx-auto mt-8 w-full laptop:px-2 phone:p-2 tablet:p-2">
-                <div className="border border-black rounded-md overflow-hidden p-6">
-                    <h2 className="text-[32px] font-bold text-[#111233] inline-block pb-2">Customer Reviews</h2>
+                <div className={`border border-black ${reviews && reviews.length > 0 ? 'border-b-0 rounded-b-none' : ''} rounded-md overflow-hidden`}>
+                    <div className=" rounded-md rounded-b-none p-4  flex flex-col tablet:flex-row tablet:items-center justify-between gap-4">
+                        <div className="flex-1 min-w-0">
+                            <h2 className="text-[28px] tablet:text-[32px] font-bold text-[#111233]">Customer Reviews</h2>
+                            <div className="mt-2 flex items-center gap-3">
+                                <div className="flex items-center gap-2" aria-hidden>
+                                    {Array.from({ length: 5 }).map((_, i) => {
+                                        const fillStar = reviewsAvailable && averageRating != null && (i < Math.round(averageRating));
+                                        return (
+                                            <svg key={i} className={`h-5 w-5 ${fillStar ? 'text-yellow-400' : 'text-gray-300'}`} viewBox="0 0 20 20" fill={fillStar ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5" xmlns="http://www.w3.org/2000/svg">
+                                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.449a1 1 0 00-.364 1.118l1.287 3.957c.3 .921-.755 1.688-1.54 1.118L10 15.347l-3.488 2.679c-.784 .57-1.838-.197-1.54-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.525 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69L9.05 2.927z" />
+                                            </svg>
+                                        );
+                                    })}
+                                </div>
+                                <div className="text-sm text-black">
+                                    {reviewsAvailable
+                                        ? (reviewsCount > 0
+                                            ? `${averageRating ? averageRating.toFixed(1) : '—'}/5 ${reviewsCount} review${reviewsCount !== 1 ? 's' : ''}`
+                                            : '(—/5) 0 reviews')
+                                        : '(—/5) 0 reviews'}
+                                </div>
+                            </div>
+                        </div>
+                        <div className="shrink-0 ">
+                            <button
+                                type="button"
+                                onClick={openReviewForm}
+                                className="uppercase tracking-wide border border-black px-4 py-2 rounded bg-[#2B4269] text-white font-semibold focus:outline-none focus:ring-0"
+                            >
+                                WRITE A REVIEW
+                            </button>
+                        </div>
+                    </div>
+                    <div className="px-4 tablet:px-6">
+                        <hr className="mt-2 border-t border-gray-300" />
+                    </div>
+                    {isReviewFormOpen && (
+                        <div className="px-4 pb-4 tablet:px-6 tablet:pb-6 pt-4">
+                            <div className="space-y-3">
+                                <div>
+                                    <div className="text-sm font-medium text-[#111233] mb-1">Your Rating:</div>
+                                    <div className="flex items-center gap-1">
+                                        {Array.from({ length: 5 }).map((_, i) => {
+                                            const idx = i + 1;
+                                            const active = (reviewHoverRating ?? reviewRating) >= idx;
+                                            return (
+                                                <button
+                                                    key={i}
+                                                    type="button"
+                                                    onMouseEnter={() => setReviewHoverRating(idx)}
+                                                    onMouseLeave={() => setReviewHoverRating(null)}
+                                                    onClick={() => setReviewRating(idx)}
+                                                    aria-label={`Rate ${idx} star${idx>1?'s':''}`}
+                                                    className="p-0.5 bg-transparent focus:outline-none focus:ring-0"
+                                                >
+                                                    <svg className={`h-5 w-5 ${active ? 'text-yellow-400' : 'text-gray-300'}`} viewBox="0 0 20 20" fill={active ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5" xmlns="http://www.w3.org/2000/svg">
+                                                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.449a1 1 0 00-.364 1.118l1.287 3.957c.3 .921-.755 1.688-1.54 1.118L10 15.347l-3.488 2.679c-.784 .57-1.838-.197-1.54-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.525 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69L9.05 2.927z" />
+                                                    </svg>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
 
-                    <div className="mt-4 flex items-center gap-4">
-                        <div className="flex items-center gap-2 text-gray-300" aria-hidden>
-                            {Array.from({ length: 5 }).map((_, i) => {
-                                const fillStar = reviewsAvailable && averageRating != null && (i < Math.round(averageRating));
+                                <div>
+                                    <textarea
+                                        value={reviewText}
+                                        onChange={(e) => setReviewText(e.target.value)}
+                                        rows={4}
+                                        placeholder="Share your experience with this product..."
+                                        className="w-full border border-black rounded-md p-3 outline-none focus:ring-0 resize-y"
+                                    />
+                                </div>
+
+                                <div className="flex flex-col gap-2">
+                                    <div className="flex items-center gap-4">
+                                        <input
+                                            ref={reviewFileInputRef}
+                                            type="file"
+                                            accept="image/png,image/jpeg,image/svg+xml,.svg"
+                                            className="hidden"
+                                            multiple
+                                            onChange={onPickReviewFiles}
+                                        />
+                                        <button
+                                            type="button"
+                                            disabled={reviewFiles && reviewFiles.length >= 3}
+                                            className={`bg-[#27496d] text-white px-4 py-2 rounded flex items-center gap-2 focus:outline-none focus:ring-0 ${(reviewFiles && reviewFiles.length >= 3) ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                            onClick={() => reviewFileInputRef.current && reviewFileInputRef.current.click()}
+                                        >
+                                            <img src="/logo-icon/upload.svg" alt="upload" className="h-4 w-4" />
+                                            <span>UPLOAD FILE</span>
+                                        </button>
+                                        <p className="text-[12px] italic font-dm-sans">Upload up to 3 images only.</p>
+
+                                        {reviewFiles && reviewFiles.length > 0 && (
+                                            <div className="flex gap-2 flex-wrap">
+                                                {reviewFiles.map((f, i) => (
+                                                    <div key={i} className="relative">
+                                                        <div className="border border-dashed rounded flex flex-row items-center justify-center gap-2 px-3 h-10" style={{ borderColor: '#d1d5db', minWidth: '160px' }}>
+                                                            <div className="w-6 h-6 flex items-center justify-center rounded bg-[#f7f7f7] overflow-hidden">
+                                                                {f && f.type && f.type.startsWith('image/') ? (
+                                                                    <img src={URL.createObjectURL(f)} alt={`uploaded preview ${i + 1}`} className="w-full h-full object-cover" onLoad={(e) => URL.revokeObjectURL(e.currentTarget.src)} />
+                                                                ) : (
+                                                                    <img src="/logo-icon/image.svg" alt="file" className="w-4 h-4" />
+                                                                )}
+                                                            </div>
+                                                            <div className="text-sm text-gray-600 italic text-center truncate" style={{ maxWidth: 120 }}>{f?.name || 'file'}</div>
+                                                        </div>
+                                                        <button type="button" className="absolute -top-2 -right-2 bg-white rounded-full p-1.5 border focus:outline-none focus:ring-0" onClick={() => removeReviewFileAt(i)} aria-label="Remove uploaded file">
+                                                            <img src="/logo-icon/close.svg" alt="remove" className="w-3 h-3" />
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                    {reviewUploadError && <div className="text-sm text-red-600 italic ml-2">{reviewUploadError}</div>}
+                                </div>
+
+                                <div className="flex items-center gap-3 justify-end">
+                                    <button
+                                        type="button"
+                                        onClick={cancelReview}
+                                        className="px-4 py-2 rounded border border-black bg-white justify-center  text-[#111233] font-semibold focus:outline-none focus:ring-0"
+                                    >
+                                        CANCEL
+                                    </button>
+                                    <button
+                                        type="button"
+                                        disabled={isSubmittingReview || !reviewRating}
+                                        onClick={submitReview}
+                                        className={`px-4 py-2 rounded bg-[#EF7D66] text-black font-semibold focus:outline-none focus:ring-0 ${(!reviewRating || isSubmittingReview) ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                    >
+                                        {isSubmittingReview ? 'SUBMITTING...' : 'SUBMIT'}
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="w-full mt-5">
+                                <hr className="mt-2 border-t border-gray-300" />
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+            {reviews && reviews.length > 0 && (
+                <div className="max-w-[1200px] mx-auto w-full laptop:px-2 phone:p-2 tablet:p-2 mt-2">
+                    <div className="border border-black mt-[-30px] rounded-md border-t-0 rounded-t-none p-4 tablet:p-6">
+                        <div className="divide-y max-h-[60vh] overflow-y-auto pr-1">
+                            {reviews.map((rev) => {
+                                const name = reviewAuthors[rev.user_id] || (rev?.user_id ? `User-${String(rev.user_id).slice(0, 8)}` : 'User');
+                                const masked = maskName(name);
+                                const created = parseReviewDate(rev.created_at);
+                                const timeLabel = created ? formatTimeAgo(created) : '';
+                                const isVerified = !!verifiedBuyerMap[rev.user_id];
+                                const images = [rev.image_1_url, rev.image_2_url, rev.image_3_url].filter(Boolean);
                                 return (
-                                    <svg key={i} className="h-5 w-5" viewBox="0 0 20 20" fill={fillStar ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5" xmlns="http://www.w3.org/2000/svg">
-                                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.449a1 1 0 00-.364 1.118l1.287 3.957c.3 .921-.755 1.688-1.54 1.118L10 15.347l-3.488 2.679c-.784 .57-1.838-.197-1.54-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.525 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69L9.05 2.927z" />
-                                    </svg>
+                                    <div key={rev.id} className="py-5">
+                                        <div className="flex items-start gap-3">
+                                            <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 text-xs select-none">{(name || 'U').charAt(0)}</div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-2 text-[14px] text-[#111233]">
+                                                    <span className="font-semibold">{masked}</span>
+                                                    {isVerified && (
+                                                        <span className="text-[10px] uppercase tracking-wide bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded">Verified</span>
+                                                    )}
+                                                </div>
+                                                {timeLabel && (
+                                                    <div className="text-[12px] text-gray-500 mt-0.5">{timeLabel}</div>
+                                                )}
+                                                <div className="mt-2 flex items-left  ml-[-50px] gap-1">
+                                                    {Array.from({ length: 5 }).map((_, i) => (
+                                                        <svg key={i} className={`h-4 w-4 ${i < (Number(rev.rating)||0) ? 'text-yellow-400' : 'text-gray-300'}`} viewBox="0 0 20 20" fill={i < (Number(rev.rating)||0) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5" xmlns="http://www.w3.org/2000/svg">
+                                                            <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.449a1 1 0 00-.364 1.118l1.287 3.957c.3 .921-.755 1.688-1.54 1.118L10 15.347l-3.488 2.679c-.784 .57-1.838-.197-1.54-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.525 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69L9.05 2.927z" />
+                                                        </svg>
+                                                    ))}
+                                                </div>
+                                                {rev.comment && (
+                                                    <p className="mt-5 ml-[-50px] font-dm-sans text-[14px] text-[#111233]">{rev.comment}</p>
+                                                )}
+                                                {images.length > 0 && (
+                                                    <div className="mt-3 ml-[-50px] flex flex-wrap gap-2">
+                                                        {images.map((src, idx) => (
+                                                            <button
+                                                                key={idx}
+                                                                type="button"
+                                                                className="block p-0 m-0 bg-transparent focus:outline-none focus:ring-0 w-20 h-20 aspect-square shrink-0 border border-black rounded"
+                                                                onClick={() => openLightbox(images, idx)}
+                                                                aria-label="Open image"
+                                                            >
+                                                                <img src={src} alt={`review-${rev.id}-${idx}`} className="w-full h-full object-cover" />
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
                                 );
                             })}
                         </div>
-
-                        <div className="text-sm text-black">
-                            {reviewsAvailable
-                                ? (reviewsCount > 0
-                                    ? `${averageRating ? averageRating.toFixed(1) : '—'}/5 ${reviewsCount} review${reviewsCount !== 1 ? 's' : ''}`
-                                    : '(—/5) 0 reviews')
-                                : '(—/5) 0 reviews'}
-                        </div>
                     </div>
                 </div>
-            </div>
+            )}
+
+            {isLightboxOpen && (
+                <div
+                    className="fixed inset-0 z-[1000] bg-black/90 flex items-center justify-center"
+                    role="dialog"
+                    aria-modal="true"
+                    onClick={closeLightbox}
+                >
+                    <button
+                        type="button"
+                        aria-label="Close"
+                        className="absolute top-4 right-4 bg-white/90 hover:bg-white rounded-full p-2 focus:outline-none focus:ring-0"
+                        onClick={(e) => { e.stopPropagation(); closeLightbox(); }}
+                    >
+                        <img src="/logo-icon/close.svg" alt="close" className="w-5 h-5" />
+                    </button>
+                    {lightboxItems.length > 1 && (
+                        <button
+                            type="button"
+                            aria-label="Previous image"
+                            className="absolute left-4 top-1/2 -translate-y-1/2 bg-white/80 hover:bg-white rounded-full p-3 focus:outline-none focus:ring-0"
+                            onClick={(e) => { e.stopPropagation(); prevLightbox(); }}
+                        >
+                            <img src="/logo-icon/arrow-left.svg" alt="prev" className="w-5 h-5" />
+                        </button>
+                    )}
+                    <div className="w-screen h-screen flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+                        <img src={lightboxItems[lightboxIdx]} alt="review full" className="max-w-screen max-h-screen w-auto h-auto object-contain" />
+                    </div>
+                    {lightboxItems.length > 1 && (
+                        <button
+                            type="button"
+                            aria-label="Next image"
+                            className="absolute right-4 top-1/2 -translate-y-1/2 bg-white/80 hover:bg-white rounded-full p-3 focus:outline-none focus:ring-0"
+                            onClick={(e) => { e.stopPropagation(); nextLightbox(); }}
+                        >
+                            <img src="/logo-icon/arrow-right.svg" alt="next" className="w-5 h-5" />
+                        </button>
+                    )}
+                </div>
+            )}
         </div>
     );
 };

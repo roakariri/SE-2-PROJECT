@@ -39,10 +39,10 @@ const LandingPage = () => {
         <h1 className="phone:text-[24px] tablet:text-[28px] laptop:text-[32px] mb-6">New Arrivals</h1>
         {/* Textured mugs */}
         <div className="flex flex-col laptop:flex-row w-full items-center laptop:items-start laptop:justify-center">
-          <div className=" mt-10 rounded-[4px]">
+          <div className=" mt-10 rounded-[4px] border border-black">
             <img src="/images/textured-mugs.png" className="phone:w-[220px] tablet:w-[300px] laptop:w-[clamp(250px,26vw,400px)] phone:h-[180px] tablet:h-[220px] laptop:h-[clamp(200px,24vw,305px)] rounded-[4px]" />
           </div>
-          <div className="border mt-10 laptop:ml-5 rounded-[4px] phone:w-full tablet:w-[90vw] laptop:w-[799px] phone:h-auto laptop:h-[305px] p-[5vw] pt-[6vw] bg-gradient-to-r from-[#E7E8E9] to-white flex flex-col justify-center">
+          <div className="border border-black mt-10 laptop:ml-5 rounded-[4px] phone:w-full tablet:w-[90vw] laptop:w-[799px] phone:h-auto laptop:h-[305px] p-[5vw] pt-[6vw] bg-gradient-to-r from-[#E7E8E9] to-white flex flex-col justify-center">
             <h2 className="phone:text-[22px] tablet:text-[28px] laptop:text-[36px] font-bold">Textured Glaze Mugs</h2>
             <p className="phone:text-[16px] tablet:text-[20px] laptop:text-[24px] italic text-[#171738]">Subtle, artisan feel. Your design printed on slightly rustic ceramic textures</p>
             <p className="text-right mt-9">
@@ -60,8 +60,8 @@ const LandingPage = () => {
           </div>
         </div>
         {/* Embroidered caps */}
-        <div className="flex flex-col laptop:flex-row w-full items-center laptop:items-start laptop:justify-center">
-          <div className="border mt-5 laptop:w-[833px] phone:w-full tablet:w-[90vw] laptop:h-[305px] p-[5vw] pt-[6vw] bg-gradient-to-r from-[#E7E8E9] to-white rounded-[4px] flex flex-col justify-center">
+        <div className="flex flex-col  laptop:flex-row w-full items-center laptop:items-start laptop:justify-center">
+          <div className="border border-black mt-5 laptop:w-[833px] phone:w-full tablet:w-[90vw] laptop:h-[305px] p-[5vw] pt-[6vw] bg-gradient-to-r from-[#E7E8E9] to-white rounded-[4px] flex flex-col justify-center">
             <h2 className="phone:text-[22px] tablet:text-[28px] laptop:text-[36px] font-bold">Embroidered Slogan Caps</h2>
             <p className="phone:text-[16px] tablet:text-[20px] laptop:text-[24px] italic text-[#171738]">Subtle, artisan feel. Your design printed on slightly rustic ceramic textures</p>
             <p className="text-left mt-9">
@@ -77,7 +77,7 @@ const LandingPage = () => {
                 </a>
             </p>
           </div>
-          <div className="border mt-5 laptop:ml-5 rounded-[4px]">
+          <div className="border border-black mt-5 laptop:ml-5 rounded-[4px]">
             <img src="/images/caps.png" className="phone:w-[220px] tablet:w-[300px] laptop:w-[clamp(250px,24vw,400px)] phone:h-[180px] tablet:h-[220px] laptop:h-[clamp(200px,24vw,305px)] rounded-[4px]" />
           </div>
         </div>
@@ -91,60 +91,72 @@ const LandingPage = () => {
           <div className="relative w-full overflow-x-auto items-center flex justify-center">
             <div className="flex flex-row gap-5 w-max px-4">
               {/* Business Cards */}
-              <div className="flex flex-col border rounded-[4px] w-[220px] h-[300px] flex-shrink-0">
+              <a
+                href="/cards-stickers/postcards"
+                onClick={e => { e.preventDefault(); navigate('/cards-stickers/postcards'); }}
+                className="flex flex-col border border-[#171738] rounded-[4px] w-[220px] h-[300px] flex-shrink-0"
+              >
                 <img src="/images/business-cards.png" className="w-full h-[80%] border-b border-[#171738] rounded-t-[4px] object-cover" />
-                <div className="text-center text-[#171738] font-dm-sans text-[18px] p-5">Business Cards</div>
-              </div>
+                <div className="text-center text-[#171738] font-dm-sans text-[18px] p-5">Custom Postcards</div>
+              </a>
               {/* Posters */}
-              <div className="flex flex-col border rounded-[4px] w-[220px] h-[300px] flex-shrink-0">
+              <a
+                href="/signage-posters/poster"
+                onClick={e => { e.preventDefault(); navigate('/signage-posters/poster'); }}
+                className="flex flex-col border border-[#171738] rounded-[4px] w-[220px] h-[300px] flex-shrink-0"
+              >
                 <img src="/images/posters.png" className="w-full h-[80%] border-b border-[#171738] rounded-t-[4px] object-cover" />
-                <div className="text-center text-[#171738] font-dm-sans text-[18px] p-5">Posters</div>
-              </div>
+                <div className="text-center text-[#171738] font-dm-sans text-[18px] p-5">Custom Posters</div>
+              </a>
               {/* Stickers */}
-              <div className="flex flex-col border rounded-[4px] w-[220px] h-[300px] flex-shrink-0">
+              <a
+                href="/cards-stickers/die-cut-stickers"
+                onClick={e => { e.preventDefault(); navigate('/cards-stickers/die-cut-stickers'); }}
+                className="flex flex-col border border-[#171738] rounded-[4px] w-[220px] h-[300px] flex-shrink-0"
+              >
                 <img src="/images/stickers.png" className="w-full h-[80%] border-b border-[#171738] rounded-t-[4px] object-cover" />
-                <div className="text-center text-[#171738] font-dm-sans text-[18px] p-5">Stickers</div>
-              </div>
+                <div className="text-center text-[#171738] font-dm-sans text-[18px] p-2 leading-[1.4]">Custom Die Cut Stickers</div>
+              </a>
             </div>
           </div>
         </div>
         {/* Grid for tablet/laptop */}
         <div className="hidden tablet:hidden laptop:flex flex-col tablet:flex-row laptop:flex-row mt-10 gap-[5vw] w-full items-center justify-center">
-          {/* Business Cards */}
-          <a
-            className="flex flex-col border rounded-[4px] tablet:w-[300px] laptop:w-[350px] tablet:h-[350px] laptop:h-[425px]"
-            href="/cards-stickers"
-            onClick={e => {
-              e.preventDefault();
-              navigate("/cards-stickers");
-            }}
-          >
-            <img src="/images/business-cards.png" className="w-full h-[80%] border-b border-[#171738] rounded-t-[4px] object-cover" />
-            <div className="text-center text-[#171738] font-dm-sans tablet:text-[24px] laptop:text-[30px] p-5 laptop:h-[30px] ">Business Cards</div>
-          </a>
-          {/* Posters */}
-          <a className="flex flex-col border rounded-[4px] tablet:w-[300px] laptop:w-[350px] tablet:h-[350px] laptop:h-[425px]"
-             href="/signage-posters"
-             onClick={e => {
-                 e.preventDefault();
-                 navigate("/signage-posters");
-             }}
-          >
-            <img src="/images/posters.png" className="w-full h-[80%] border-b border-[#171738] rounded-t-[4px] object-cover" />
-            <div className="text-center text-[#171738] font-dm-sans tablet:text-[24px] laptop:text-[30px] p-5">Posters</div>
-          </a>
-          {/* Stickers */}
-          <a className="flex flex-col border rounded-[4px] tablet:w-[300px] laptop:w-[350px] tablet:h-[350px] laptop:h-[425px]"
-           href="/cards-stickers"
-           onClick={e => {
-               e.preventDefault();
-               navigate("/cards-stickers");
-           }}
-          >
-            <img src="/images/stickers.png" className="w-full h-[80%] border-b border-[#171738] rounded-t-[4px] object-cover" />
-            <div className="text-center text-[#171738] font-dm-sans tablet:text-[24px] laptop:text-[30px] p-5">Stickers</div>
-          </a>
-        </div>
+              {/* Post Cards */}
+              <a
+                  className="flex flex-col border border-[#171738] rounded-[4px] tablet:w-[300px] laptop:w-[350px] tablet:h-[350px] laptop:h-[425px]"
+                  href="/cards-stickers"
+                  onClick={e => {
+                      e.preventDefault();
+                      navigate("/cards-stickers/postcards");
+                  }}
+              >
+                  <img src="/images/business-cards.png" className="w-full h-[80%] border-b border-[#171738] rounded-t-[4px] object-cover" />
+                  <div className="text-center font-semibold text-[#171738] font-dm-sans tablet:text-[24px] laptop:text-[30px] p-5 laptop:h-[30px] ">Custom Postcards</div>
+              </a>
+              {/* Posters */}
+              <a className="flex flex-col border border-[#171738] rounded-[4px] tablet:w-[300px] laptop:w-[350px] tablet:h-[350px] laptop:h-[425px]"
+                 href="/signage-posters"
+                 onClick={e => {
+                     e.preventDefault();
+                     navigate("/signage-posters/poster");
+                 }}
+              >
+                  <img src="/images/posters.png" className="w-full h-[80%] border-b border-[#171738] rounded-t-[4px] object-cover" />
+                  <div className="text-center font-semibold text-[#171738] font-dm-sans tablet:text-[24px] laptop:text-[30px] p-5">Custom Posters</div>
+              </a>
+              {/* Stickers */}
+              <a className="flex flex-col border border-[#171738] rounded-[4px] tablet:w-[300px] laptop:w-[350px] tablet:h-[350px] laptop:h-[425px]"
+                 href="/cards-stickers"
+                 onClick={e => {
+                     e.preventDefault();
+                     navigate("/cards-stickers/die-cut-stickers");
+                 }}
+              >
+                  <img src="/images/stickers.png" className="w-full h-[80%] border-b border-[#171738] rounded-t-[4px] object-cover" />
+                  <div className="text-center font-semibold text-[#171738] font-dm-sans tablet:text-[24px] laptop:text-[30px] p-2 leading-[1.2]">Custom Die Cut Stickers</div>
+              </a>
+          </div>
       </div>
 
       {/* Suggested for you */}
@@ -166,7 +178,7 @@ const LandingPage = () => {
                 </div>
               </div>
               {/* Banners */}
-              <div className="flex flex-col relative border rounded-[4px] bg-cover bg-center text-center items-center justify-center text-white border-white w-[220px] h-[220px] tablet:w-[260px] tablet:h-[300px] flex-shrink-0" style={{ backgroundImage: 'url("/images/banners1.png")' }}>
+              <div className="flex flex-col relative border rounded-[4px] bg-cover bg-center text-center items-center justify-center text-white border-white w-[220px] h-[220px] tablet:w-[260px] tablet:h-[300px] flex-shrink-0" style={{ backgroundImage: 'url("/images/clothing-banner.png")' }}>
                 <div className="absolute mt-[12vw] w-[80vw] tablet:mt-[2vw] tablet:w-[20vw] left-1/2 transform -translate-x-1/2 z-10 p-0">
                   <p className="text-[28px] tablet:text-[36px] font-bold text-white font-dm-sans drop-shadow-lg mb-8 tablet:mb-10 phone:mb-8 tablet:text-center tablet:w-full">BANNERS</p>
                 </div>
@@ -215,8 +227,8 @@ const LandingPage = () => {
               </button>
             </div>
           </div>
-          {/* Banners */}
-          <div className="flex flex-col justify-between items-center border rounded-[4px] bg-cover bg-center text-center text-white border-white laptop:w-[290px] laptop:h-[360px] bigscreen:w-[290px] bigscreen:h-[360px] relative" style={{ backgroundImage: 'url("/images/banners1.png")' }}>
+          {/* Clothing Banners */}
+          <div className="flex flex-col justify-between items-center border rounded-[4px] bg-cover bg-center text-center text-white border-white laptop:w-[290px] laptop:h-[360px] bigscreen:w-[290px] bigscreen:h-[360px] relative" style={{ backgroundImage: 'url("/images/clothing-banner.png")' }}>
             <div className="flex flex-1 items-center justify-center w-full h-full">
               <p className="laptop:text-[46px] font-bold text-white font-dm-sans drop-shadow-lg bigscreen:text-[46px] bigscreen:text-center">CLOTHING BANNERS</p>
             </div>

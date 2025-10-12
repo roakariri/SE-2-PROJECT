@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { supabase } from "../../supabaseClient";
 import { useNavigate } from "react-router-dom";
 
@@ -14,6 +14,8 @@ const ThreeDPrintsCatalog = () => {
          const [priceRange, setPriceRange] = useState({ min: '', max: '' });
          const [selectAll, setSelectAll] = useState(false);
          const [sortOption, setSortOption] = useState("relevance");
+         const [isSortOpen, setIsSortOpen] = useState(false);
+         const sortRef = useRef(null);
          const navigate = useNavigate();
          const [session, setSession] = useState(null);
          const [favoriteIds, setFavoriteIds] = useState([]);
@@ -134,24 +136,45 @@ const ThreeDPrintsCatalog = () => {
            setSortOption("relevance"); 
          };
        
-         const handleSortChange = (e) => {
-           // Sort change
-           const sortValue = e.target.value;
+         const applySort = (sortValue) => {
            setSortOption(sortValue);
            let sorted = [...filteredProducts];
-       
+
            if (sortValue === "lowToHigh") {
              sorted.sort((a, b) => a.starting_price - b.starting_price);
            } else if (sortValue === "highToLow") {
              sorted.sort((a, b) => b.starting_price - a.starting_price);
+           } else if (sortValue === "newest") {
+             const dateOf = (p) => new Date(p.created_at || p.createdAt || 0).getTime();
+             const idFallback = (p) => String(p.id || '').toString();
+             sorted.sort((a, b) => (dateOf(b) - dateOf(a)) || idFallback(b).localeCompare(idFallback(a)));
+           } else if (sortValue === "bestSelling") {
+             const sold = (p) => Number(p.sold_count ?? p.sales ?? p.total_sold ?? 0);
+             sorted.sort((a, b) => sold(b) - sold(a));
            } else if (sortValue === "nameAZ") {
              sorted.sort((a, b) => a.name?.toLowerCase().localeCompare(b.name?.toLowerCase()));
            } else if (sortValue === "nameZA") {
              sorted.sort((a, b) => b.name?.toLowerCase().localeCompare(a.name?.toLowerCase()));
            }
-       
+
            setFilteredProducts(sorted);
          };
+
+         const handleSortChange = (e) => {
+           const sortValue = e.target.value;
+           applySort(sortValue);
+         };
+
+         // Close custom sort dropdown on outside click
+         useEffect(() => {
+           const onDocClick = (e) => {
+             if (isSortOpen && sortRef.current && !sortRef.current.contains(e.target)) {
+               setIsSortOpen(false);
+             }
+           };
+           document.addEventListener('mousedown', onDocClick);
+           return () => document.removeEventListener('mousedown', onDocClick);
+         }, [isSortOpen]);
        
          // Hamburger menu
          // Menu state
@@ -353,20 +376,63 @@ const ThreeDPrintsCatalog = () => {
                  <div className="flex-1">
                    <div className="flex flex-col tablet:flex-row laptop:flex-row justify-between items-center mb-4 gap-4 tablet:gap-0">
                      <p className="font-semibold">{filteredProducts.length} Products</p>
-                     <select
-                       className="border border-gray-800 bg-white text-black rounded-md p-2"
-                       value={sortOption}
-                       onChange={handleSortChange}
-                     >
-                       <option value="relevance">Sort by Relevance</option>
-                       <option value="lowToHigh">Price: Low to High</option>
-                       <option value="highToLow">Price: High to Low</option>
-                       <option value="nameAZ">Name: A to Z</option>
-                       <option value="nameZA">Name: Z to A</option>
-                     </select>
+                     <div className="relative" ref={sortRef}>
+                       <button
+                         type="button"
+                         className="border border-gray-800 w-[215px] bg-white text-black font-dm-sans rounded-md px-3 py-2 inline-flex items-center gap-2"
+                         onClick={() => setIsSortOpen(v => !v)}
+                         aria-haspopup="listbox"
+                         aria-expanded={isSortOpen}
+                       >
+                         {({
+                           relevance: 'Sort by Relevance',
+                           newest: 'Newest First',
+                           lowToHigh: 'Price: Low to High',
+                           highToLow: 'Price: High to Low',
+                           bestSelling: 'Best Selling',
+                           nameAZ: 'Name: A to Z',
+                           nameZA: 'Name: Z to A'
+                         })[sortOption] || 'Sort by Relevance'}
+                         <img
+                           src={isSortOpen ? '/logo-icon/arrow-up.svg' : '/logo-icon/arrow-down.svg'}
+                           alt=""
+                           className="ml-[30px] w-4 h-4"
+                           onError={(e) => {
+                             try { e.currentTarget.replaceWith(document.createTextNode(isSortOpen ? '▲' : '▼')); } catch {}
+                           }}
+                         />
+                       </button>
+                       {isSortOpen && (
+                         <div className="absolute right-0 mt-2 w-[215px] border border-gray-800 bg-white rounded-md shadow z-20">
+                           <ul className="py-1 text-black" role="listbox">
+                             <li>
+                               <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('relevance'); setIsSortOpen(false); }}>Sort by Relevance</button>
+                             </li>
+                             <li>
+                               <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('newest'); setIsSortOpen(false); }}>Newest First</button>
+                             </li>
+                             <li>
+                               <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('lowToHigh'); setIsSortOpen(false); }}>Price: Low to High</button>
+                             </li>
+                             <li>
+                               <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('highToLow'); setIsSortOpen(false); }}>Price: High to Low</button>
+                             </li>
+                             <li>
+                               <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('bestSelling'); setIsSortOpen(false); }}>Best Selling</button>
+                             </li>
+                             <li>
+                               <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('nameAZ'); setIsSortOpen(false); }}>Name: A to Z</button>
+                             </li>
+                             <li>
+                               <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('nameZA'); setIsSortOpen(false); }}>Name: Z to A</button>
+                             </li>
+                           </ul>
+                         </div>
+                       )}
+                     </div>
                    </div>
        
-                   <div className="grid  grid-cols-1 phone:grid-cols-1 tablet:grid-cols-2 laptop:grid-cols-3 semi-bigscreen:grid-cols-4 biggest:grid-cols-5 gap-6 mb-10">
+                   <div className="grid  grid-cols-1 phone:grid-cols-1 tablet:grid-cols-2 laptop:grid-cols-3 semi-bigscreen:grid-cols-4 biggest:grid-cols-5 gap-6 mb-10 mt-10">
                      {filteredProducts.map((product) => (
                        <div
                          key={product.id}
@@ -444,7 +510,7 @@ const ThreeDPrintsCatalog = () => {
                            >
                                {product.name}
                            </h3>
-                         <p className="text-gray-500">from ₱{product.starting_price.toFixed(2)}</p>
+                         <p className="text-gray-500 font-dm-sans">from ₱{product.starting_price.toFixed(2)}</p>
                        </div>
                      ))}
                    </div>

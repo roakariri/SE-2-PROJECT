@@ -180,19 +180,18 @@ const HomePage = () => {
         <h1 className="phone:text-[24px] tablet:text-[28px] laptop:text-[32px] mb-6">New Arrivals</h1>
         {/* Textured mugs */}
         <div className="flex flex-col laptop:flex-row w-full items-center laptop:items-start laptop:justify-center">
-          <div className=" mt-10 rounded-[4px]">
+          <div className=" mt-10 rounded-[4px] border border-black">
             <img src="/images/textured-mugs.png" className="phone:w-[220px] tablet:w-[300px] laptop:w-[clamp(250px,26vw,400px)] phone:h-[180px] tablet:h-[220px] laptop:h-[clamp(200px,24vw,305px)] rounded-[4px]" />
           </div>
-          <div className="border mt-10 laptop:ml-5 rounded-[4px] phone:w-full tablet:w-[90vw] laptop:w-[799px] phone:h-auto laptop:h-[305px] p-[5vw] pt-[6vw] bg-gradient-to-r from-[#E7E8E9] to-white flex flex-col justify-center">
+          <div className="border border-black mt-10 laptop:ml-5 rounded-[4px] phone:w-full tablet:w-[90vw] laptop:w-[799px] phone:h-auto laptop:h-[305px] p-[5vw] pt-[6vw] bg-gradient-to-r from-[#E7E8E9] to-white flex flex-col justify-center">
             <h2 className="phone:text-[22px] tablet:text-[28px] laptop:text-[36px] font-bold">Textured Glaze Mugs</h2>
             <p className="phone:text-[16px] tablet:text-[20px] laptop:text-[24px] italic text-[#171738]">Subtle, artisan feel. Your design printed on slightly rustic ceramic textures</p>
             <p className="text-right mt-9">
                 <a
-                    href={supabase.auth.getSession() ? "/product" : "/signin"}
-                    onClick={async e => {
+                    href="/signin"
+                    onClick={e => {
                         e.preventDefault();
-                        const { data: { session } } = await supabase.auth.getSession();
-                        navigate(session ? "/accessories-decorations/mug" : "/signin");
+                        navigate("/accessories-decorations/mug");
                     }}
                     className="underline text-black not-italic phone:text-base tablet:text-lg laptop:text-lg hover:text-black"
                 >
@@ -202,17 +201,16 @@ const HomePage = () => {
           </div>
         </div>
         {/* Embroidered caps */}
-        <div className="flex flex-col laptop:flex-row w-full items-center laptop:items-start laptop:justify-center">
-          <div className="border mt-5 laptop:w-[833px] phone:w-full tablet:w-[90vw] laptop:h-[305px] p-[5vw] pt-[6vw] bg-gradient-to-r from-[#E7E8E9] to-white rounded-[4px] flex flex-col justify-center">
+        <div className="flex flex-col  laptop:flex-row w-full items-center laptop:items-start laptop:justify-center">
+          <div className="border border-black mt-5 laptop:w-[833px] phone:w-full tablet:w-[90vw] laptop:h-[305px] p-[5vw] pt-[6vw] bg-gradient-to-r from-[#E7E8E9] to-white rounded-[4px] flex flex-col justify-center">
             <h2 className="phone:text-[22px] tablet:text-[28px] laptop:text-[36px] font-bold">Embroidered Slogan Caps</h2>
             <p className="phone:text-[16px] tablet:text-[20px] laptop:text-[24px] italic text-[#171738]">Subtle, artisan feel. Your design printed on slightly rustic ceramic textures</p>
             <p className="text-left mt-9">
                 <a
-                    href={supabase.auth.getSession() ? "/product" : "/signin"}
-                    onClick={async e => {
+                    href="/signin"
+                    onClick={e => {
                         e.preventDefault();
-                        const { data: { session } } = await supabase.auth.getSession();
-                        navigate(session ? "/apparel/cap" : "/signin");
+                        navigate("/apparel/cap");
                     }}
                     className="underline text-black not-italic phone:text-base tablet:text-lg laptop:text-lg hover:text-black"
                 >
@@ -220,18 +218,18 @@ const HomePage = () => {
                 </a>
             </p>
           </div>
-          <div className="border mt-5 laptop:ml-5 rounded-[4px]">
+          <div className="border border-black mt-5 laptop:ml-5 rounded-[4px]">
             <img src="/images/caps.png" className="phone:w-[220px] tablet:w-[300px] laptop:w-[clamp(250px,24vw,400px)] phone:h-[180px] tablet:h-[220px] laptop:h-[clamp(200px,24vw,305px)] rounded-[4px]" />
           </div>
         </div>
       </div>
 
       {/* Recently Viewed */}
-      <div className="flex flex-col items-center justify-center mt-10 text-[#171738] font-bold font-dm-sans phone:text-[10px] tablet:text-[14px] laptop:text-[16px] laptop:items-center laptop:mx-auto laptop:max-w-[1200px] w-full">
+      <div className="flex flex-col  items-center justify-center mt-10 text-[#171738] font-bold font-dm-sans phone:text-[10px] tablet:text-[14px] laptop:text-[16px] laptop:items-center laptop:mx-auto laptop:max-w-[1200px] w-full">
         <div className="w-full px-4 laptop:px-0">
-          <h2 className="phone:text-[20px] tablet:text-[24px] laptop:text-[26px] mb-4 border-t pt-6">Recently Viewed</h2>
+          <h2 className="phone:text-[20px] tablet:text-[24px] laptop:text-[26px] mb-4 border-t border-black pt-6">Recently Viewed</h2>
         </div>
-        <div className="w-full overflow-x-auto">
+        <div className="w-full overflow-x-auto border-b border-black py-5">
           <div className="flex gap-4 px-4 laptop:px-0">
             {(recentLoading ? Array.from({ length: 5 }) : recent).map((item, idx) => (
               <div key={item?.id || idx} className="flex-shrink-0 w-[180px]">
@@ -273,58 +271,70 @@ const HomePage = () => {
           <div className="relative w-full overflow-x-auto items-center flex justify-center">
             <div className="flex flex-row gap-5 w-max px-4">
               {/* Business Cards */}
-              <div className="flex flex-col border rounded-[4px] w-[220px] h-[300px] flex-shrink-0">
+              <a
+                href="/cards-stickers/postcards"
+                onClick={e => { e.preventDefault(); navigate('/cards-stickers/postcards'); }}
+                className="flex flex-col border border-[#171738] rounded-[4px] w-[220px] h-[300px] flex-shrink-0"
+              >
                 <img src="/images/business-cards.png" className="w-full h-[80%] border-b border-[#171738] rounded-t-[4px] object-cover" />
-                <div className="text-center text-[#171738] font-dm-sans text-[18px] p-5">Business Cards</div>
-              </div>
+                <div className="text-center text-[#171738] font-dm-sans text-[18px] p-5">Custom Postcards</div>
+              </a>
               {/* Posters */}
-              <div className="flex flex-col border rounded-[4px] w-[220px] h-[300px] flex-shrink-0">
+              <a
+                href="/signage-posters/poster"
+                onClick={e => { e.preventDefault(); navigate('/signage-posters/poster'); }}
+                className="flex flex-col border border-[#171738] rounded-[4px] w-[220px] h-[300px] flex-shrink-0"
+              >
                 <img src="/images/posters.png" className="w-full h-[80%] border-b border-[#171738] rounded-t-[4px] object-cover" />
-                <div className="text-center text-[#171738] font-dm-sans text-[18px] p-5">Posters</div>
-              </div>
+                <div className="text-center text-[#171738] font-dm-sans text-[18px] p-5">Custom Posters</div>
+              </a>
               {/* Stickers */}
-              <div className="flex flex-col border rounded-[4px] w-[220px] h-[300px] flex-shrink-0">
+              <a
+                href="/cards-stickers/die-cut-stickers"
+                onClick={e => { e.preventDefault(); navigate('/cards-stickers/die-cut-stickers'); }}
+                className="flex flex-col border border-[#171738] rounded-[4px] w-[220px] h-[300px] flex-shrink-0"
+              >
                 <img src="/images/stickers.png" className="w-full h-[80%] border-b border-[#171738] rounded-t-[4px] object-cover" />
-                <div className="text-center text-[#171738] font-dm-sans text-[18px] p-5">Stickers</div>
-              </div>
+                <div className="text-center text-[#171738] font-dm-sans text-[18px] p-2 leading-[1.4]">Custom Die Cut Stickers</div>
+              </a>
             </div>
           </div>
         </div>
         {/* Grid for tablet/laptop */}
           <div className="hidden tablet:hidden laptop:flex flex-col tablet:flex-row laptop:flex-row mt-10 gap-[5vw] w-full items-center justify-center">
-              {/* Business Cards */}
+              {/* Post Cards */}
               <a
-                  className="flex flex-col border rounded-[4px] tablet:w-[300px] laptop:w-[350px] tablet:h-[350px] laptop:h-[425px]"
+                  className="flex flex-col border border-[#171738] rounded-[4px] tablet:w-[300px] laptop:w-[350px] tablet:h-[350px] laptop:h-[425px]"
                   href="/cards-stickers"
                   onClick={e => {
                       e.preventDefault();
-                      navigate("/cards-stickers");
+                      navigate("/cards-stickers/postcards");
                   }}
               >
                   <img src="/images/business-cards.png" className="w-full h-[80%] border-b border-[#171738] rounded-t-[4px] object-cover" />
-                  <div className="text-center text-[#171738] font-dm-sans tablet:text-[24px] laptop:text-[30px] p-5 laptop:h-[30px] ">Business Cards</div>
+                  <div className="text-center font-semibold text-[#171738] font-dm-sans tablet:text-[24px] laptop:text-[30px] p-5 laptop:h-[30px] ">Custom Postcards</div>
               </a>
               {/* Posters */}
-              <a className="flex flex-col border rounded-[4px] tablet:w-[300px] laptop:w-[350px] tablet:h-[350px] laptop:h-[425px]"
+              <a className="flex flex-col border border-[#171738] rounded-[4px] tablet:w-[300px] laptop:w-[350px] tablet:h-[350px] laptop:h-[425px]"
                  href="/signage-posters"
                  onClick={e => {
                      e.preventDefault();
-                     navigate("/signage-posters");
+                     navigate("/signage-posters/poster");
                  }}
               >
                   <img src="/images/posters.png" className="w-full h-[80%] border-b border-[#171738] rounded-t-[4px] object-cover" />
-                  <div className="text-center text-[#171738] font-dm-sans tablet:text-[24px] laptop:text-[30px] p-5">Posters</div>
+                  <div className="text-center font-semibold text-[#171738] font-dm-sans tablet:text-[24px] laptop:text-[30px] p-5">Custom Posters</div>
               </a>
               {/* Stickers */}
-              <a className="flex flex-col border rounded-[4px] tablet:w-[300px] laptop:w-[350px] tablet:h-[350px] laptop:h-[425px]"
+              <a className="flex flex-col border border-[#171738] rounded-[4px] tablet:w-[300px] laptop:w-[350px] tablet:h-[350px] laptop:h-[425px]"
                  href="/cards-stickers"
                  onClick={e => {
                      e.preventDefault();
-                     navigate("/cards-stickers");
+                     navigate("/cards-stickers/die-cut-stickers");
                  }}
               >
                   <img src="/images/stickers.png" className="w-full h-[80%] border-b border-[#171738] rounded-t-[4px] object-cover" />
-                  <div className="text-center text-[#171738] font-dm-sans tablet:text-[24px] laptop:text-[30px] p-5">Stickers</div>
+                  <div className="text-center font-semibold text-[#171738] font-dm-sans tablet:text-[24px] laptop:text-[30px] p-2 leading-[1.2]">Custom Die Cut Stickers</div>
               </a>
           </div>
       </div>

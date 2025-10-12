@@ -1060,9 +1060,24 @@ const AccountPage = () => {
     
     return (
         <div className="min-h-screen w-full bg-white phone:pt-[212px] tablet:pt-[215px] laptop:pt-[166px] relative z-0">
-            <div className="flex flex-row justify-center gap-[50px] h-full p-4 px-[100px]">
+            <div className="flex flex-col tablet:flex-row justify-center gap-6 tablet:gap-[50px] h-full p-4 px-4 tablet:px-12 laptop:px-[100px]">
+                {/* Mobile Tabs Nav */}
+                <div className="tablet:hidden flex w-full overflow-x-auto gap-2 mb-2">
+                    {[
+                        { key: 'homebase', label: 'Homebase' },
+                        { key: 'orders', label: 'Orders' },
+                        { key: 'profile', label: 'Profile' },
+                    ].map(t => (
+                        <button
+                            key={t.key}
+                            className={`shrink-0 px-3 py-2 text-sm rounded border ${activeTab === t.key ? 'bg-[#2B4269] text-white border-[#2B4269]' : 'bg-white text-[#171738] border-gray-300'}`}
+                            onClick={() => handleSetActiveTab(t.key)}
+                        >{t.label}</button>
+                    ))}
+                    <div className="ml-auto" />
+                </div>
                 {/* Account Page Nav */}
-                <div className="flex flex-col rounded-lg p-4">
+                <div className="hidden tablet:flex flex-col rounded-lg p-4">
                     <div className="flex flex-col justify-center p-0">
                         <h1 className="text-2xl font-bold mb-4 text-black">
                             Welcome, {session?.user?.user_metadata?.display_name || session?.user?.user_metadata?.full_name || userName}.
@@ -1096,7 +1111,7 @@ const AccountPage = () => {
 
                 {/* Homebase */}
                 {activeTab === "homebase" && (
-                    <div className="flex flex-col rounded-lg p-4 w-[80vw]">
+                    <div className="flex flex-col rounded-lg p-4 w-full">
                         <div className="flex flex-row justify-end">
                             <p className="text-right text-black font-dm-sans font-bold text-[36px]">My Account</p>
                         </div>
@@ -1111,7 +1126,7 @@ const AccountPage = () => {
                                 const o = orders[0];
                                 const pill = statusPill(o.status);
                                 return (
-                                    <div className="w-full flex items-start gap-[70px] mt-4">
+                                    <div className="w-full flex items-start gap-4 tablet:gap-[70px] mt-4">
                                         {/* Thumbnail */}
                                                     <div className="w-[60px]">
                                                         <div className="w-[107px] h-[105px] relative z-0">
@@ -1122,15 +1137,15 @@ const AccountPage = () => {
                                                         </div>
                                                     </div>
                                         {/* Labeled grid like Orders */}
-                                        <div className="flex flex-row border border-[#939393] rounded-lg p-3 w-full">
+                                        <div className="flex flex-row border border-[#939393] rounded-lg p-3 w-full overflow-x-auto">
                                             <div className="flex-1 ">
-                                                <div className="grid grid-cols-4 gap-10 text-[#171738] text-sm font-dm-sans border-b border-[#939393] w-full pb-2 mb-2">
+                                                <div className="grid grid-cols-4 gap-10 text-[#171738] text-sm font-dm-sans border-b border-[#939393] w-full min-w-[640px] pb-2 mb-2">
                                                     <div className="min-w-[120px] font-semibold text-[16px]">Order</div>
                                                     <div className="min-w-[160px] ml-[-70px] font-semibold text-[16px]">Date</div>
                                                     <div className="min-w-[140px] ml-[-50px] font-semibold text-[16px]">Status</div>
                                                     <div className="min-w-[120px] ml-[-70px] font-semibold text-[16px]">Total</div>
                                                 </div>
-                                                <div className="grid grid-cols-5 gap-10 items-center">
+                                                <div className="grid grid-cols-5 gap-6 tablet:gap-10 items-center min-w-[640px]">
                                                     <div className="min-w-[120px]"><a href={`/order?order_id=${o.id}`} onClick={(e)=>{e.preventDefault(); navigate(`/order?order_id=${o.id}`);}} className="text-black font-semibold">#{o.id}</a></div>
                                                     <div className="min-w-[160px] ml-[-30px]  font-dm-sans text-[#171738]">{formatDate(o.date)}</div>
                                                     <div className={`min-w-[140px] font-dm-sans ml-[20px] font-semibold ${pill.className}`}>{pill.label}</div>
@@ -1193,7 +1208,7 @@ const AccountPage = () => {
 
                 {/* Orders */}
                 {activeTab === "orders" && (
-                    <div className="flex flex-col rounded-lg p-4 w-[80vw]">
+                    <div className="flex flex-col rounded-lg p-4 w-full">
                         <div className="flex flex-row justify-end">
                             <p className="text-right text-black font-dm-sans font-bold text-[36px]">My Account</p>
                         </div>
@@ -1313,7 +1328,7 @@ const AccountPage = () => {
                                         .map((o) => {
                                             const pill = statusPill(o.status);
                                             return (
-                                                <div key={o.id} className="w-full flex items-start gap-[70px] ">
+                                                <div key={o.id} className="w-full flex items-start gap-4 tablet:gap-[70px] ">
                                                     {/* Thumbnails stack */}
                                                     <div className="w-[60px]">
                                                         <div className="w-[107px] h-[105px] relative z-0">
@@ -1324,15 +1339,15 @@ const AccountPage = () => {
                                                         </div>
                                                     </div>
                                                     {/* Labeled grid */}
-                                                    <div className="flex flex-row border border-[#939393] rounded-lg p-3">
+                                                    <div className="flex flex-row border border-[#939393] rounded-lg p-3 overflow-x-auto">
                                                         <div className="flex-1 ">
-                                                            <div className="grid grid-cols-4 gap-10 text-[#171738] text-sm font-dm-sans border-b border-[#939393] w-full pb-2 mb-2">
+                                                            <div className="grid grid-cols-4 gap-10 text-[#171738] text-sm font-dm-sans border-b border-[#939393] w-full min-w-[640px] pb-2 mb-2">
                                                                 <div className="min-w-[120px] font-semibold text-[16px]">Order</div>
                                                                 <div className="min-w-[160px] ml-[-70px] font-semibold text-[16px]">Date</div>
                                                                 <div className="min-w-[140px] ml-[-50px] font-semibold text-[16px]">Status</div>
                                                                 <div className="min-w-[120px] ml-[-70px] font-semibold text-[16px]">Total</div>
                                                             </div>
-                                                            <div className="grid grid-cols-5 gap-10 items-center">
+                                                            <div className="grid grid-cols-5 gap-6 tablet:gap-10 items-center min-w-[640px]">
                                                                 <div className="min-w-[120px]"><a href={`/order?order_id=${o.id}`} onClick={(e)=>{e.preventDefault(); navigate(`/order?order_id=${o.id}`);}} className="text-black font-semibold">#{o.id}</a></div>
                                                                 <div className="min-w-[160px] ml-[-30px]  font-dm-sans text-[#171738]">{formatDate(o.date)}</div>
                                                                 <div className={`min-w-[140px] font-dm-sans ml-[20px] font-semibold ${pill.className}`}>{pill.label}</div>
@@ -1354,21 +1369,21 @@ const AccountPage = () => {
 
                 {/* Profile */}
                 {activeTab === "profile" && (
-                    <div className="flex flex-col rounded-lg p-4 w-[80vw]">
+                    <div className="flex flex-col rounded-lg p-4 w-full">
                         <div className="flex flex-row justify-end">
                             <p className="text-right text-black font-dm-sans font-bold text-[36px]">My Account</p>
                         </div>
-                        <div className="mt-6">
+                            <div className="mt-6">
                             <p className="text-[24px] text-black font-dm-sans">Personal Information</p>
                             <p className="mt-10 font-dm-sans text-black text-[16px]">MY INFORMATION</p>
-                            <div className="flex flex-row gap-10 mt-8 items-start">
+                            <div className="flex flex-col tablet:flex-row gap-6 tablet:gap-10 mt-8 items-start">
 
                                 <div className="flex flex-col">
                                     <div className="relative flex flex-row items-center">
                                         <img
                                             src={(selectedFile && profilePic) ? profilePic : (resolveAvatarUrl(profilePhotoUrl) || resolveAvatarUrl(profilePic) || DEFAULT_AVATAR)}
                                             alt="Profile"
-                                            className="w-32 h-32 rounded-full object-cover bg-gray-300"
+                                            className="w-24 h-24 tablet:w-32 tablet:h-32 rounded-full object-cover bg-gray-300"
                                             onError={(e) => {
                                                 try { console.error('[Avatar] <img> failed to load src=', e?.target?.src); } catch (er) {}
                                                 try { if (typeof window !== 'undefined') localStorage.setItem('profilePhotoUrl', DEFAULT_AVATAR); } catch (e) {}
@@ -1378,7 +1393,7 @@ const AccountPage = () => {
                                         />
                                         <label
                                             htmlFor="profilePicUpload"
-                                            className="absolute bottom-2 left-20 cursor-pointer bg-white rounded-full p-1 shadow-md border border-gray-300"
+                                            className="absolute bottom-2 left-16 tablet:left-20 cursor-pointer bg-white rounded-full p-1 shadow-md border border-gray-300"
                                             aria-label="Upload profile picture"
                                         >
                                             <img src="/logo-icon/camera-icon.svg" alt="Upload" className="w-6 h-6" />
@@ -1419,7 +1434,7 @@ const AccountPage = () => {
                                 </div>
                                     
                                 
-                                <form className="flex-1 grid grid-cols-2 gap-6">
+                                <form className="flex-1 grid grid-cols-1 tablet:grid-cols-2 gap-6">
                                     <div className="flex flex-col col-span-1">
                                         <label className="text-black font-dm-sans mb-2">First Name</label>
                                         <input
@@ -1477,7 +1492,7 @@ const AccountPage = () => {
                                     <div className="relative">
                                         <input
                                             type="password"
-                                            className="w-[49%] border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white"
+                                            className="w-full tablet:w-[49%] border border-[#3B5B92] rounded-md px-4 py-3 text-black font-dm-sans bg-white"
                                             value={currentPassword}
                                             onChange={e => setCurrentPassword(e.target.value)}
                                             placeholder="Enter your current password"
@@ -1490,7 +1505,7 @@ const AccountPage = () => {
                                     </div>
                                 </form>
                                 <a href="/forgot-password">Forgot Password?</a>
-                                <form className="mt-2 w-full grid grid-cols-2 gap-4">
+                                <form className="mt-2 w-full grid grid-cols-1 tablet:grid-cols-2 gap-4">
                                     <div>
                                         <p className="font-dm-sans">New Password</p>
                                         <input
@@ -1653,7 +1668,7 @@ const AccountPage = () => {
                                     </button>
                                     <p className="mt-5 text-black font-dm-sans">EDIT ADDRESSES</p>
                                     <form onSubmit={handleAddressSubmit} className="w-full">
-                                        <div className="grid grid-cols-2 gap-4 mt-2">
+                                        <div className="grid grid-cols-1 tablet:grid-cols-2 gap-4 mt-2">
                                             <div>
                                                 <p className="text-[16px] mt-2 font-dm-sans">First Name</p>
                                                 <input
@@ -1696,7 +1711,7 @@ const AccountPage = () => {
                                             />
                                             {addressStreetError && <p className="text-red-600 font-dm-sans text-sm mt-1">{addressStreetError}</p>}
                                         </div>
-                                        <div className="grid grid-cols-2 gap-4 mt-2">
+                                        <div className="grid grid-cols-1 tablet:grid-cols-2 gap-4 mt-2">
                                             {/* Province */}
                                             <div>
                                                 <p className="text-[16px] mt-2 font-dm-sans">Province</p>
@@ -1897,7 +1912,7 @@ const AccountPage = () => {
                                                 />
                                             </div>
                                             {/* Phone Number & Label As side by side */}
-                                            <div className="col-span-2 flex gap-4 items-end">
+                                            <div className="col-span-2 flex flex-col tablet:flex-row gap-4 items-stretch tablet:items-end">
                                                 <div className="flex-1">
                                                     <p className="text-[16px] font-dm-sans mb-2">Phone Number</p>
                                                     <div className="relative">
