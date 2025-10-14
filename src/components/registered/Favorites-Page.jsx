@@ -1,6 +1,7 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../../supabaseClient";
+import { loadCatalogCache, saveCatalogCache, bucketForProduct } from "../../utils/catalogCache";
 
 const FavoritesPage = () => {
     const [favorites, setFavorites] = React.useState([]);
@@ -10,10 +11,12 @@ const FavoritesPage = () => {
     const navigate = useNavigate();
 
     React.useEffect(() => {
-        const fetchFavorites = async () => {
+        let isMounted = true;
+        const run = async () => {
             setLoading(true);
             // Get current session and user
             const { data: { session } } = await supabase.auth.getSession();
+            if (!isMounted) return;
             setSession(session);
             const user = session?.user;
             if (!user) {
@@ -21,65 +24,61 @@ const FavoritesPage = () => {
                 setLoading(false);
                 return;
             }
-            // Fetch favorites for user
+
+            // 1) Show cached favorites instantly (if any)
+            const key = `favorites:${user.id}`;
+            const cached = loadCatalogCache(key);
+            if (cached && cached.favorites && Array.isArray(cached.favorites)) {
+                setFavorites(cached.favorites);
+                setLoading(false);
+            }
+
+            // 2) Fetch fresh in background
             const { data: favs, error } = await supabase
                 .from("favorites")
                 .select("product_id")
                 .eq("user_id", user.id);
 
             if (error || !favs || favs.length === 0) {
-                setFavorites([]);
+                if (!cached) setFavorites([]);
                 setLoading(false);
+                saveCatalogCache(key, { favorites: [] });
                 return;
             }
 
-            // Fetch product details for each favorite
             const productIds = favs.map(fav => fav.product_id);
             if (productIds.length === 0) {
-                setFavorites([]);
+                if (!cached) setFavorites([]);
                 setLoading(false);
+                saveCatalogCache(key, { favorites: [] });
                 return;
             }
-            const { data: products, error: prodError } = await supabase
+
+            const { data: products } = await supabase
                 .from("products")
-                .select("*")
+                .select("id, name, starting_price, image_url, route, product_types(id, name, category_id, product_categories(id, name))")
                 .in("id", productIds);
 
-            // For each product, find the first bucket where the image actually exists
-            const buckets = [
-                'apparel-images',
-                'accessories-images',
-                'accessoriesdecorations-images',
-                'signage-posters-images',
-                'cards-stickers-images',
-                'packaging-images',
-                '3d-prints-images',
-            ];
-            const productsWithImage = await Promise.all((products || []).map(async (product) => {
-                let foundUrl = "/logo-icon/logo.png";
-                if (product.image_url) {
-                    for (const bucket of buckets) {
-                        const { data } = supabase.storage.from(bucket).getPublicUrl(product.image_url);
-                        // Actually try to fetch the image to see if it exists
-                        if (data && data.publicUrl && !data.publicUrl.endsWith('/')) {
-                            try {
-                                const res = await fetch(data.publicUrl, { method: 'HEAD' });
-                                if (res.ok) {
-                                    foundUrl = data.publicUrl;
-                                    break;
-                                }
-                            } catch (e) { /* ignore */ }
-                        }
-                    }
+            const withResolved = (products || []).map(p => {
+                const bucket = bucketForProduct(p);
+                let publicUrl = "/logo-icon/logo.png";
+                if (p.image_url) {
+                    const { data: pub } = supabase.storage.from(bucket).getPublicUrl(p.image_url);
+                    if (pub && pub.publicUrl && !pub.publicUrl.endsWith('/')) publicUrl = pub.publicUrl; else publicUrl = p.image_url;
                 }
-                return { ...product, resolved_image_url: foundUrl };
-            }));
+                return { ...p, resolved_image_url: publicUrl };
+            });
 
-            setFavorites(productsWithImage);
+            // Keep original order of favorites
+            const orderMap = new Map(productIds.map((id, i) => [id, i]));
+            withResolved.sort((a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0));
+
+            setFavorites(withResolved);
             setLoading(false);
+            saveCatalogCache(key, { favorites: withResolved });
         };
 
-        fetchFavorites();
+        run();
         // fetch categories for building routes
         const fetchCategories = async () => {
             const { data, error } = await supabase.from('product_categories').select('*');
@@ -90,6 +89,7 @@ const FavoritesPage = () => {
             setProductCategories(data || []);
         };
         fetchCategories();
+        return () => { isMounted = false; };
     }, []);
 
     const resolveProductRoute = (product) => {
@@ -153,7 +153,7 @@ const FavoritesPage = () => {
                     <p className="text-black font-dm-sans">Click the heart icon on any product to save it to your favorites.</p>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 phone:grid-cols-1 tablet:grid-cols-2 laptop:grid-cols-3 semi-bigscreen:grid-cols-4 biggest:grid-cols-5 gap-6 mb-10">
+                <div className="grid grid-cols-1 phone:grid-cols-1 tablet:grid-cols-2 laptop:grid-cols-3 semi-bigscreen:grid-cols-4 biggest:grid-cols-5 gap-6 mb-10 mt-10">
                     {favorites.map(product => {
                         const imageUrl = product.resolved_image_url || "/logo-icon/logo.png";
                         return (
@@ -188,7 +188,14 @@ const FavoritesPage = () => {
                                         onClick={async (e) => {
                                             e.stopPropagation();
                                             // Instantly update UI (remove from local state)
-                                            setFavorites(prev => prev.filter(fav => fav.id !== product.id));
+                                            setFavorites(prev => {
+                                                const next = prev.filter(fav => fav.id !== product.id);
+                                                if (session?.user?.id) {
+                                                    const key = `favorites:${session.user.id}`;
+                                                    saveCatalogCache(key, { favorites: next });
+                                                }
+                                                return next;
+                                            });
                                             // Remove from favorites in Supabase (background)
                                             const { data: { session } } = await supabase.auth.getSession();
                                             const user = session?.user;

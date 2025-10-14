@@ -242,140 +242,170 @@ export const router = createBrowserRouter([
     //Cap
     {path: "/apparel/cap", element: <Cap />},
     {path: "/favorites/cap", element: <Cap />},
+  {path: "/deals/cap", element: <Cap />},
     
 
   //RTshirt
   {path: "/apparel/rounded-t-shirt", element: <RTshirt />},
   {path: "/favorites/rounded-t-shirt", element: <RTshirt />},
+  {path: "/deals/rounded-t-shirt", element: <RTshirt />},
 
   //Basic T bag
   {path: "/apparel/basic-tote-bag", element: <BasicTBag />},
   {path: "/favorites/basic-tote-bag", element: <BasicTBag />},
+  {path: "/deals/basic-tote-bag", element: <BasicTBag />},
     
   //sweatshirt
   {path: "/apparel/sweatshirt", element: <Sweatshirt />},
   {path: "/favorites/sweatshirt", element: <Sweatshirt />},
+  {path: "/deals/sweatshirt", element: <Sweatshirt />},
 
   //Hoodie
   {path: "/apparel/hoodie", element: <Hoodie />},
   {path: "/favorites/hoodie", element: <Hoodie />},
+  {path: "/deals/hoodie", element: <Hoodie />},
 
   //Accesories anmd Decorations
 
   //Acrylic Keychain
   {path: "/accessories-decorations/acrylic-keychain", element: <AcrylicKeychain />},
   {path: "/favorites/acrylic-keychain", element: <AcrylicKeychain />},
+  {path: "/deals/acrylic-keychain", element: <AcrylicKeychain />},
     
   //Shaker Keychain
   {path: "/accessories-decorations/shaker-keychain", element: <ShakerKeychain />},
   {path: "/favorites/shaker-keychain", element: <ShakerKeychain />},
+  {path: "/deals/shaker-keychain", element: <ShakerKeychain />},
 
   //Blanket
   {path: "/accessories-decorations/blanket", element: <Blanket />},
   {path: "/favorites/blanket", element: <Blanket />},
+  {path: "/deals/blanket", element: <Blanket />},
 
   //tapestry
   {path: "/accessories-decorations/tapestry", element: <Tapestry />},
   {path: "/favorites/tapestry", element: <Tapestry />},
+  {path: "/deals/tapestry", element: <Tapestry />},
 
   //Acrylic Stand
   {path: "/accessories-decorations/acrylic-stand", element: <AcrylicStand />},
   {path: "/favorites/acrylic-stand", element: <AcrylicStand />},
+  {path: "/deals/acrylic-stand", element: <AcrylicStand />},
 
   //button pins
   {path: "/accessories-decorations/button-pins", element: <ButtonPin />},
   {path: "/favorites/button-pins", element: <ButtonPin />},
+  {path: "/deals/button-pins", element: <ButtonPin />},
 
   //Phone Holder
   {path: "/accessories-decorations/phone-holder", element: <PhoneHolder />},
   {path: "/favorites/phone-holder", element: <PhoneHolder />},
+  {path: "/deals/phone-holder", element: <PhoneHolder />},
 
   //Mugs
   {path: "/accessories-decorations/mug", element: <Mug />},
   {path: "/favorites/mug", element: <Mug />},
+  {path: "/deals/mug", element: <Mug />},
 
   //Sinage & Poster
 
   //Poster 
   {path: "/signage-posters/poster", element: <Poster />},
   {path: "/favorites/poster", element: <Poster />},
+  {path: "/deals/poster", element: <Poster />},
   //Clothing Banner 
   {path: "/signage-posters/clothing-banner", element: <ClothingBanner />},
   {path: "/favorites/clothing-banner", element: <ClothingBanner />},
+  {path: "/deals/clothing-banner", element: <ClothingBanner />},
   //Retractable Banner
   {path: "/signage-posters/retractable-banner", element: <RetractableBanner />},
   {path: "/favorites/retractable-banner", element: <RetractableBanner />},
+  {path: "/deals/retractable-banner", element: <RetractableBanner />},
 
   //Cards & Stickers
 
   //IDCards
   {path: "/cards-stickers/id-cards", element: <IDCards />},
   {path: "/favorites/id-cards", element: <IDCards />},
+  {path: "/deals/id-cards", element: <IDCards />},
   //diecuu cards
   {path: "/cards-stickers/die-cut-stickers", element: <DiecutStickers />},
   {path: "/favorites/die-cut-stickers", element: <DiecutStickers />},
+  {path: "/deals/die-cut-stickers", element: <DiecutStickers />},
   // photocards
   {path: "/cards-stickers/photocards", element: <Photocards />},
   {path: "/favorites/photocards", element: <Photocards />},
+  {path: "/deals/photocards", element: <Photocards />},
   //thankyou cards
   {path: "/cards-stickers/thank-you-cards", element: <ThankyouCards />},
   {path: "/favorites/thank-you-cards", element: <ThankyouCards />},
+  {path: "/deals/thank-you-cards", element: <ThankyouCards />},
   // shikishi
   {path: "/cards-stickers/shikishi", element: <Shikishi />},
   {path: "/favorites/shikishi", element: <Shikishi />},
+  {path: "/deals/shikishi", element: <Shikishi />},
   // sticker sheet
   {path: "/cards-stickers/sticker-sheet", element: <StickerSheet />},
   {path: "/favorites/sticker-sheet", element: <StickerSheet />},
+  {path: "/deals/sticker-sheet", element: <StickerSheet />},
   //lenticular cards
   {path: "/cards-stickers/lenticular-cards", element: <LenticularCards />},
   {path: "/favorites/lenticular-cards", element: <LenticularCards />},
+  {path: "/deals/lenticular-cards", element: <LenticularCards />},
   //postcards
   {path: "/cards-stickers/postcards", element: <Postcards />},
   {path: "/favorites/postcards", element: <Postcards />},
+  {path: "/deals/postcards", element: <Postcards />},
 
   //Packaging
   
   //product box 
   {path: "/packaging/product-box", element: <ProductBox />},
   {path: "/favorites/product-box", element: <ProductBox />},
+  {path: "/deals/product-box", element: <ProductBox />},
   //Paper bag
   {path: "/packaging/paper-bag", element: <PaperBag />},
   {path: "/favorites/paper-bag", element: <PaperBag />},
+  {path: "/deals/paper-bag", element: <PaperBag />},
   //Plastic bag
   {path: "/packaging/plastic-bag", element: <PlasticBag />},
   {path: "/favorites/plastic-bag", element: <PlasticBag />},
+  {path: "/deals/plastic-bag", element: <PlasticBag />},
   //Chip bag      
   {path: "/packaging/chip-bag", element: <ChipBag />},
   {path: "/favorites/chip-bag", element: <ChipBag />},
+  {path: "/deals/chip-bag", element: <ChipBag />},
   //Mailerbox
   {path: "/packaging/mailer-box", element: <MailerBox />},
   {path: "/favorites/mailer-box", element: <MailerBox />},
+  {path: "/deals/mailer-box", element: <MailerBox />},
 
 //3D Print services
   //Stamp seal
   {path: "/3d-prints-services/wax-stamp", element: <StampSeal/>},
   {path: "/favorites/wax-stamp", element: <StampSeal />},
+  {path: "/deals/wax-stamp", element: <StampSeal />},
   
   //Mockup tool
-  {path: "/rounded-t-shirt-mockuptool", element: <RTMockupTool />},
-  {path: "/tapestry-mockuptool", element: <TapestryMockupTool />},
-  {path: "/phone-holder-mockuptool", element: <PHMockupTool />},
-  {path: "/blanket-mockuptool", element: <BlanketMockupTool />},
+  {path: "mockup-tool/rounded-t-shirt", element: <RTMockupTool />},
+  {path: "mockup-tool/tapestry", element: <TapestryMockupTool />},
+  {path: "mockup-tool/phone-holder", element: <PHMockupTool />},
+  {path: "mockup-tool/blanket", element: <BlanketMockupTool />},
 
-  {path: "/photo-cards-mockuptool", element: <PCardsMockupTool />},
-  {path: "/thank-you-cards-mockuptool", element: <TYCardsMockupTool />},
-  {path: "/post-cards-mockuptool", element: <PostCardsMockupTool />},
-  {path: "/id-cards-mockuptool", element: <IDCardsMockupTool />},
+  {path: "mockup-tool/photo-cards", element: <PCardsMockupTool />},
+  {path: "mockup-tool/thank-you-cards", element: <TYCardsMockupTool />},
+  {path: "mockup-tool/post-cards", element: <PostCardsMockupTool />},
+  {path: "mockup-tool/id-cards", element: <IDCardsMockupTool />},
 
-  {path: "/poster-mockuptool", element: <PosterMockupTool />},
-  {path: "/retractable-banner-mockuptool", element: <RetractableBannerMockupTool />},
-  {path: "/clothing-banner-mockuptool", element: <ClothingBannerMockupTool />},
+  {path: "mockup-tool/poster", element: <PosterMockupTool />},
+  {path: "mockup-tool/retractable-banner", element: <RetractableBannerMockupTool />},
+  {path: "mockup-tool/clothing-banner", element: <ClothingBannerMockupTool />},
 
-  {path: "/paper-bag-mockuptool", element: <PaperBagMockupTool />},
-  {path: "/plastic-bag-mockuptool", element: <PlasticBagMockupTool />},
-  {path: "/basic-tote-bag-mockuptool", element: <ToteBagMockupTool />},
-  {path: "/sweatshirt-mockuptool", element: <SweatshirtMockupTool />},
-  {path: "/hoodie-mockuptool", element: <HoodieMockupTool />},
+  {path: "mockup-tool/paper-bag", element: <PaperBagMockupTool />},
+  {path: "mockup-tool/plastic-bag", element: <PlasticBagMockupTool />},
+  {path: "mockup-tool/basic-tote-bag", element: <ToteBagMockupTool />},
+  {path: "mockup-tool/sweatshirt", element: <SweatshirtMockupTool />},
+  {path: "mockup-tool/hoodie", element: <HoodieMockupTool />},
 
 
 //orders

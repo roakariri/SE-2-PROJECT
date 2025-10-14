@@ -1,14 +1,17 @@
 import React, { useEffect, useState, useRef } from "react";
 import { supabase } from "../../supabaseClient";
 import { useNavigate } from "react-router-dom";
+import { loadCatalogCache, saveCatalogCache, bucketForProduct } from "../../utils/catalogCache";
 
 const AccessoriesCatalog = () => {
   // Scroll to top on mount
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   }, []);
-  const [products, setProducts] = useState([]);
-    const [filteredProducts, setFilteredProducts] = useState([]);
+  const CACHE_KEY = 'accessories';
+  const __initialCache = loadCatalogCache(CACHE_KEY);
+  const [products, setProducts] = useState(() => __initialCache?.products || []);
+    const [filteredProducts, setFilteredProducts] = useState(() => __initialCache?.products || []);
     const [productTypeFilter, setProductTypeFilter] = useState([]);
     const [allProductTypes, setAllProductTypes] = useState([]);
     const [priceRange, setPriceRange] = useState({ min: '', max: '' });
@@ -17,7 +20,7 @@ const AccessoriesCatalog = () => {
   const [isSortOpen, setIsSortOpen] = useState(false);
   const sortRef = useRef(null);
     const [session, setSession] = useState(null);
-    const [favoriteIds, setFavoriteIds] = useState([]);
+  const [favoriteIds, setFavoriteIds] = useState(() => __initialCache?.favoriteIds || []);
     const navigate = useNavigate();
 
     useEffect(() => {
@@ -38,7 +41,17 @@ const AccessoriesCatalog = () => {
     }, []);
 
     useEffect(() => {
-      fetchProducts();
+      let isMounted = true;
+      const fetchFresh = async () => {
+        const fresh = await fetchProducts();
+        if (isMounted && fresh) {
+          setProducts(fresh);
+          setFilteredProducts(fresh);
+          saveCatalogCache(CACHE_KEY, { products: fresh, favoriteIds });
+        }
+      };
+      fetchFresh();
+      return () => { isMounted = false; };
     }, []);
   
     useEffect(() => {
@@ -56,31 +69,48 @@ const AccessoriesCatalog = () => {
       const fetchFavorites = async () => {
         if (!session) {
           setFavoriteIds([]);
+          saveCatalogCache(CACHE_KEY, { products, favoriteIds: [] });
           return;
         }
         const { data: favs } = await supabase
           .from('favorites')
           .select('product_id')
           .eq('user_id', session.user.id);
-        setFavoriteIds(favs ? favs.map(fav => fav.product_id) : []);
+        const ids = favs ? favs.map(fav => fav.product_id) : [];
+        setFavoriteIds(ids);
+        saveCatalogCache(CACHE_KEY, { products, favoriteIds: ids });
       };
       fetchFavorites();
-    }, [session]);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [session, products.length]);
   
     const fetchProducts = async () => {
       const { data, error } = await supabase
         .from("products")
-        .select("*, product_types(id, name, category_id, product_categories(id, name))");
-  
+        .select(
+          "id, name, starting_price, image_url, route, product_types(id, name, category_id, product_categories(id, name))"
+        );
+
       if (error) {
         console.error("Error fetching products:", error);
+        return null;
       } else {
-        // Only show products whose type's category is 'Accessories & Documentation'
-        const accessoriesProducts = data.filter(product =>
-          product.product_types?.product_categories?.name === 'Accessories & Decorations'
+        // Only show products whose type's category is 'Accessories & Decorations'
+        const accessoriesProducts = (data || []).filter(product =>
+          product?.product_types?.product_categories?.name === 'Accessories & Decorations'
         );
-        setProducts(accessoriesProducts);
-        setFilteredProducts(accessoriesProducts);
+        // Resolve a single public URL without per-render storage checks
+        const resolved = accessoriesProducts.map(p => {
+          const bucket = bucketForProduct(p);
+          let publicUrl = "/apparel-images/caps.png";
+          if (p.image_url) {
+            const { data: pub } = supabase.storage.from(bucket).getPublicUrl(p.image_url);
+            if (pub && pub.publicUrl && !pub.publicUrl.endsWith('/')) publicUrl = pub.publicUrl;
+            else publicUrl = p.image_url;
+          }
+          return { ...p, resolved_image_url: publicUrl };
+        });
+        return resolved;
       }
     };
   
@@ -445,23 +475,7 @@ const AccessoriesCatalog = () => {
               <div className="grid grid-cols-1 phone:grid-cols-1 tablet:grid-cols-2 laptop:grid-cols-3 semi-bigscreen:grid-cols-4 biggest:grid-cols-5 gap-6 mb-10 mt-10">
                 {filteredProducts.map((product) => {
                   const isFavorite = favoriteIds.includes(product.id);
-                  // Fix: get correct image url for favorites and catalog
-                  let imageUrl = "/apparel-images/caps.png";
-                  if (product.image_url) {
-                    // Try both buckets for compatibility
-                    let { data } = supabase.storage.from('accessoriesdecorations-images').getPublicUrl(product.image_url);
-                    if (data && data.publicUrl && !data.publicUrl.endsWith('/')) {
-                      imageUrl = data.publicUrl;
-                    } else {
-                      // fallback to apparel-images bucket if not found
-                      ({ data } = supabase.storage.from('apparel-images').getPublicUrl(product.image_url));
-                      if (data && data.publicUrl && !data.publicUrl.endsWith('/')) {
-                        imageUrl = data.publicUrl;
-                      } else {
-                        imageUrl = product.image_url;
-                      }
-                    }
-                  }
+                  const imageUrl = product.resolved_image_url || "/apparel-images/caps.png";
                   return (
                     <div
                       key={product.id}
@@ -500,12 +514,17 @@ const AccessoriesCatalog = () => {
                                 .eq('user_id', session.user.id)
                                 .eq('product_id', product.id);
                               setFavoriteIds(ids => ids.filter(id => id !== product.id));
+                              saveCatalogCache(CACHE_KEY, { products, favoriteIds: favoriteIds.filter(id => id !== product.id) });
                             } else {
                               // Add to favorites
                               await supabase
                                 .from('favorites')
                                 .insert({ user_id: session.user.id, product_id: product.id });
-                              setFavoriteIds(ids => [...ids, product.id]);
+                              setFavoriteIds(ids => {
+                                const next = [...ids, product.id];
+                                saveCatalogCache(CACHE_KEY, { products, favoriteIds: next });
+                                return next;
+                              });
                             }
                           }}
                           aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}

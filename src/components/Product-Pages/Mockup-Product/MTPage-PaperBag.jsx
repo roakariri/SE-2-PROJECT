@@ -533,7 +533,7 @@ const PaperBagMockupToolPage = () => {
                         </div>
 
                         <div className="flex items-center gap-4">
-                            <button className="px-4 py-2 bg-[#ef7d66] text-black font-semibold rounded">{fromCart ? 'UPDATE CART' : 'ADD TO CART'}</button>
+                            <button className="px-4 py-2 bg-[#ef7d66] text-black font-semibold rounded" onClick={() => navigate(`/packaging/paper-bag`)}>VIEW PRODUCT</button>
                         </div>
                     </div>
                 </div>

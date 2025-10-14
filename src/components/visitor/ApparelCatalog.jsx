@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from "react";
 import { supabase } from "../../supabaseClient";
 import { useNavigate } from "react-router-dom";
 import "../../checkboxes.css"; // Importing the custom checkbox styles
+import { saveCatalogCache, loadCatalogCache, bucketForProduct } from "../../utils/catalogCache";
 
 const ApparelCatalog = () => {
   // Scroll to top on mount
@@ -33,8 +34,19 @@ const ApparelCatalog = () => {
   const [isSortOpen, setIsSortOpen] = useState(false);
   const sortRef = useRef(null);
 
+  // On mount, try cached products for instant rendering; refresh in background
   useEffect(() => {
-    fetchProducts();
+    const cacheKey = 'catalog:apparel';
+    const cached = loadCatalogCache(cacheKey);
+    if (cached?.products?.length) {
+      setProducts(cached.products);
+      setFilteredProducts(cached.products);
+      if (Array.isArray(cached.favoriteIds)) setFavoriteIds(cached.favoriteIds);
+      // background refresh
+      fetchProducts(true, cacheKey);
+    } else {
+      fetchProducts(false, cacheKey);
+    }
   }, []);
 
   useEffect(() => {
@@ -64,22 +76,34 @@ const ApparelCatalog = () => {
     fetchFavorites();
   }, [session]);
 
-  const fetchProducts = async () => {
-    // Fetch the route field from the database for each product
+  const fetchProducts = async (silent = false, cacheKey = 'catalog:apparel') => {
     const { data, error } = await supabase
       .from("products")
-      .select("*, route, product_types(id, name, category_id, product_categories(id, name))");
+      .select("id, name, starting_price, image_url, route, product_types(id, name, category_id, product_categories(id, name))");
 
     if (error) {
       console.error("Error fetching products:", error);
-    } else {
-      // Only show products whose type's category is 'Apparel'
-      const apparelProducts = data.filter(product =>
-        product.product_types?.product_categories?.name === 'Apparel'
-      );
-      setProducts(apparelProducts);
-      setFilteredProducts(apparelProducts);
+      return;
     }
+
+    const apparelRaw = (data || []).filter(product =>
+      product.product_types?.product_categories?.name === 'Apparel'
+    );
+
+    const withImages = apparelRaw.map(p => {
+      let url = '/logo-icon/logo.png';
+      if (p?.image_url) {
+        const bucket = bucketForProduct(p) || 'apparel-images';
+        const { data: pub } = supabase.storage.from(bucket).getPublicUrl(p.image_url);
+        url = pub?.publicUrl || url;
+      }
+      return { ...p, resolved_image_url: url };
+    });
+
+    setProducts(withImages);
+    setFilteredProducts(withImages);
+    // Save to cache with current favorites snapshot
+    saveCatalogCache(cacheKey, { products: withImages, favoriteIds });
   };
 
   const fetchProductTypes = async () => {
@@ -451,11 +475,7 @@ const ApparelCatalog = () => {
                   >
                     <div className="relative w-[230px] h-48 mb-4 mx-auto overflow-hidden">
                       <img
-                        src={
-                          product.image_url
-                            ? supabase.storage.from('apparel-images').getPublicUrl(product.image_url).data.publicUrl
-                            : "/apparel-images/caps.png"
-                        }
+                        src={product.resolved_image_url || "/apparel-images/caps.png"}
                         alt={product.name}
                         className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-125 cursor-pointer"
                         onError={e => { e.target.src = "/apparel-images/caps.png"; }}

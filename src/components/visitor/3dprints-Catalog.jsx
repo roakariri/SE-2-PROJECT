@@ -1,14 +1,17 @@
 import React, { useEffect, useState, useRef } from "react";
 import { supabase } from "../../supabaseClient";
 import { useNavigate } from "react-router-dom";
+import { loadCatalogCache, saveCatalogCache, bucketForProduct } from "../../utils/catalogCache";
 
 const ThreeDPrintsCatalog = () => {
   // Scroll to top on mount
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   }, []);
-  const [products, setProducts] = useState([]);
-         const [filteredProducts, setFilteredProducts] = useState([]);
+    const CACHE_KEY = '3d-prints-services';
+    const __initialCache = loadCatalogCache(CACHE_KEY);
+  const [products, setProducts] = useState(() => __initialCache?.products || []);
+    const [filteredProducts, setFilteredProducts] = useState(() => __initialCache?.products || []);
          const [productTypeFilter, setProductTypeFilter] = useState([]);
          const [allProductTypes, setAllProductTypes] = useState([]);
          const [priceRange, setPriceRange] = useState({ min: '', max: '' });
@@ -18,7 +21,7 @@ const ThreeDPrintsCatalog = () => {
          const sortRef = useRef(null);
          const navigate = useNavigate();
          const [session, setSession] = useState(null);
-         const [favoriteIds, setFavoriteIds] = useState([]);
+         const [favoriteIds, setFavoriteIds] = useState(() => __initialCache?.favoriteIds || []);
 
          useEffect(() => {
            // Get current session
@@ -37,7 +40,17 @@ const ThreeDPrintsCatalog = () => {
          }, []);
 
          useEffect(() => {
-           fetchProducts();
+           let isMounted = true;
+           const fetchFresh = async () => {
+             const fresh = await fetchProducts();
+             if (isMounted && fresh) {
+               setProducts(fresh);
+               setFilteredProducts(fresh);
+               saveCatalogCache(CACHE_KEY, { products: fresh, favoriteIds });
+             }
+           };
+           fetchFresh();
+           return () => { isMounted = false; };
          }, []);
        
          useEffect(() => {
@@ -55,17 +68,26 @@ const ThreeDPrintsCatalog = () => {
          const fetchProducts = async () => {
            const { data, error } = await supabase
              .from("products")
-             .select("*, product_types(id, name, category_id, product_categories(id, name))");
-       
+             .select("id, name, starting_price, image_url, route, product_types(id, name, category_id, product_categories(id, name))");
+
            if (error) {
              console.error("Error fetching products:", error);
+             return null;
            } else {
-             // Show products
-             const threeDPrintProducts = data.filter(product =>
-               product.product_types?.product_categories?.name === '3D Print Services'
+             const threeDPrintProducts = (data || []).filter(product =>
+               product?.product_types?.product_categories?.name === '3D Print Services'
              );
-             setProducts(threeDPrintProducts);
-             setFilteredProducts(threeDPrintProducts);
+             const resolved = threeDPrintProducts.map(p => {
+               const bucket = bucketForProduct(p);
+               let publicUrl = "/apparel-images/caps.png";
+               if (p.image_url) {
+                 const { data: pub } = supabase.storage.from(bucket).getPublicUrl(p.image_url);
+                 if (pub && pub.publicUrl && !pub.publicUrl.endsWith('/')) publicUrl = pub.publicUrl;
+                 else publicUrl = p.image_url;
+               }
+               return { ...p, resolved_image_url: publicUrl };
+             });
+             return resolved;
            }
          };
        
@@ -440,11 +462,7 @@ const ThreeDPrintsCatalog = () => {
                        >
                          <div className="relative w-[230px] h-48 mb-4 mx-auto overflow-hidden">
                            <img
-                             src={
-                               product.image_url
-                                 ? supabase.storage.from('3d-prints-images').getPublicUrl(product.image_url).data.publicUrl
-                                 : "/apparel-images/caps.png"
-                             }
+                             src={product.resolved_image_url || "/apparel-images/caps.png"}
                              alt={product.name}
                              className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-125 cursor-pointer"
                              onError={e => { e.target.src = "/apparel-images/caps.png"; }}
@@ -477,7 +495,9 @@ const ThreeDPrintsCatalog = () => {
                                    .delete()
                                    .eq('user_id', user.id)
                                    .eq('product_id', product.id);
-                                 setFavoriteIds(favoriteIds.filter(id => id !== product.id));
+                                 const next = favoriteIds.filter(id => id !== product.id);
+                                 setFavoriteIds(next);
+                                 saveCatalogCache('catalog:3d-prints-services', { products, favoriteIds: next });
                                } else {
                                  // Add to favorites
                                  await supabase
@@ -485,7 +505,9 @@ const ThreeDPrintsCatalog = () => {
                                    .insert([
                                      { user_id: user.id, product_id: product.id }
                                    ]);
-                                 setFavoriteIds([...favoriteIds, product.id]);
+                                 const next = [...favoriteIds, product.id];
+                                 setFavoriteIds(next);
+                                 saveCatalogCache('catalog:3d-prints-services', { products, favoriteIds: next });
                                }
                              }}
                              aria-label={favoriteIds && favoriteIds.includes(product.id) ? "Remove from favorites" : "Add to favorites"}

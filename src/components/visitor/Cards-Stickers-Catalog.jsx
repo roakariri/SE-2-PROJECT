@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import { supabase } from "../../supabaseClient";
 import { useNavigate } from "react-router-dom";
+import { loadCatalogCache, saveCatalogCache, bucketForProduct } from "../../utils/catalogCache";
 
 const CardsStickersCatalog = () => {
   // Scroll to top on mount
@@ -8,8 +9,10 @@ const CardsStickersCatalog = () => {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   }, []);
 
- const [products, setProducts] = useState([]);
-       const [filteredProducts, setFilteredProducts] = useState([]);
+   const CACHE_KEY = 'cards-stickers';
+   const __initialCache = loadCatalogCache(CACHE_KEY);
+ const [products, setProducts] = useState(() => __initialCache?.products || []);
+   const [filteredProducts, setFilteredProducts] = useState(() => __initialCache?.products || []);
        const [productTypeFilter, setProductTypeFilter] = useState([]);
        const [allProductTypes, setAllProductTypes] = useState([]);
        const [priceRange, setPriceRange] = useState({ min: '', max: '' });
@@ -18,11 +21,21 @@ const CardsStickersCatalog = () => {
   const [isSortOpen, setIsSortOpen] = useState(false);
   const sortRef = useRef(null);
        const [session, setSession] = useState(null);
-       const [favoriteIds, setFavoriteIds] = useState([]);
+  const [favoriteIds, setFavoriteIds] = useState(() => __initialCache?.favoriteIds || []);
        const navigate = useNavigate();
      
        useEffect(() => {
-         fetchProducts();
+         let isMounted = true;
+         const fetchFresh = async () => {
+           const fresh = await fetchProducts();
+           if (isMounted && fresh) {
+             setProducts(fresh);
+             setFilteredProducts(fresh);
+             saveCatalogCache(CACHE_KEY, { products: fresh, favoriteIds });
+           }
+         };
+         fetchFresh();
+         return () => { isMounted = false; };
        }, []);
      
        useEffect(() => {
@@ -40,32 +53,10 @@ const CardsStickersCatalog = () => {
          // Get current session
          supabase.auth.getSession().then(({ data: { session } }) => {
            setSession(session);
-           if (session && session.user) {
-             supabase
-               .from('favorites')
-               .select('product_id')
-               .eq('user_id', session.user.id)
-               .then(({ data }) => {
-                 setFavoriteIds(data ? data.map(fav => fav.product_id) : []);
-               });
-           } else {
-             setFavoriteIds([]);
-           }
          });
          // Listen for auth changes
          const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
            setSession(newSession);
-           if (newSession && newSession.user) {
-             supabase
-               .from('favorites')
-               .select('product_id')
-               .eq('user_id', newSession.user.id)
-               .then(({ data }) => {
-                 setFavoriteIds(data ? data.map(fav => fav.product_id) : []);
-               });
-           } else {
-             setFavoriteIds([]);
-           }
          });
          return () => {
            if (listener && typeof listener.subscription?.unsubscribe === 'function') {
@@ -73,21 +64,49 @@ const CardsStickersCatalog = () => {
            }
          };
        }, []);
+
+       useEffect(() => {
+         const fetchFavorites = async () => {
+           if (!session) {
+             setFavoriteIds([]);
+             saveCatalogCache(CACHE_KEY, { products, favoriteIds: [] });
+             return;
+           }
+           const { data: favs } = await supabase
+             .from('favorites')
+             .select('product_id')
+             .eq('user_id', session.user.id);
+           const ids = favs ? favs.map(f => f.product_id) : [];
+           setFavoriteIds(ids);
+           saveCatalogCache(CACHE_KEY, { products, favoriteIds: ids });
+         };
+         fetchFavorites();
+         // eslint-disable-next-line react-hooks/exhaustive-deps
+       }, [session, products.length]);
      
        const fetchProducts = async () => {
          const { data, error } = await supabase
            .from("products")
-           .select("*, product_types(id, name, category_id, product_categories(id, name))");
-     
+           .select("id, name, starting_price, image_url, route, product_types(id, name, category_id, product_categories(id, name))");
+
          if (error) {
            console.error("Error fetching products:", error);
+           return null;
          } else {
-           // Only show products whose type's category is 'Cards & Stickers'
-           const cardsStickersProducts = data.filter(product =>
-             product.product_types?.product_categories?.name === 'Cards & Stickers'
+           const cardsStickersProducts = (data || []).filter(product =>
+             product?.product_types?.product_categories?.name === 'Cards & Stickers'
            );
-           setProducts(cardsStickersProducts);
-           setFilteredProducts(cardsStickersProducts);
+           const resolved = cardsStickersProducts.map(p => {
+             const bucket = bucketForProduct(p);
+             let publicUrl = "/apparel-images/caps.png";
+             if (p.image_url) {
+               const { data: pub } = supabase.storage.from(bucket).getPublicUrl(p.image_url);
+               if (pub && pub.publicUrl && !pub.publicUrl.endsWith('/')) publicUrl = pub.publicUrl;
+               else publicUrl = p.image_url;
+             }
+             return { ...p, resolved_image_url: publicUrl };
+           });
+           return resolved;
          }
        };
      
@@ -456,11 +475,7 @@ const CardsStickersCatalog = () => {
                      >
                        <div className="relative w-[230px] h-48 mb-4 mx-auto overflow-hidden">
                          <img
-                           src={
-                             product.image_url
-                               ? supabase.storage.from('cards-stickers-images').getPublicUrl(product.image_url).data.publicUrl
-                               : "/apparel-images/caps.png"
-                           }
+                           src={product.resolved_image_url || "/apparel-images/caps.png"}
                            alt={product.name}
                            className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-125 cursor-pointer"
                            onError={e => { e.target.src = "/logo-icon/logo.png"; }}
@@ -493,7 +508,9 @@ const CardsStickersCatalog = () => {
                                  .delete()
                                  .eq('user_id', user.id)
                                  .eq('product_id', product.id);
-                               setFavoriteIds(favoriteIds.filter(id => id !== product.id));
+                               const next = favoriteIds.filter(id => id !== product.id);
+                               setFavoriteIds(next);
+                               saveCatalogCache(CACHE_KEY, { products, favoriteIds: next });
                              } else {
                                // Add to favorites
                                await supabase
@@ -501,7 +518,9 @@ const CardsStickersCatalog = () => {
                                  .insert([
                                    { user_id: user.id, product_id: product.id }
                                  ]);
-                               setFavoriteIds([...favoriteIds, product.id]);
+                               const next = [...favoriteIds, product.id];
+                               setFavoriteIds(next);
+                               saveCatalogCache(CACHE_KEY, { products, favoriteIds: next });
                              }
                            }}
                            aria-label={favoriteIds.includes(product.id) ? "Remove from favorites" : "Add to favorites"}
@@ -514,10 +533,6 @@ const CardsStickersCatalog = () => {
                          <h3
                              className="font-semibold mt-2 text-black text-center tablet:text-center semibig:text-center laptop:text-center cursor-pointer"
                              onClick={() => {
-                               if (!session) {
-                                 navigate('/signin');
-                                 return;
-                               }
                                const route = product.route || product.routes;
                                if (route) {
                                  navigate(route);
