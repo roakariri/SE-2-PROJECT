@@ -347,8 +347,8 @@ const AddProductModal = ({ open, onClose, onSubmit }) => {
     );
 };
 
-// Resolve image key like Cap-Info: accept full URLs or plain keys, try a list of buckets
-// using getPublicUrl(cleanKey), and if the key already contains a bucket/path try that directly.
+// Resolve image key fast: accept full URLs or plain keys, try common buckets via getPublicUrl.
+// Avoid network HEAD/GET checks to keep Stocks load from hanging on many rows.
 const resolveImageKeyAsync = async (img) => {
     if (!img) return null;
     try {
@@ -357,28 +357,24 @@ const resolveImageKeyAsync = async (img) => {
 
         const cleanKey = s.replace(/^\/+/, '');
 
-        // Try a list of likely buckets (same order used in Cap-Info)
-    // Default bucket order (generic)
-    let bucketsToTry = ['accessoriesdecorations-images', 'apparel-images', '3d-prints-images', 'product-images', 'images', 'public'];
-        // If this product looks like apparel, prefer apparel-images first (matches product pages)
+        // Default bucket order
+        let bucketsToTry = ['apparel-images', 'accessoriesdecorations-images', 'accessories-images', '3d-prints-images', 'product-images', 'images', 'public'];
+        // Heuristic: keep apparel-first order if possible (guarded by try so undefined vars don't throw)
         try {
             const look = String((productName || productTypes?.name || category || '')).toLowerCase();
-            const apparelKeywords = ['apparel','shirt','t-shirt','tshirt','hoodie','sweatshirt','cap','hat','tote','bag','rtshirt','rounded_t-shirt','hoodie'];
+            const apparelKeywords = ['apparel','shirt','t-shirt','tshirt','hoodie','sweatshirt','cap','hat','tote','bag','rtshirt','rounded_t-shirt'];
             const isApparel = apparelKeywords.some(k => look.includes(k)) || String(category || '').toLowerCase().includes('apparel');
-            if (isApparel) {
-                bucketsToTry = ['apparel-images', 'accessoriesdecorations-images', 'accessories-images', 'images', 'product-images', 'public'];
+            if (!isApparel) {
+                bucketsToTry = ['accessoriesdecorations-images', 'accessories-images', 'product-images', 'images', 'apparel-images', '3d-prints-images', 'public'];
             }
-        } catch (e) { /* ignore */ }
+        } catch (e) { /* ignore heuristic errors */ }
 
         for (const bucket of bucketsToTry) {
             try {
-                const { data, error } = supabase.storage.from(bucket).getPublicUrl(cleanKey);
-                // Supabase sometimes returns data.publicUrl or data.publicURL
+                const { data } = supabase.storage.from(bucket).getPublicUrl(cleanKey);
                 const url = data?.publicUrl || data?.publicURL || null;
                 if (url && !String(url).endsWith('/')) return url;
-            } catch (e) {
-                // ignore and try next bucket
-            }
+            } catch (e) { /* try next bucket */ }
         }
 
         // If key looks like 'bucket/path/to/file.png', try using that bucket directly
@@ -387,37 +383,44 @@ const resolveImageKeyAsync = async (img) => {
             const bucket = parts.shift();
             const path = parts.join('/');
             try {
-                const { data, error } = supabase.storage.from(bucket).getPublicUrl(path);
+                const { data } = supabase.storage.from(bucket).getPublicUrl(path);
                 const url = data?.publicUrl || data?.publicURL || null;
                 if (url && !String(url).endsWith('/')) return url;
-            } catch (e) {
-                // ignore
-            }
+            } catch (e) { /* ignore */ }
         }
 
-        // Try signed URL for the most-likely bucket names (non-blocking)
-        for (const bucket of bucketsToTry) {
-            try {
-                const signed = await supabase.storage.from(bucket).createSignedUrl(cleanKey, 60);
-                const signedUrl = signed?.data?.signedUrl || signed?.signedUrl || null;
-                if (signedUrl) return signedUrl;
-            } catch (e) {
-                // ignore
+        // Fallback: synthesize public URL using SUPABASE_URL if bucket/key format is provided
+        try {
+            const base = SUPABASE_URL.replace(/\/$/, '');
+            const split = cleanKey.split('/');
+            if (base && split.length > 1) {
+                const bucket = split.shift();
+                const path = split.join('/');
+                return `${base}/storage/v1/object/public/${bucket}/${path}`;
             }
-        }
+        } catch (e) { /* ignore */ }
 
-        // Fallback: return the original key so caller can synthesize a URL if desired
         return cleanKey;
     } catch (e) {
         return null;
     }
 };
 
-const OrdersList = () => {
-    const [search, setSearch] = useState('');
+const OrdersList = ({ externalSearch = '' }) => {
     const [rows, setRows] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
+    // Status dropdown states for Orders
+    const [showStatusDropdown, setShowStatusDropdown] = useState(false);
+    const [statusFilters, setStatusFilters] = useState([]); // ['Delivered','Cancelled','In Progress']
+    const [statusDraft, setStatusDraft] = useState([]);
+    const statusMenuRef = useRef(null);
+
+    // View / Update order modal state
+    const [viewOrderDetails, setViewOrderDetails] = useState(null);
+    const [viewLoading, setViewLoading] = useState(false);
+    const [showUpdateModal, setShowUpdateModal] = useState(false);
+    const [updateStatusValue, setUpdateStatusValue] = useState('');
 
     useEffect(() => {
         let mounted = true;
@@ -796,12 +799,53 @@ const OrdersList = () => {
                     }
                 } catch {}
 
+                // Attempt to compute totals from related tables (order items / payments) when orders don't expose a total
+                const totalsMap = {};
+                try {
+                    const orderIds = Array.from(new Set((all || []).map(x => x?.order_id ?? x?.id ?? x?.reference ?? x?.number).filter(Boolean).map(String)));
+                    if (orderIds.length > 0) {
+                        const itemTables = ['order_items','order_lines','line_items','order_line_items','order_line','order_products'];
+                        for (const tbl of itemTables) {
+                            try {
+                                const { data: items, error: itemsErr } = await supabase.from(tbl).select('order_id, amount, price, quantity').in('order_id', orderIds);
+                                if (itemsErr || !Array.isArray(items) || items.length === 0) continue;
+                                items.forEach(it => {
+                                    try {
+                                        const id = String(it.order_id);
+                                        let val = null;
+                                        if (it?.amount != null) val = Number(it.amount || 0);
+                                        else if (it?.price != null) val = Number(it.price || 0) * (Number(it?.quantity || 1) || 1);
+                                        if (val != null && !Number.isNaN(val)) totalsMap[id] = (totalsMap[id] || 0) + val;
+                                    } catch (e) { /* ignore row */ }
+                                });
+                            } catch (e) { /* ignore table */ }
+                        }
+
+                        // Also try payments table for captured amounts
+                        try {
+                            const { data: pays, error: payErr } = await supabase.from('payments').select('order_id, amount').in('order_id', orderIds);
+                            if (!payErr && Array.isArray(pays)) {
+                                pays.forEach(p => {
+                                    try {
+                                        const id = String(p.order_id);
+                                        const v = Number(p?.amount || 0);
+                                        if (!Number.isNaN(v)) totalsMap[id] = (totalsMap[id] || 0) + v;
+                                    } catch (e) {}
+                                });
+                            }
+                        } catch (e) { /* ignore payments */ }
+                    }
+                } catch (e) { /* ignore totals aggregation errors */ }
+
                 // Map flexible fields to UI shape
                 const mapped = (all || []).map(o => {
                     const orderId = o.order_id ?? o.id ?? o.reference ?? o.number ?? null;
                     const dateRaw = o.date_ordered ?? o.created_at ?? o.createdAt ?? o.placed_at ?? null;
                     const status = o.status ?? o.order_status ?? 'In Progress';
-                    const amount = o.total_amount ?? o.total ?? o.amount ?? 0;
+                    const computed = orderId != null ? totalsMap[String(orderId)] : null;
+                    const amount = (o?.total_price != null && !Number.isNaN(Number(o.total_price)))
+                        ? Number(o.total_price)
+                        : ((computed != null && !Number.isNaN(Number(computed))) ? Number(computed) : (o.total_amount ?? o.total ?? o.amount ?? 0));
                     const uId = extractUserId(o);
                     // Prefer profile/auth-derived names first (like Account page), then inline order fields
                     let customer = '';
@@ -867,9 +911,24 @@ const OrdersList = () => {
         return () => { mounted = false; };
     }, []);
 
-    const filtered = rows.filter(r =>
-        String(r.id).toLowerCase().includes(search.toLowerCase()) ||
-        (r.customer || '').toLowerCase().includes(search.toLowerCase())
+    const q = String(externalSearch || '').trim().toLowerCase();
+
+    // Helper to normalize order status into three buckets used by the UI
+    const orderStatusLabel = (s) => {
+        if (s === 'Delivered') return 'Delivered';
+        if (s === 'Cancelled') return 'Cancelled';
+        return 'In Progress';
+    };
+
+    // Apply status filters first (if any), then search
+    let filtered = rows;
+    if (Array.isArray(statusFilters) && statusFilters.length > 0) {
+        const setSt = new Set(statusFilters);
+        filtered = filtered.filter(r => setSt.has(orderStatusLabel(r.status)));
+    }
+    filtered = filtered.filter(r =>
+        String(r.id).toLowerCase().includes(q) ||
+        (r.customer || '').toLowerCase().includes(q)
     );
 
     const statusBadge = (s) => {
@@ -881,51 +940,346 @@ const OrdersList = () => {
 
     const peso = (n) => `₱${Number(n).toFixed(2)}`;
 
+    // Helpers to fetch a single order's details and any linked address rows
+    const fetchAddressesByIds = async (ids = []) => {
+        if (!Array.isArray(ids) || ids.length === 0) return [];
+        const uniq = Array.from(new Set(ids.map(String).filter(Boolean)));
+        if (uniq.length === 0) return [];
+        const results = [];
+        try {
+            // Try to fetch by primary id
+            try {
+                const { data: byId, error: idErr } = await supabase.from('addresses').select('*').in('id', uniq);
+                if (!idErr && Array.isArray(byId)) results.push(...byId);
+            } catch (e) { /* ignore */ }
+            // Try to fetch by address_id column (some schemas use address_id as UUID)
+            try {
+                const { data: byAddrId, error: addrErr } = await supabase.from('addresses').select('*').in('address_id', uniq);
+                if (!addrErr && Array.isArray(byAddrId)) results.push(...byAddrId);
+            } catch (e) { /* ignore */ }
+            // De-dupe by primary key if both queries returned overlapping rows
+            const seen = new Set();
+            const deduped = [];
+            results.forEach(r => {
+                const key = String(r?.id ?? r?.address_id ?? Math.random());
+                if (seen.has(key)) return; seen.add(key);
+                deduped.push(r);
+            });
+            return deduped;
+        } catch (e) {
+            return [];
+        }
+    };
+
+    const isLikelyUuid = (v) => typeof v === 'string' && /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i.test(String(v));
+
+    const fetchShippingAddressRow = async (orderRow) => {
+        if (!orderRow) return { row: null, attempted: [] };
+        const seen = new Set();
+        const candidates = [];
+        const push = (value, label) => {
+            if (value === null || value === undefined) return;
+            const str = String(value).trim();
+            if (str === '') return;
+            const key = `${label || 'value'}:${str}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            candidates.push({ value: str, label: label || 'value' });
+        };
+
+        push(orderRow.shipping_address_id, 'shipping_address_id');
+        push(orderRow.address_id, 'address_id');
+        if (typeof orderRow.shipping_address === 'string' || typeof orderRow.shipping_address === 'number') {
+            push(orderRow.shipping_address, 'shipping_address');
+        }
+        try {
+            if (orderRow?.shipping?.address_id) push(orderRow.shipping.address_id, 'shipping.address_id');
+            if (orderRow?.shipping?.id) push(orderRow.shipping.id, 'shipping.id');
+        } catch (e) { /* ignore */ }
+
+        const attempted = [];
+        for (const cand of candidates) {
+            attempted.push(`${cand.label}:${cand.value}`);
+            try {
+                const { data, error } = await supabase.from('addresses').select('*').eq('address_id', cand.value).maybeSingle();
+                if (!error && data) return { row: data, attempted };
+            } catch (e) { /* ignore */ }
+            try {
+                const { data, error } = await supabase.from('addresses').select('*').eq('id', cand.value).maybeSingle();
+                if (!error && data) return { row: data, attempted };
+            } catch (e) { /* ignore */ }
+        }
+
+        return { row: null, attempted };
+    };
+
+    const fetchOrderDetails = async (orderId) => {
+        if (!orderId) return null;
+        try {
+            // Try multiple candidate columns
+            let res = await supabase.from('orders').select('*').eq('order_id', orderId).maybeSingle();
+            if (!res || res.error || !res.data) {
+                res = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
+            }
+            if (res && !res.error && res.data) {
+                const data = res.data;
+
+                const { row: shippingQuickRow, attempted: shippingQuickAttempts } = await fetchShippingAddressRow(data);
+                const candidateLog = Array.isArray(shippingQuickAttempts) ? [...shippingQuickAttempts] : [];
+                if (shippingQuickRow) {
+                    const result = { ...data };
+                    result.shipping_address_row = shippingQuickRow;
+                    result._resolved_addresses = [shippingQuickRow];
+                    result._address_candidates = candidateLog;
+                    return result;
+                }
+
+                // Collect possible address identifiers from the order row
+                const candidates = new Set();
+                const attemptedCandidates = [];
+                const push = (v, label) => { if (v !== null && v !== undefined && String(v).trim() !== '') { candidates.add(String(v)); if (label) attemptedCandidates.push(`${label}:${String(v)}`); else attemptedCandidates.push(String(v)); } };
+                // Common field names for address references
+                push(data.shipping_address_id, 'shipping_address_id');
+                push(data.billing_address_id, 'billing_address_id');
+                push(data.address_id, 'address_id');
+                // Sometimes the columns may contain UUIDs or numeric ids in shipping_address/billing_address
+                push(data.shipping_address, 'shipping_address');
+                push(data.billing_address, 'billing_address');
+                // Some schemas store nested objects with id fields
+                try {
+                    if (data?.shipping?.id) push(data.shipping.id, 'shipping.id');
+                    if (data?.billing?.id) push(data.billing.id, 'billing.id');
+                    if (data?.shipping?.address_id) push(data.shipping.address_id, 'shipping.address_id');
+                    if (data?.billing?.address_id) push(data.billing.address_id, 'billing.address_id');
+                } catch (e) { /* ignore */ }
+
+                const ids = Array.from(candidates).filter(Boolean);
+                let addrs = [];
+                if (ids.length > 0) {
+                    addrs = await fetchAddressesByIds(ids);
+                }
+                const attemptedSet = new Set(candidateLog);
+                attemptedCandidates.forEach(c => attemptedSet.add(c));
+                ids.forEach(id => attemptedSet.add(String(id)));
+                const attempted = Array.from(attemptedSet);
+
+                // If no addresses matched the id candidates, try common alternative lookups:
+                // 1) addresses.order_id == orderId (some schemas store addresses per-order)
+                // 2) addresses.user_id == data.user_id (addresses attached to the customer)
+                try {
+                    if ((!Array.isArray(addrs) || addrs.length === 0) && (orderId || data?.id || data?.order_id)) {
+                        // Try by order_id using different possible values
+                        const candidates = Array.from(new Set([String(orderId || ''), String(data?.id || ''), String(data?.order_id || '')].filter(Boolean)));
+                        candidates.forEach(c => attemptedSet.add(`order_id:${c}`));
+                        for (const cand of candidates) {
+                            try {
+                                const { data: byOrder, error: byOrderErr } = await supabase.from('addresses').select('*').eq('order_id', cand);
+                                if (!byOrderErr && Array.isArray(byOrder) && byOrder.length > 0) {
+                                    addrs.push(...byOrder);
+                                }
+                            } catch (e) { /* ignore per-candidate */ }
+                            if (addrs.length > 0) break;
+                        }
+                    }
+                } catch (e) { /* ignore */ }
+                try {
+                    if ((!Array.isArray(addrs) || addrs.length === 0) && data?.user_id) {
+                        const uid = String(data.user_id);
+                        attemptedSet.add(`user_id:${uid}`);
+                        const { data: byUser, error: byUserErr } = await supabase.from('addresses').select('*').eq('user_id', uid);
+                        if (!byUserErr && Array.isArray(byUser) && byUser.length > 0) addrs.push(...byUser);
+                    }
+                } catch (e) { /* ignore */ }
+
+                if (Array.isArray(addrs) && addrs.length > 0) {
+                    // De-duplicate
+                    const seen = new Set();
+                    const dedup = [];
+                    addrs.forEach(a => {
+                        const key = String(a?.id ?? a?.address_id ?? Math.random());
+                        if (seen.has(key)) return; seen.add(key);
+                        dedup.push(a);
+                    });
+
+                    const byId = {};
+                    const byAddressId = {};
+                    dedup.forEach(a => {
+                        if (a?.id != null) byId[String(a.id)] = a;
+                        if (a?.address_id) byAddressId[String(a.address_id)] = a;
+                    });
+
+                    const matchFor = (fieldVal) => {
+                        if (fieldVal == null) return null;
+                        const s = String(fieldVal);
+                        if (byId[s]) return byId[s];
+                        if (byAddressId[s]) return byAddressId[s];
+                        if (isLikelyUuid(s)) {
+                            const lower = s.toLowerCase();
+                            if (byId[lower]) return byId[lower];
+                            if (byAddressId[lower]) return byAddressId[lower];
+                        }
+                        return null;
+                    };
+
+                    const result = { ...data };
+                    result.shipping_address_row = matchFor(data.shipping_address_id) || matchFor(data.shipping_address) || matchFor(data.shipping?.id) || matchFor(data.shipping?.address_id) || dedup[0] || null;
+                    result.billing_address_row = matchFor(data.billing_address_id) || matchFor(data.billing_address) || matchFor(data.billing?.id) || matchFor(data.billing?.address_id) || (dedup.length > 1 ? dedup[1] : dedup[0]) || null;
+                    result._resolved_addresses = dedup;
+                    result._address_candidates = Array.from(attemptedSet);
+                    return result;
+                }
+
+                // attach attempted candidates for debugging even when no addresses resolved
+                try { data._address_candidates = Array.from(attemptedSet); } catch (e) {}
+                return data;
+            }
+        } catch (e) {
+            // ignore
+        }
+        return null;
+    };
+
+    const openViewModal = async (orderId) => {
+        setViewLoading(true);
+        setViewOrderDetails(null);
+        try {
+            const data = await fetchOrderDetails(orderId);
+            if (data) {
+                setViewOrderDetails(data);
+                setUpdateStatusValue(data.status ?? 'In Progress');
+            } else {
+                // fallback: find in rows
+                const fallback = rows.find(r => String(r.id) === String(orderId));
+                if (fallback) {
+                    setViewOrderDetails({ id: fallback.id, status: fallback.status, customer_name: fallback.customer });
+                    setUpdateStatusValue(fallback.status ?? 'In Progress');
+                }
+            }
+        } catch (e) {
+            // ignore
+        } finally {
+            setViewLoading(false);
+        }
+    };
+
+    const closeViewModal = () => { setViewOrderDetails(null); setShowUpdateModal(false); };
+
+    const cancelOrder = async (orderId) => {
+        try {
+            await supabase.from('orders').update({ status: 'Cancelled' }).or(`order_id.eq.${orderId},id.eq.${orderId}`);
+            // update local rows
+            setRows(prev => prev.map(r => (String(r.id) === String(orderId) ? { ...r, status: 'Cancelled' } : r)));
+            setViewOrderDetails(prev => prev ? { ...prev, status: 'Cancelled' } : prev);
+        } catch (e) {
+            console.error('Cancel order failed', e);
+        }
+    };
+
+    const saveUpdatedStatus = async () => {
+        if (!viewOrderDetails) return;
+        const orderId = viewOrderDetails.order_id ?? viewOrderDetails.id ?? viewOrderDetails.reference ?? viewOrderDetails.number;
+        try {
+            const { error } = await supabase.from('orders').update({ status: updateStatusValue }).or(`order_id.eq.${orderId},id.eq.${orderId}`);
+            if (!error) {
+                setRows(prev => prev.map(r => (String(r.id) === String(orderId) ? { ...r, status: updateStatusValue } : r)));
+                setViewOrderDetails(prev => prev ? { ...prev, status: updateStatusValue } : prev);
+                setShowUpdateModal(false);
+            }
+        } catch (e) {
+            console.error('Save status failed', e);
+        }
+    };
+
     return (
-        <div className="p-4">
-            <div className="flex items-center justify-between mb-3">
-                <h2 className="text-[24px] font-bold text-gray-900">Orders</h2>
-                <div className="relative w-[241px]">
-                    <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
-                        <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
-                            <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 3.473 9.8l3.613 3.614a.75.75 0 1 0 1.06-1.06l-3.614-3.614A5.5 5.5 0 0 0 9 3.5Zm-4 5.5a4 4 0 1 1 8 0 4 4 0 0 1-8 0Z" clipRule="evenodd" />
-                        </svg>
-                    </span>
-                    <input
-                        type="text"
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                        placeholder="Search order"
-                        className="w-[241px] pl-9 pr-3 py-2 border rounded-md text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-black/20"
-                    />
-                </div>
-            </div>
+        <div className="p-0 px-0">
+            <div className="flex items-center justify-between"></div>
 
-            {error && (
-                <div className="mb-2 text-red-600 text-sm">{error}</div>
-            )}
-            {loading && (
-                <div className="mb-2 text-gray-600 text-sm">Loading orders…</div>
-            )}
-
-            <div className="overflow-x-auto">
-                <table className="w-full table-fixed rounded-md">
+            
+            <div className="overflow-x-auto p-0">
+                <div className="h-[700px] overflow-y-auto">
+                    <table className="w-full table-fixed rounded-md">
                     <colgroup>
                         <col style={{ width: '16%' }} />
                         <col style={{ width: '22%' }} />
                         <col style={{ width: '18%' }} />
                         <col style={{ width: '18%' }} />
                         <col style={{ width: '16%' }} />
-                        <col style={{ width: '10%' }} />
+                        <col style={{ width: '12%' }} />
+                     
                     </colgroup>
-                    <thead className="sticky top-0 bg-[#DFE7F4]">
+                    <thead className="sticky top-0 bg-[#DFE7F4] border-b border-[#939393]">
                         <tr className="text-left text-[16px] text-gray-600">
                             <th className="px-4 py-2">Order ID</th>
                             <th className="px-4 py-2">Customer</th>
                             <th className="px-4 py-2">Date Ordered</th>
-                            <th className="px-4 py-2">Status</th>
+                            <th className="px-4 py-2">
+                                <div className="flex items-center gap-2">
+                                    <span>Status</span>
+                                    <div className="relative  p-0 z-30" ref={statusMenuRef}>
+                                        <button
+                                            type="button"
+                                            aria-label="Filter by status"
+                                            onClick={() => { setStatusDraft(statusFilters); setShowStatusDropdown(s => !s); }}
+                                            className="bg-transparent  focus:outline-none"
+                                        >
+                                            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="h-4 w-4 text-gray-600">
+                                                <path d="M6 9l6 6 6-6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                            </svg>
+                                        </button>
+                                        {showStatusDropdown && (
+                                            <div className="absolute left-[-50px] mt-2 w-[244px] rounded-md border bg-white shadow z-20">
+                                                <div className="p-3">
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="font-medium text-gray-800">Select Status</span>
+                                                    </div>
+                                                    <div className="max-h-60 overflow-y-auto py-1 pr-1">
+                                                        <div className="flex flex-wrap gap-2">
+                                                            {['Delivered','Cancelled','In Progress'].map(name => {
+                                                                const available = rows.some(r => orderStatusLabel(r.status) === name);
+                                                                const active = statusDraft.includes(name);
+                                                                const base = "px-3 py-1 rounded-full border border-black text-sm";
+                                                                if (!available) {
+                                                                    return (
+                                                                        <button key={name} type="button" disabled className={`${base} bg-gray-200 text-gray-400 cursor-not-allowed`}>{name}</button>
+                                                                    );
+                                                                }
+                                                                return (
+                                                                    <button
+                                                                        key={name}
+                                                                        type="button"
+                                                                        onClick={() => setStatusDraft(d => (d.includes(name) ? d.filter(x => x !== name) : [...d, name]))}
+                                                                        className={`${base} ${active ? 'bg-[#2B4269] text-white border-[#2B4269]' : 'text-gray-700 hover:bg-gray-50'}`}
+                                                                    >
+                                                                        {name}
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center justify-between mt-3 pt-2 border-t">
+                                                        <button
+                                                            type="button"
+                                                            className="px-3 py-1 rounded-md border border-black text-sm text-red-600 hover:bg-red-50"
+                                                            onClick={() => { setStatusDraft([]); setStatusFilters([]); setShowStatusDropdown(false); }}
+                                                        >
+                                                            Reset
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            className="px-3 py-1 rounded-md bg-[#2B4269] text-white text-sm"
+                                                            onClick={() => { setStatusFilters(statusDraft); setShowStatusDropdown(false); }}
+                                                        >
+                                                            Apply
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </th>
                             <th className="px-4 py-2">Total Amount</th>
-                            <th className="px-4 py-2">Action</th>
+                            <th className="px-4 py-2"></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -940,14 +1294,163 @@ const OrdersList = () => {
                                 <td className="px-4 py-3 align-top">{statusBadge(r.status)}</td>
                                 <td className="px-4 py-3 align-top text-gray-800">{peso(r.amount)}</td>
                                 <td className="px-4 py-3 align-top">
-                                    <button className="px-3 py-1 rounded-md border text-sm text-gray-700 hover:bg-gray-50">View</button>
+                                    <button onClick={() => openViewModal(r.id)} className="px-3 py-1 rounded-md w-[109px] border border-[#939393] text-sm text-gray-700 hover:bg-gray-50">View</button>
                                 </td>
                             </tr>
                         ))}
                         </tbody>
-                        </table>
+                    </table>
+                </div>
+
+            {/* View Order Modal */}
+            <Modal open={!!viewOrderDetails} onClose={closeViewModal}>
+                <div className="p-6 max-w-[520px]">
+                    {viewLoading ? (
+                        <div className="p-6 text-center">Loading…</div>
+                    ) : (
+                        <>
+                        <div className="mb-4">
+                            <div className="text-2xl font-bold text-[#12263F]">{`Order #${viewOrderDetails?.order_id ?? viewOrderDetails?.id ?? ''}`}</div>
+                            <div className="mt-3 flex items-center gap-3">
+                                <span className="inline-flex items-center px-2.5 py-1 rounded text-sm bg-yellow-100 text-yellow-800 font-medium">{viewOrderDetails?.status ?? 'In Progress'}</span>
+                                <button className="inline-flex items-center gap-2 text-sm border rounded px-2 py-1 text-gray-700 bg-white">
+                                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 9l6 6 6-6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                                    Print
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="mt-4 border-t border-dashed border-gray-200 pt-4">
+                            <h3 className="text-sm font-semibold text-[#12263F] mb-3">Contact</h3>
+                            <div className="grid grid-cols-2 gap-6">
+                                <div>
+                                    <div className="text-xs text-gray-500">Email Address</div>
+                                    <div className="text-sm text-blue-600 underline">
+                                        {
+                                            (viewOrderDetails?.shipping_address_row?.email)
+                                            || (viewOrderDetails?.billing_address_row?.email)
+                                            || viewOrderDetails?.customer_email
+                                            || viewOrderDetails?.email
+                                            || viewOrderDetails?.contact_email
+                                            || '—'
+                                        }
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="text-xs text-gray-500">Phone</div>
+                                    <div className="text-sm">
+                                        {
+                                            (viewOrderDetails?.shipping_address_row?.phone_number)
+                                            || (viewOrderDetails?.billing_address_row?.phone_number)
+                                            || viewOrderDetails?.phone
+                                            || viewOrderDetails?.contact_phone
+                                            || viewOrderDetails?.mobile
+                                            || '—'
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="mt-6 border-t border-dashed border-gray-200 pt-4">
+                            <h4 className="text-sm font-semibold mb-2">Shipping Address</h4>
+                            <div className="text-sm text-gray-700 leading-relaxed">
+                                {
+                                    (function() {
+                                        const a = viewOrderDetails?.shipping_address_row;
+                                        if (a && (a.street_address || a.first_name || a.last_name || a.city || a.province)) {
+                                            const lines = [];
+                                            const name = [a.first_name, a.last_name].filter(Boolean).join(' ').trim();
+                                            if (name) lines.push(name);
+                                            if (a.street_address) lines.push(a.street_address);
+                                            if (a.barangay) lines.push(a.barangay);
+                                            const cityLine = [a.city, a.province].filter(Boolean).join(', ').trim();
+                                            if (cityLine) lines.push(cityLine);
+                                            if (a.postal_code) lines.push(a.postal_code);
+                                            return lines.map((l,i) => (<div key={i}>{l}</div>));
+                                        }
+                                        // Fallback to plain text fields
+                                        const fallback = viewOrderDetails?.shipping_address || viewOrderDetails?.shipping || '—';
+                                        return String(fallback).split('\n').map((line, i) => (<div key={i}>{line || '—'}</div>));
+                                    })()
+                                }
+                            </div>
+                        </div>
+
+                        <div className="mt-4 border-t border-dashed border-gray-200 pt-4">
+                            <h4 className="text-sm font-semibold mb-2">Billing Address</h4>
+                            <div className="text-sm text-gray-700 leading-relaxed">
+                                {
+                                    (function() {
+                                        const a = viewOrderDetails?.billing_address_row;
+                                        if (a && (a.street_address || a.first_name || a.last_name || a.city || a.province)) {
+                                            const lines = [];
+                                            const name = [a.first_name, a.last_name].filter(Boolean).join(' ').trim();
+                                            if (name) lines.push(name);
+                                            if (a.street_address) lines.push(a.street_address);
+                                            if (a.barangay) lines.push(a.barangay);
+                                            const cityLine = [a.city, a.province].filter(Boolean).join(', ').trim();
+                                            if (cityLine) lines.push(cityLine);
+                                            if (a.postal_code) lines.push(a.postal_code);
+                                            return lines.map((l,i) => (<div key={i}>{l}</div>));
+                                        }
+                                        const fallback = viewOrderDetails?.billing_address || viewOrderDetails?.billing || '—';
+                                        return String(fallback).split('\n').map((line, i) => (<div key={i}>{line || '—'}</div>));
+                                    })()
+                                }
+                            </div>
+                        </div>
+
+                      
+
+                        <div className="mt-6 pt-4 border-t flex items-center justify-between gap-4">
+                            <button className="bg-[#9E3E3E] hover:bg-[#873434] text-white px-4 py-2 rounded-md font-semibold" onClick={() => cancelOrder(viewOrderDetails?.order_id ?? viewOrderDetails?.id)}>CANCEL ORDER</button>
+                            <div className="flex items-center gap-3">
+                                <button className="px-4 py-2 border border-gray-300 rounded-md text-sm" onClick={closeViewModal}>CLOSE</button>
+                                <button className="px-4 py-2 bg-[#1F3A57] hover:bg-[#172a41] text-white rounded-md font-semibold" onClick={() => setShowUpdateModal(true)}>UPDATE</button>
+                            </div>
+                        </div>
+                        {/* Debug info: show attempted address candidate keys and any resolved address rows */}
+                        {viewOrderDetails?._address_candidates && (
+                            <details className="mt-3 text-xs text-gray-500">
+                                <summary>Debug: address lookup</summary>
+                                <div className="mt-2">
+                                    <div><strong>candidates:</strong> {String((viewOrderDetails._address_candidates || []).join(', ') || 'none')}</div>
+                                    <div className="mt-2"><strong>resolved:</strong>
+                                        <pre className="whitespace-pre-wrap bg-gray-50 p-2 rounded mt-1">{JSON.stringify(viewOrderDetails._resolved_addresses || [], null, 2)}</pre>
+                                    </div>
+                                </div>
+                            </details>
+                        )}
+                        </>
+                    )}
+                </div>
+            </Modal>
+
+            {/* Update Status Modal */}
+            <Modal open={showUpdateModal} onClose={() => setShowUpdateModal(false)}>
+                <div className="p-6 max-w-[420px]">
+                    <div className="text-xl font-bold text-[#12263F] mb-4">{`Order #${viewOrderDetails?.order_id ?? viewOrderDetails?.id ?? ''}`}</div>
+                    <div className="mb-4">
+                        <label className="block text-sm text-gray-700 mb-2">Status</label>
+                        <div className="flex items-center gap-3">
+                            <select value={updateStatusValue} onChange={(e) => setUpdateStatusValue(e.target.value)} className="border rounded px-3 py-2 text-sm">
+                                <option>In Progress</option>
+                                <option>Delivered</option>
+                                <option>Cancelled</option>
+                            </select>
+                            <button className="px-3 py-2 border rounded text-sm">Print</button>
+                        </div>
                     </div>
-            </div>
+                    <div className="flex items-center gap-3">
+                        <button className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md font-semibold" onClick={saveUpdatedStatus}>SAVE</button>
+                        <button className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md" onClick={() => setShowUpdateModal(false)}>CANCEL</button>
+                    </div>
+                </div>
+            </Modal>
+
+        </div>
+        </div>
     );
 };
 
@@ -1190,8 +1693,7 @@ const ProductsList = ({ externalSearch = '' }) => {
 
     return (
         <div className="">
-            {error && <div className="mb-2 text-red-600 text-sm">{error}</div>}
-            {loading && <div className="mb-2 text-gray-600 text-sm">Loading products…</div>}
+            
             <div className="overflow-x-auto p-0">
                 <div className="h-[700px] overflow-y-auto">
                     <table className="w-full table-fixed rounded-md">
@@ -1214,7 +1716,7 @@ const ProductsList = ({ externalSearch = '' }) => {
                                             type="button"
                                             aria-label="Filter by category"
                                             onClick={() => { setCategoryDraft(selectedCategories); setShowCategoryDropdown((s) => !s); }}
-                                            className="bg-transparent focus:outline-none border border-black"
+                                            className="bg-transparent focus:outline-none "
                                         >
                                             <svg
                                                 aria-hidden="true"
@@ -1288,7 +1790,7 @@ const ProductsList = ({ externalSearch = '' }) => {
                                             type="button"
                                             aria-label="Filter by status"
                                             onClick={() => { setStatusDraft(statusFilters); setShowStatusDropdown(s => !s); }}
-                                            className="bg-transparent focus:outline-none border border-black"
+                                            className="bg-transparent focus:outline-none "
                                         >
                                             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="h-4 w-4 text-gray-600">
                                                 <path d="M6 9l6 6 6-6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -1388,7 +1890,7 @@ const ProductsList = ({ externalSearch = '' }) => {
                                 <td className="px-8 py-3 align-center text-gray-800">{p.total_stock ?? 0}</td>
                                 <td className="px-4 py-3 align-center">{statusBadge(p.status)}</td>
                                 <td className="px-4 py-3 align-center">
-                                    <button className="px-3 py-1 rounded-md border text-sm text-gray-700 hover:bg-gray-50">View</button>
+                                    <button className="px-3 py-1 rounded-md w-[109px] border border-[#939393] text-sm text-gray-700 hover:bg-gray-50">View</button>
                                 </td>
                             </tr>
                         ))}
@@ -1936,17 +2438,25 @@ const StocksList = ({ externalSearch = '' }) => {
 
     return (
         <div>
-            {loading && (<div className="text-gray-600 px-4 py-2">Loading inventory...</div>)}
-           
+            {loading && (
+                <div className="flex items-center gap-2 text-gray-600 px-4 py-2">
+                    <svg className="h-4 w-4 animate-spin text-gray-500" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                    </svg>
+                    <span>Loading inventory…</span>
+                </div>
+            )}
+                     
         <div className="overflow-x-auto p-0">
             <div className="h-[700px] overflow-y-auto">
                 <table className="w-full table-fixed rounded rounded-md ">
                     <colgroup>
                         <col style={{ width: '15%' }} />
-                        <col style={{ width: '12%' }} />
-                        <col style={{ width: '10%' }} />
-                        <col style={{ width: '10%' }} />
                         <col style={{ width: '8%' }} />
+                        <col style={{ width: '7%' }} />
+                        <col style={{ width: '8%' }} />
+                        <col style={{ width: '7%' }} />
                         <col style={{ width: '8%' }} />
                         <col style={{ width: '10%' }} />
                     </colgroup>
@@ -1961,7 +2471,7 @@ const StocksList = ({ externalSearch = '' }) => {
                                             type="button"
                                             aria-label="Filter by category"
                                             onClick={() => { setCategoryDraft(selectedCategories); setShowCategoryDropdown((s) => !s); }}
-                                            className="bg-transparent focus:outline-none border border-black"
+                                            className="bg-transparent focus:outline-none "
                                         >
                                             <svg
                                                 aria-hidden="true"
@@ -2039,7 +2549,7 @@ const StocksList = ({ externalSearch = '' }) => {
                                                 // initialize draft from applied filters when opening
                                                 setVariantDraft(prev => (prev && prev.length ? prev : variantFilters));
                                             }}
-                                            className="bg-transparent focus:outline-none border border-black"
+                                            className="bg-transparent focus:outline-none "
                                         >
                                             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="h-4 w-4 text-gray-600">
                                                 <path d="M6 9l6 6 6-6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -2124,7 +2634,7 @@ const StocksList = ({ externalSearch = '' }) => {
                                             type="button"
                                             aria-label="Filter by status"
                                             onClick={() => { setStatusDraft(statusFilters); setShowStatusDropdown(s => !s); }}
-                                            className="bg-transparent focus:outline-none border border-black"
+                                            className="bg-transparent focus:outline-none "
                                         >
                                             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="h-4 w-4 text-gray-600">
                                                 <path d="M6 9l6 6 6-6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -2194,7 +2704,7 @@ const StocksList = ({ externalSearch = '' }) => {
                     <tbody>
                     {filteredRows.map(r => (
                         <tr key={r.inventory_id || r.combination_id} className="border-t">
-                            <td className="px-4 py-3 align-top">
+                            <td className="px-4 py-3 align-middle">
                                 <div className="flex items-center gap-3">
                                     <img
                                         src={(() => {
@@ -2224,11 +2734,11 @@ const StocksList = ({ externalSearch = '' }) => {
                                 </div>
                             </td>
 
-                            <td className="px-4 py-3 align-center text-gray-700">{r.product?.category || '—'}</td>
+                            <td className="px-4 py-3 align-middle text-gray-700">{r.product?.category || '—'}</td>
 
-                            <td className="px-4 py-3 align-center text-gray-800">{r.product?.price != null ? `₱${Number(r.product.price).toFixed(2)}` : '—'}</td>
+                            <td className="px-4 py-3 align-middle text-gray-800">{r.product?.price != null ? `₱${Number(r.product.price).toFixed(2)}` : '—'}</td>
 
-                            <td className="px-4 py-3 align-center text-gray-700">
+                            <td className="px-4 py-3 align-middle text-gray-700">
                                 {Array.isArray(r.variantList) && r.variantList.length > 0 ? (
                                     <div className="flex flex-col gap-0.5">
                                         {r.variantList.map((v, idx) => (
@@ -2238,7 +2748,7 @@ const StocksList = ({ externalSearch = '' }) => {
                                 ) : (r.variantDesc || '—')}
                             </td>
 
-                            <td className="px-8 py-3 align-centertext-gray-800">
+                            <td className="px-8 py-3 align-middle text-gray-800">
                                 {editingInventory && (editingInventory.inventory_id === r.inventory_id || editingInventory.combination_id === r.combination_id) ? (
                                     <div className="flex items-center border rounded-md overflow-hidden w-fit">
                                         <button className="px-2" onClick={() => setEditQuantity(q => {
@@ -2270,7 +2780,7 @@ const StocksList = ({ externalSearch = '' }) => {
                                 )}
                             </td>
 
-                            <td className="px-4 py-3 align-center">
+                            <td className="px-4 py-3 align-middle">
                                 {((r.quantity ?? 0) <= 0) ? (
                                     <span className="inline-flex items-center px-2 py-1 rounded text-sm bg-red-100 text-red-700">Out of Stock</span>
                                 ) : ((r.low_stock_limit != null && (r.quantity ?? 0) <= r.low_stock_limit) ? (
@@ -2280,7 +2790,7 @@ const StocksList = ({ externalSearch = '' }) => {
                                 ))}
                             </td>
 
-                            <td className="px-4 py-3 align-top">
+                            <td className="px-4 py-3 align-middle">
                                 {editingInventory && (editingInventory.inventory_id === r.inventory_id || editingInventory.combination_id === r.combination_id) ? (
                                     <div className="flex items-center gap-2">
                                         <button
@@ -2405,6 +2915,7 @@ const AdminContents = () => {
     const [selected, setSelected] = useState('Dashboard');
     const [stocksSearch, setStocksSearch] = useState('');
     const [productsSearch, setProductsSearch] = useState('');
+    const [ordersSearch, setOrdersSearch] = useState('');
     const [showAddProduct, setShowAddProduct] = useState(false);
 
     // Create product and link variants in Supabase
@@ -2602,6 +3113,24 @@ const AdminContents = () => {
                             </button>
                         </div>
                     )}
+                    {selected === 'Orders' && (
+                        <div className="flex items-center gap-3 w-full max-w-md justify-end">
+                            <div className="relative w-[241px]">
+                                <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
+                                    <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
+                                        <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 3.473 9.8l3.613 3.614a.75.75 0 1 0 1.06-1.06l-3.614-3.614A5.5 5.5 0 0 0 9 3.5Zm-4 5.5a4 4 0 1 1 8 0 4 4 0 0 1-8 0Z" clipRule="evenodd" />
+                                    </svg>
+                                </span>
+                                <input
+                                    type="text"
+                                    value={ordersSearch}
+                                    onChange={(e) => setOrdersSearch(e.target.value)}
+                                    placeholder="Search order id or customer"
+                                    className="w-[241px] pl-9 pr-3 py-2 border rounded-md text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-black/20"
+                                />
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -2620,7 +3149,8 @@ const AdminContents = () => {
                 </div>
 
                 <div style={{ display: selected === 'Orders' ? 'block' : 'none' }} className={`${containerClass} mt-6`}>
-                    <OrdersList />
+                    <OrdersList externalSearch={ordersSearch} />
+                    
                 </div>
             </div>
         </div>

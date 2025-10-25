@@ -185,7 +185,7 @@ const Header = () => {
                     alt="Favorites"
                     className="transition duration-200 w-6 h-6 laptop:w-5 laptop:h-5"
                 />
-                <span className="hidden semi-bigscreen:inline ml-2 font-dm-sans">Favorites</span>
+                <span className="hidden semi-bigscreen:inline ml-2 font-dm-sans ">Favorites</span>
                 </button>
 
                 <button

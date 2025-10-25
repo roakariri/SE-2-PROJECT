@@ -5,6 +5,8 @@ import { supabase } from "../../supabaseClient";
 
 const SUPABASE_PROJECT_REF = "abcd1234";
 
+const PENDING_REDIRECT_KEY = 'postRefreshRedirect';
+
 const Navigation = () => {
 
   const dropdownHideTimer = React.useRef(null);
@@ -75,12 +77,32 @@ const Navigation = () => {
     return () => { active = false; };
   }, [searchTerm]);
 
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+  window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    const pendingPath = sessionStorage.getItem(PENDING_REDIRECT_KEY);
+    if (!pendingPath) return;
+    sessionStorage.removeItem(PENDING_REDIRECT_KEY);
+    if (pendingPath !== location.pathname) {
+      navigate(pendingPath, { replace: true });
+    }
+  }, [navigate, location.pathname]);
+
   const handleSearch = (e) => {
     e.preventDefault();
     setShowSuggestions(false);
     if (searchTerm.trim() !== "") {
       navigate(`/search?q=${encodeURIComponent(searchTerm.trim())}`);
     }
+  };
+
+  const refreshThenNavigate = (path) => {
+    if (typeof window === 'undefined') {
+      navigate(path);
+      return;
+    }
+    sessionStorage.setItem(PENDING_REDIRECT_KEY, path);
+    window.location.reload();
   };
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -193,7 +215,7 @@ const Navigation = () => {
             <div className="flex items-center gap-2 phone:gap-[45px] laptop:gap-1 justify-center phone:mt-1 laptop:mt-0 biggest:mr-[-300px]">
                 <button
                 className="flex items-center focus:outline-none focus:ring-0 font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]"
-                onClick={() => navigate("/mockup-tool")}
+                onClick={() => refreshThenNavigate("/mockup-tool")}
                 onMouseEnter={() => setIsProjectsHovered(true)}
                 onMouseLeave={() => setIsProjectsHovered(false)}
                 >
@@ -211,7 +233,7 @@ const Navigation = () => {
 
                 <button
                 className="flex items-center focus:outline-none focus:ring-0 font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]"
-                onClick={() => navigate("/favorites")}
+                onClick={() => refreshThenNavigate("/favorites")}
                 onMouseEnter={() => setIsFavoritesHovered(true)}
                 onMouseLeave={() => setIsFavoritesHovered(false)}
                 >
@@ -229,7 +251,7 @@ const Navigation = () => {
 
                 <button
                 className="flex items-center focus:outline-none focus:ring-0 font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]"
-                onClick={() => navigate("/cart")}
+                onClick={() => refreshThenNavigate("/cart")}
                 onMouseEnter={() => setIsCartHovered(true)}
                 onMouseLeave={() => setIsCartHovered(false)}
                 >
@@ -248,7 +270,7 @@ const Navigation = () => {
                 <button
                   type="button"
                   className="flex items-center semi-bigscreen:ml-2 focus:outline-none focus:ring-0 font-bold font-dm-sans bg-white text-black text-[16px] hover:text-[#c4c4c4]"
-                  onClick={() => navigate('/account?tab=orders')}
+                  onClick={() => refreshThenNavigate('/account?tab=orders')}
                 >
                   <img
                     src={profilePhotoUrl || DEFAULT_AVATAR}

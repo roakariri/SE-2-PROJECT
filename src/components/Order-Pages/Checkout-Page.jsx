@@ -706,6 +706,111 @@ const CheckoutPage = () => {
         }
       }
 
+      // Link uploaded_files rows to this order by setting uploaded_files.order_id
+      try {
+        // 1) Precise: link by uploaded_files primary id gathered from checkout items
+        const idsFromItems = Array.from(new Set(
+          (orderedItems || [])
+            .flatMap((it) => Array.isArray(it.uploaded_files) ? it.uploaded_files : [])
+            .map((f) => f?.id || f?.file_id)
+            .filter(Boolean)
+        ));
+        if (idsFromItems.length > 0) {
+          // Try updating by file_id (primary key in this table). If your schema also has an 'id' column,
+          // both updates will be harmless; otherwise the non-existing-column query simply affects 0 rows.
+          let totalLinkedByIds = 0;
+          try {
+            const { data: upByFileId, error: eByFileId } = await supabase
+              .from('uploaded_files')
+              .update({ order_id: orderId })
+              .in('file_id', idsFromItems)
+              .eq('user_id', session.user.id)
+              .is('order_id', null)
+              .select();
+            if (eByFileId) console.warn('uploaded_files link by file_id failed', eByFileId);
+            else totalLinkedByIds += Array.isArray(upByFileId) ? upByFileId.length : 0;
+          } catch (e) {
+            console.warn('uploaded_files link by file_id threw', e);
+          }
+          try {
+            const { data: upById, error: eById } = await supabase
+              .from('uploaded_files')
+              .update({ order_id: orderId })
+              .in('id', idsFromItems)
+              .eq('user_id', session.user.id)
+              .is('order_id', null)
+              .select();
+            if (eById) console.warn('uploaded_files link by id failed', eById);
+            else totalLinkedByIds += Array.isArray(upById) ? upById.length : 0;
+          } catch (e) {
+            console.warn('uploaded_files link by id threw', e);
+          }
+          console.info('uploaded_files linked by ids (file_id/id)', { count: totalLinkedByIds });
+        }
+
+        // 2) Fallback: link by cart_id for selected carts
+        if ((selectedCartIds || []).length > 0) {
+          const { data: upByCart, error: eByCart } = await supabase
+            .from('uploaded_files')
+            .update({ order_id: orderId })
+            .in('cart_id', selectedCartIds)
+            .eq('user_id', session.user.id)
+            .is('order_id', null)
+            .select();
+          if (eByCart) console.warn('uploaded_files link by cart_id failed', eByCart);
+          else console.info('uploaded_files linked by cart_id', { count: Array.isArray(upByCart) ? upByCart.length : 0 });
+        }
+
+        // 3) Last-resort: link by user + product_ids present in this order (narrow to only null order_id)
+        const prodIds = Array.from(new Set((orderedItems || []).map((it) => it.product_id).filter(Boolean)));
+        if (session?.user?.id && prodIds.length > 0) {
+          const { data: candidates, error: candErr } = await supabase
+            .from('uploaded_files')
+            // Use file_id which is guaranteed in schema; avoid selecting a possibly non-existent 'id' column
+            .select('file_id, product_id, order_id')
+            .eq('user_id', session.user.id)
+            .in('product_id', prodIds)
+            .is('order_id', null)
+            .limit(1000);
+          if (!candErr && Array.isArray(candidates) && candidates.length > 0) {
+            // Try linking by file_id first, then attempt the generic 'id' column as a best-effort fallback
+            const candidateFileIds = candidates.map((r) => r.file_id ?? r.id).filter(Boolean);
+            if (candidateFileIds.length > 0) {
+              let totalLinkedByProd = 0;
+              try {
+                const { data: upByProdFile, error: eByProdFile } = await supabase
+                  .from('uploaded_files')
+                  .update({ order_id: orderId })
+                  .in('file_id', candidateFileIds)
+                  .eq('user_id', session.user.id)
+                  .is('order_id', null)
+                  .select();
+                if (eByProdFile) console.warn('uploaded_files link by product_id (file_id) failed', eByProdFile);
+                else totalLinkedByProd += Array.isArray(upByProdFile) ? upByProdFile.length : 0;
+              } catch (e) {
+                console.warn('uploaded_files link by product_id (file_id) threw', e);
+              }
+              try {
+                const { data: upByProd, error: eByProd } = await supabase
+                  .from('uploaded_files')
+                  .update({ order_id: orderId })
+                  .in('id', candidateFileIds)
+                  .eq('user_id', session.user.id)
+                  .is('order_id', null)
+                  .select();
+                if (eByProd) console.warn('uploaded_files link by product_id (id) failed', eByProd);
+                else totalLinkedByProd += Array.isArray(upByProd) ? upByProd.length : 0;
+              } catch (e) {
+                console.warn('uploaded_files link by product_id (id) threw', e);
+              }
+              console.info('uploaded_files linked by product_id', { count: totalLinkedByProd });
+            }
+          }
+        }
+      } catch (linkErr) {
+        console.warn('Linking uploaded_files to order failed (non-fatal)', linkErr);
+      }
+
       // Decrement inventory based on purchased quantities (aggregate per combination)
       try {
         // 1) Build cart_id -> qty ordered

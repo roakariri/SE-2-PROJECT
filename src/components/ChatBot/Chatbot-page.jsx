@@ -60,6 +60,12 @@ const ChatbotPage = () => {
 
   const [suggestions, setSuggestions] = useState([]);
 
+  const faqPreview = [
+    "Where can I see my orders?",
+    "How do I track my delivery?",
+    "What payment methods do you accept?"
+  ];
+
   const toggleChatbot = () => {
     setIsOpen(!isOpen);
   };
@@ -80,6 +86,21 @@ const ChatbotPage = () => {
     setSuggestions([]);
   };
 
+  const appendMessagePair = (question) => {
+    const answer = faqs[question];
+    if (answer) {
+      setMessages(prev => [...prev, { text: question, sender: 'user' }, { text: answer, sender: 'bot' }]);
+    } else {
+      setMessages(prev => [...prev, { text: question, sender: 'user' }, { text: "I'm sorry, I don't have an answer for that. Please contact support at goodprintsgreatprints@gmail.com", sender: 'bot' }]);
+    }
+  };
+
+  const handleFaqClick = (question) => {
+    appendMessagePair(question);
+    setSuggestions([]);
+    setInput('');
+  };
+
   const handleSend = () => {
     const trimmed = input.trim();
     switch (trimmed) {
@@ -87,12 +108,7 @@ const ChatbotPage = () => {
         alert('Please enter a message.');
         break;
       default:
-        const answer = faqs[trimmed];
-        if (answer) {
-          setMessages(prev => [...prev, { text: trimmed, sender: 'user' }, { text: answer, sender: 'bot' }]);
-        } else {
-          setMessages(prev => [...prev, { text: trimmed, sender: 'user' }, { text: "I'm sorry, I don't have an answer for that. Please contact support at goodprintsgreatprints@gmail.com", sender: 'bot' }]);
-        }
+        appendMessagePair(trimmed);
         setInput('');
         setSuggestions([]);
         break;
@@ -156,12 +172,39 @@ const ChatbotPage = () => {
 
             {/* Messages area */}
             <div className="flex-1 p-4 overflow-y-auto">
-              <div className="text-center text-gray-500 text-sm mb-4">
-                Welcome to Good Print Great Prints support!
+              <div className="flex items-start gap-3 mb-4">
+                <div className="w-10 h-10 rounded-full bg-[#2B4269] text-white flex items-center justify-center font-semibold text-sm">
+                  🤖
+                </div>
+                <div className="space-y-3 w-full">
+                  <div className="bg-[#D7DEED] text-[#12263F] rounded-xl px-4 py-3 text-sm leading-relaxed">
+                    Hello! I can answer questions about products, orders, or printing. What’s on your mind?
+                  </div>
+                  <div className="bg-[#D7DEED] text-[#12263F] rounded-xl px-4 py-3">
+                    <div className="font-semibold text-sm mb-2">FAQ</div>
+                    <div className="space-y-2 text-sm">
+                      {faqPreview.map((question, idx) => (
+                        <button
+                          key={question}
+                          type="button"
+                          onClick={() => handleFaqClick(question)}
+                          className="w-full text-left text-[#12263F] hover:text-[#2B4269]"
+                        >
+                          <span className="border-t border-[#B8C2DA] block pt-2 first:border-t-0 first:pt-0">
+                            {idx + 1}. {question}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
               </div>
               {messages.map((msg, index) => (
-                <div key={index} className={`mb-2 ${msg.sender === 'user' ? 'text-right' : 'text-left'}`}>
-                  <div className={`inline-block px-3 py-2 rounded-lg text-sm ${msg.sender === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-800'}`}>
+                <div key={index} className={`mb-3 flex ${msg.sender === 'bot' ? 'items-start gap-3' : 'justify-end'}`}>
+                  {msg.sender === 'bot' && (
+                    <div className="w-9 h-9 rounded-full bg-[#2B4269] text-white flex items-center justify-center text-sm font-semibold">🤖</div>
+                  )}
+                  <div className={`max-w-[75%] px-3 py-2 rounded-lg text-sm leading-relaxed ${msg.sender === 'user' ? 'bg-[#2B4269] text-white ml-auto' : 'bg-[#E9EDF7] text-[#12263F]'}`}>
                     {msg.text}
                   </div>
                 </div>
@@ -171,7 +214,7 @@ const ChatbotPage = () => {
             {/* Input area */}
             <div className="p-4 border-t border-gray-200 relative">
               {suggestions.length > 0 && (
-                <div className="absolute bottom-full left-0 right-0 bg-white border border-gray-300 rounded-t-lg shadow-lg max-h-40 overflow-y-auto z-10">
+                <div className="absolute bottom-full left-0 right-0 bg-white border border-gray-300 rounded-t-lg shadow-lg h-[110px] overflow-y-auto z-10">
                   {suggestions.map((suggestion, index) => (
                     <div
                       key={index}
@@ -194,7 +237,7 @@ const ChatbotPage = () => {
                 />
                 <button
                   onClick={handleSend}
-                  className="absolute right-2 top-1/2 transform -translate-y-1/2 w-[45px] h-[18px] bg-blue-600 p-0 rounded-sm text-[12px] bg-transparent border border-[#939393] text-[#939393] hover:bg-[#939393] hover:text-white transition-colors"
+                  className="absolute right-2 top-1/2 transform -translate-y-1/2 px-3 py-1 rounded-sm text-[12px] bg-[#2B4269] text-white hover:bg-[#1b2c46] transition-colors"
                 >
                   Send
                 </button>

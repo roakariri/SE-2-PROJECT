@@ -19,10 +19,9 @@ const formatDisplayPHMobile = (value) => {
 		let local10 = digits;
 		if (local10.startsWith("63")) local10 = local10.slice(2);
 		if (local10.startsWith("0")) local10 = local10.slice(1);
-		// Ensure we only show last 10 digits and it starts with 9
+		// Ensure we only show last 10 digits
 		if (local10.length > 10) local10 = local10.slice(-10);
 		if (local10 && !local10.startsWith("9") && local10.length === 10) {
-			// If it doesn't start with 9, just return raw best-effort under +63
 			return `+63 ${local10}`;
 		}
 		return local10 ? `+63 ${local10}` : "";
@@ -359,7 +358,22 @@ const OrderConfirmationPage = () => {
 						const userId = session?.user?.id;
 						const createdAt = ord?.created_at ? new Date(ord.created_at).toISOString() : null;
 						const normalizeFiles = (arr) => (arr || []).map(f => ({ ...f, id: f.id ?? f.file_id, file_id: f.file_id ?? f.id }));
-						// Attempt 1: by cart_id (from Checkout selection) for the same product
+						// Attempt 1: by order_id for the same product (set during checkout)
+						if (ord?.order_id && it.product_id) {
+							try {
+								const { data: filesByOrder, error: filesByOrderErr } = await supabase
+									.from('uploaded_files')
+									.select('*')
+									.eq('order_id', ord.order_id)
+									.eq('product_id', it.product_id)
+									.order('uploaded_at', { ascending: false })
+									.limit(10);
+								if (!filesByOrderErr && Array.isArray(filesByOrder) && filesByOrder.length > 0) {
+									uploadedFilesForItem = normalizeFiles(filesByOrder);
+								}
+							} catch {}
+						}
+						// Attempt 2: by cart_id (from Checkout selection) for the same product
 						if (Array.isArray(selectedCartIds) && selectedCartIds.length > 0 && it.product_id) {
 							try {
 								const { data: filesByCart, error: filesByCartErr } = await supabase
@@ -378,7 +392,7 @@ const OrderConfirmationPage = () => {
 								}
 							} catch {}
 						}
-						// Attempt 2: by user_id + product_id
+						// Attempt 3: by user_id + product_id
 						if ((!uploadedFilesForItem || uploadedFilesForItem.length === 0) && userId && it.product_id) {
 							let q = supabase
 								.from('uploaded_files')
@@ -391,7 +405,7 @@ const OrderConfirmationPage = () => {
 							if (!filesErr && Array.isArray(files)) {
 								let pool = files;
 								if (createdAt) {
-									pool = files.filter(f => {
+									pool = files.filter((f) => {
 										try { return new Date(f.uploaded_at).getTime() <= new Date(createdAt).getTime(); } catch { return true; }
 									});
 								}
