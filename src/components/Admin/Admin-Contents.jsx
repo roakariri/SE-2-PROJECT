@@ -34,6 +34,117 @@ const normalizeHexCode = (value) => {
     return hexRegex.test(s) ? s : value;
 };
 
+// Color helpers (translate hex/rgb to friendly names) reused from Order pages
+const hexToRgb = (hex) => {
+    if (typeof hex !== "string") return null;
+    let h = hex.trim();
+    if (h.startsWith("#")) h = h.slice(1);
+    if (h.length === 3) {
+        h = h.split("").map((c) => c + c).join("");
+    }
+    if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
+    const num = parseInt(h, 16);
+    return { r: (num >> 16) & 255, g: (num >> 8) & 255, b: num & 255 };
+};
+const rgbToHsl = ({ r, g, b }) => {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let h, s, l = (max + min) / 2;
+    if (max === min) { h = 0; s = 0; }
+    else {
+        const d = max - min;
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        switch (max) {
+            case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+            case g: h = (b - r) / d + 2; break;
+            case b: h = (r - g) / d + 4; break;
+        }
+        h *= 60;
+    }
+    return { h, s, l };
+};
+const describeColor = ({ h, s, l }) => {
+    if (s < 0.1) {
+        if (l < 0.08) return "black";
+        if (l < 0.2) return "very dark gray";
+        if (l < 0.35) return "dark gray";
+        if (l < 0.65) return "gray";
+        if (l < 0.85) return "light gray";
+        return "white";
+    }
+    let name = "";
+    if (h < 15 || h >= 345) name = "red";
+    else if (h < 45) name = "orange";
+    else if (h < 75) name = "yellow";
+    else if (h < 95) name = "lime";
+    else if (h < 150) name = "green";
+    else if (h < 195) name = "cyan";
+    else if (h < 255) name = "blue";
+    else if (h < 285) name = "purple";
+    else if (h < 345) name = "magenta";
+    let prefix = "";
+    if (l < 0.25) prefix = "dark ";
+    else if (l > 0.7) prefix = "light ";
+    else if (s > 0.8 && l > 0.3 && l < 0.6) prefix = "vivid ";
+    return (prefix + name).trim();
+};
+const toColorNameIfHex = (group, value) => {
+    const normalizeHex = (val) => {
+        const raw = String(val || '').trim();
+        if (!raw) return null;
+        let s = raw.startsWith('#') ? raw.slice(1) : raw;
+        if (/^[0-9a-fA-F]{3}$/.test(s)) s = s.split('').map(c => c + c).join('');
+        if (!/^[0-9a-fA-F]{6}$/.test(s)) return null;
+        return `#${s.toUpperCase()}`;
+    };
+    const HEX_NAME_MAPS = {
+        'color': {
+            '#000000': 'Black', '#FFFFFF': 'White', '#FAF9F6': 'Off-White', '#EDE8D0': 'Beige', '#808080': 'Gray', '#4169E1': 'Blue', '#C40233': 'Red'
+        },
+        'strap color': {
+            '#000000': 'Black', '#FFFFFF': 'White', '#FAF9F6': 'Off-White', '#4169E1': 'Blue', '#C40233': 'Red', '#228B22': 'Green', '#EDE8D0': 'Beige'
+        },
+        'accessories color': {
+            '#FFD700': 'Gold', '#C0C0C0': 'Silver', '#000000': 'Black', '#FFFFFF': 'White', '#FFC0CB': 'Pink', '#4169E1': 'Blue', '#228B22': 'Green', '#800080': 'Purple'
+        },
+        'trim color': {
+            '#000000': 'Black', '#FFFFFF': 'White', '#4169E1': 'Blue', '#C40233': 'Red'
+        }
+    };
+    const groupKey = (() => {
+        const g = String(group || '').toLowerCase();
+        if (g === 'color') return 'color';
+        if (g.includes('strap')) return 'strap color';
+        if (g.includes('accessories color')) return 'accessories color';
+        if (g.includes('accessories') && g.includes('color')) return 'accessories color';
+        if (g.includes('trim') && g.includes('color')) return 'trim color';
+        if (g === 'trim color') return 'trim color';
+        return null;
+    })();
+    const nx = normalizeHex(value);
+    if (groupKey && nx && HEX_NAME_MAPS[groupKey] && HEX_NAME_MAPS[groupKey][nx]) {
+        return HEX_NAME_MAPS[groupKey][nx];
+    }
+    const capFirst = (s) => (typeof s === 'string' && s.length > 0) ? (s[0].toUpperCase() + s.slice(1)) : s;
+    if (!value) return value;
+    const val = String(value).trim();
+    const looksHex = /^#?[0-9a-fA-F]{3}$/.test(val) || /^#?[0-9a-fA-F]{6}$/.test(val);
+    const groupIsColor = typeof group === 'string' && /color/i.test(group);
+    if (looksHex) {
+        const rgb = hexToRgb(val.startsWith('#') ? val : `#${val}`);
+        if (rgb) return capFirst(describeColor(rgbToHsl(rgb)));
+    }
+    const m = val.match(/^rgb\s*\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/i);
+    if (m) {
+        const r = Math.max(0, Math.min(255, parseInt(m[1], 10)));
+        const g = Math.max(0, Math.min(255, parseInt(m[2], 10)));
+        const b = Math.max(0, Math.min(255, parseInt(m[3], 10)));
+        return capFirst(describeColor(rgbToHsl({ r, g, b })));
+    }
+    if (groupIsColor) return val;
+    return value;
+};
+
 // Reusable modal wrapper
 const Modal = ({ open, onClose, children, width }) => {
     if (!open) return null;
@@ -44,6 +155,70 @@ const Modal = ({ open, onClose, children, width }) => {
                 <div className={`mt-16 mb-8 ${width || 'w-[680px]'} max-w-[95vw] bg-white rounded-md shadow-lg border`}>
                     {children}
                 </div>
+
+            {/* Dashboard Order Modal (reuse layout similar to OrdersList modal) */}
+            <Modal open={showDashboardOrderModal && !!dashboardViewOrderDetails} onClose={() => { setShowDashboardOrderModal(false); setDashboardViewOrderDetails(null); }} width={"w-[400px]"}>
+                <div className="p-4 max-w-[400px]">
+                    {dashboardViewLoading ? (
+                        <div className="text-sm text-gray-500">Loading order…</div>
+                    ) : (!dashboardViewOrderDetails) ? (
+                        <div className="text-sm text-gray-500">No order details available.</div>
+                    ) : (
+                        <>
+                        <div className="text-xl font-bold text-[#12263F] mb-2">{`Order #${dashboardViewOrderDetails?.order_id ?? dashboardViewOrderDetails?.id ?? ''}`}</div>
+                        <div className="text-sm text-gray-700 mb-2">{dashboardViewOrderDetails?.customer_name || dashboardViewOrderDetails?.customer_email || '—'}</div>
+
+                        <div className="mt-4 border-t pt-3">
+                            <h4 className="text-sm font-semibold mb-3">Item(s) Ordered</h4>
+                            <div className="space-y-4">
+                                {Array.isArray(dashboardViewOrderDetails?.items) && dashboardViewOrderDetails.items.length > 0 ? (
+                                    dashboardViewOrderDetails.items.map((it, idx) => (
+                                        <div key={idx} className="flex items-start gap-4">
+                                            <img src={it.product?.image_url || it.image_url || '/logo-icon/profile-icon.svg'} alt="" className="w-12 h-12 rounded border bg-white p-1 object-cover" />
+                                            <div className="flex-1">
+                                                <div className="font-semibold text-sm text-gray-800">{(it.product && it.product.name) || it.name || it.product_name}</div>
+                                                <div className="mt-2">
+                                                    {Array.isArray(it.uploaded_files) && it.uploaded_files.length > 0 ? (
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="flex-1">
+                                                                <div className="flex items-center gap-3 border rounded-md bg-white px-3 py-2">
+                                                                    <div className="w-10 h-10 overflow-hidden rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
+                                                                        {it.uploaded_files[0]?.image_url ? (
+                                                                            <img src={it.uploaded_files[0].image_url} alt={it.uploaded_files[0].file_name || 'design'} className="w-full h-full object-cover" />
+                                                                        ) : (
+                                                                            <img src="/logo-icon/image.svg" alt="file" className="w-4 h-4" />
+                                                                        )}
+                                                                    </div>
+                                                                    <div className="text-sm text-gray-700 truncate">{it.uploaded_files[0]?.file_name || 'uploaded design'}</div>
+                                                                </div>
+                                                            </div>
+                                                            {it.uploaded_files.length > 1 && (
+                                                                <div className="inline-flex items-center justify-center bg-gray-100 text-black text-[13px] font-semibold rounded-full w-7 h-7">+{it.uploaded_files.length - 1}</div>
+                                                            )}
+                                                        </div>
+                                                    ) : null}
+                                                    <div className="text-xs text-gray-600 mt-2">
+                                                        {(it.variants || []).map((v,i) => (<div key={i}>{(v.group || v.variant_group_name)}: {(v.value || v.variant_value_name)}</div>))}
+                                                    </div>
+                                                </div>
+                                                <div className="text-xs text-gray-600 mt-2">Qty: {it.quantity ?? 1}</div>
+                                                <div className="text-sm text-gray-900 mt-1">{peso(it.total_price ?? it.total ?? 0)}</div>
+                                            </div>
+                                        </div>
+                                    ))
+                                ) : (
+                                    <div className="text-sm text-gray-500">No item details available.</div>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="mt-4 flex items-center justify-end">
+                            <button className="px-4 py-2 border rounded-md text-sm" onClick={() => { setShowDashboardOrderModal(false); setDashboardViewOrderDetails(null); }}>CLOSE</button>
+                        </div>
+                        </>
+                    )}
+                </div>
+            </Modal>
             </div>
         </div>
     );
@@ -403,6 +578,35 @@ const resolveImageKeyAsync = async (img) => {
         return cleanKey;
     } catch (e) {
         return null;
+    }
+};
+
+// Resolve uploaded product/design file public URL (used for uploaded_files entries)
+// Ensure uploaded design image URLs are public and resolvable from the 'product-files' bucket
+const resolveProductFilePublicUrl = (input) => {
+    try {
+        if (!input || typeof input !== 'string') return null;
+        // Already a public URL
+        if (/^https?:\/\//i.test(input)) return input;
+        // If it's an absolute URL but not http(s), ignore transformation
+        try {
+            const u = new URL(input);
+            if (u.protocol && /^https?:$/i.test(u.protocol)) return input;
+        } catch {}
+        // Try to extract the storage path after /product-files/
+        let path = null;
+        const marker = '/product-files/';
+        const idx = input.indexOf(marker);
+        if (idx !== -1) {
+            path = input.slice(idx + marker.length);
+        } else {
+            // assume it's already a storage path like "userId/filename"
+            path = input.replace(/^\/+/, '');
+        }
+        const { data } = supabase.storage.from('product-files').getPublicUrl(path);
+        return (data && data.publicUrl) ? data.publicUrl : input;
+    } catch {
+        return input;
     }
 };
 
@@ -1024,6 +1228,274 @@ const OrdersList = ({ externalSearch = '' }) => {
             if (res && !res.error && res.data) {
                 const data = res.data;
 
+                // Load order items using the same logic as the customer Order page
+                try {
+                    // Fetch items specifically from `order_items` using the exact order_id
+                    let { data: rawItems, error: rawItemsErr } = await supabase
+                        .from('order_items')
+                        .select('*')
+                        .eq('order_id', orderId)
+                        .order('order_item_id', { ascending: true });
+                    if (rawItemsErr || !Array.isArray(rawItems)) rawItems = [];
+                    const oi = Array.isArray(rawItems) ? rawItems : [];
+                    const productIds = [...new Set(oi.map((r) => r.product_id).filter(Boolean))];
+                    let productsMap = {};
+                    if (productIds.length > 0) {
+                        try {
+                            const { data: prodRows } = await supabase
+                                .from('products')
+                                .select('id, name, image_url, weight, tax, product_types ( name, product_categories ( name ) )')
+                                .in('id', productIds);
+                            productsMap = (prodRows || []).reduce((acc, p) => { acc[p.id] = p; return acc; }, {});
+                        } catch (e) { productsMap = {}; }
+                    }
+
+                    // Fetch uploaded files linked to this order. Prefer exact order_id matches (supports multiple id columns) and
+                    // also fetch files attached to specific order_item_id when available. We'll build maps by product_id and order_item_id
+                    // so we can attach files to items reliably.
+                    const uploadedFilesByProduct = {};
+                    const uploadedFilesByOrderItem = {};
+                    const uploadedFilesForOrder = [];
+                    try {
+                        // Try several order_id equality strategies (many projects store uploaded_files.order_id as numeric FK to orders.id)
+                        const tried = new Set();
+                        // 1) numeric orders.id
+                        if (data?.id) {
+                            try {
+                                const { data: filesByOrderNum, error: fErrNum } = await supabase.from('uploaded_files').select('*').eq('order_id', data.id).order('uploaded_at', { ascending: false });
+                                if (!fErrNum && Array.isArray(filesByOrderNum) && filesByOrderNum.length > 0) uploadedFilesForOrder.push(...filesByOrderNum);
+                                tried.add(String(data.id));
+                            } catch (e) { /* ignore */ }
+                        }
+                        // 2) orders.order_id (external string id)
+                        if (data?.order_id && !tried.has(String(data.order_id))) {
+                            try {
+                                const { data: filesByOrderExt, error: fErrExt } = await supabase.from('uploaded_files').select('*').eq('order_id', data.order_id).order('uploaded_at', { ascending: false });
+                                if (!fErrExt && Array.isArray(filesByOrderExt) && filesByOrderExt.length > 0) uploadedFilesForOrder.push(...filesByOrderExt);
+                                tried.add(String(data.order_id));
+                            } catch (e) { /* ignore */ }
+                        }
+                        // 3) function parameter (caller-supplied orderId)
+                        if (orderId && !tried.has(String(orderId))) {
+                            try {
+                                const { data: filesByOrderParam, error: fErrParam } = await supabase.from('uploaded_files').select('*').eq('order_id', orderId).order('uploaded_at', { ascending: false });
+                                if (!fErrParam && Array.isArray(filesByOrderParam) && filesByOrderParam.length > 0) uploadedFilesForOrder.push(...filesByOrderParam);
+                                tried.add(String(orderId));
+                            } catch (e) { /* ignore */ }
+                        }
+                        // 4) if still empty, try parsing orderId as number
+                        if (uploadedFilesForOrder.length === 0 && orderId) {
+                            const maybeNum = parseInt(orderId, 10);
+                            if (!isNaN(maybeNum) && !tried.has(String(maybeNum))) {
+                                try {
+                                    const { data: filesByOrderNum2, error: fErrNum2 } = await supabase.from('uploaded_files').select('*').eq('order_id', maybeNum).order('uploaded_at', { ascending: false });
+                                    if (!fErrNum2 && Array.isArray(filesByOrderNum2) && filesByOrderNum2.length > 0) uploadedFilesForOrder.push(...filesByOrderNum2);
+                                    tried.add(String(maybeNum));
+                                } catch (e) { /* ignore */ }
+                            }
+                        }
+                    } catch (e) { /* ignore */ }
+                    try {
+                        // Also attempt to fetch files tied to specific order_item_id (if the uploaded_files table uses that linkage)
+                        const orderItemIds = Array.isArray(oi) ? oi.map(r => r.order_item_id || r.id).filter(Boolean) : [];
+                        if (orderItemIds.length > 0) {
+                            const { data: filesByItem } = await supabase.from('uploaded_files').select('*').in('order_item_id', orderItemIds).order('uploaded_at', { ascending: false });
+                            if (Array.isArray(filesByItem) && filesByItem.length > 0) uploadedFilesForOrder.push(...filesByItem);
+                        }
+                    } catch (e) { /* ignore */ }
+                    try {
+                        // Fallback: try to fetch by user_id and product_id for any missing product attachments when session user exists
+                        if (session?.user?.id && productIds.length > 0) {
+                            const { data: fallbackFiles } = await supabase.from('uploaded_files').select('*').eq('user_id', session.user.id).in('product_id', productIds).order('uploaded_at', { ascending: false }).limit(200);
+                            if (Array.isArray(fallbackFiles) && fallbackFiles.length > 0) uploadedFilesForOrder.push(...fallbackFiles);
+                        }
+                    } catch (e) { /* ignore */ }
+
+                    // Normalize and index
+                    const normalizeFiles = (arr) => (arr || []).map((f) => ({
+                        ...f,
+                        id: f.id ?? f.file_id,
+                        file_id: f.file_id ?? f.id,
+                        image_url: resolveProductFilePublicUrl(f.image_url || f.file_path || f.path || f.file_key || f.file_name || ''),
+                    }));
+                    const uniqFiles = [];
+                    const seenIds = new Set();
+                    for (const f of uploadedFilesForOrder) {
+                        const fid = String(f?.id ?? f?.file_id ?? '');
+                        if (!fid) continue;
+                        if (seenIds.has(fid)) continue;
+                        seenIds.add(fid);
+                        uniqFiles.push(f);
+                    }
+                    const norm = normalizeFiles(uniqFiles);
+                    norm.forEach((f) => {
+                        if (f.product_id) {
+                            const list = uploadedFilesByProduct[f.product_id] || (uploadedFilesByProduct[f.product_id] = []);
+                            list.push(f);
+                        }
+                        if (f.order_item_id) {
+                            const list2 = uploadedFilesByOrderItem[f.order_item_id] || (uploadedFilesByOrderItem[f.order_item_id] = []);
+                            list2.push(f);
+                        }
+                    });
+                    try { console.debug('[OrdersList] uploaded_files resolved', { total: norm.length, byProduct: Object.keys(uploadedFilesByProduct).length, byOrderItem: Object.keys(uploadedFilesByOrderItem).length, sample: norm.slice(0,3).map(f=>({id:f.id,file_name:f.file_name,image_url:f.image_url,product_id:f.product_id,order_item_id:f.order_item_id})) }); } catch(e) {}
+
+                    const resolveImage = async (product) => {
+                        try {
+                            const image_key = product?.image_url;
+                            if (!image_key) return "/logo-icon/logo.png";
+                            if (typeof image_key === 'string' && (image_key.startsWith('http') || image_key.startsWith('/'))) return image_key;
+                            const key = String(image_key).replace(/^\/+/, '');
+                            const categoryName = (product?.product_types?.product_categories?.name || product?.product_types?.name || '').toLowerCase();
+                            let primaryBucket = null;
+                            if (categoryName.includes('apparel')) primaryBucket = 'apparel-images';
+                            else if (categoryName.includes('accessories')) primaryBucket = 'accessoriesdecorations-images';
+                            else if (categoryName.includes('signage') || categoryName.includes('poster')) primaryBucket = 'signage-posters-images';
+                            else if (categoryName.includes('cards') || categoryName.includes('sticker')) primaryBucket = 'cards-stickers-images';
+                            else if (categoryName.includes('packaging')) primaryBucket = 'packaging-images';
+                            else if (categoryName.includes('3d print')) primaryBucket = '3d-prints-images';
+                            const buckets = [primaryBucket, 'apparel-images','accessoriesdecorations-images','signage-posters-images','cards-stickers-images','packaging-images','3d-prints-images','product-images','images','public'].filter(Boolean);
+                            for (const b of buckets) {
+                                try {
+                                    const { data: urlData } = supabase.storage.from(b).getPublicUrl(key);
+                                    const url = urlData?.publicUrl;
+                                    if (url && !url.endsWith('/')) return url;
+                                } catch (e) { /* ignore bucket */ }
+                            }
+                            return "/logo-icon/logo.png";
+                        } catch { return "/logo-icon/logo.png"; }
+                    };
+
+                    const orderItemIds = oi.map((r) => r.order_item_id || r.id || null).filter(Boolean);
+                    let variantsMap = {};
+                    if (orderItemIds.length > 0) {
+                        try {
+                            const { data: varRows } = await supabase.from('order_item_variants').select('order_item_id, variant_group_name, variant_value_name').in('order_item_id', orderItemIds);
+                            variantsMap = (varRows || []).reduce((acc, v) => { const list = acc[v.order_item_id] || (acc[v.order_item_id] = []); list.push({ group: v.variant_group_name, value: v.variant_value_name }); return acc; }, {});
+                        } catch (e) { variantsMap = {}; }
+                    }
+
+                    const its = [];
+                    let taxSumAcc = 0;
+                    for (const it of oi) {
+                        const prod = productsMap[it.product_id] || null;
+                        const img = prod ? await resolveImage(prod) : "/logo-icon/logo.png";
+                        const qty = Number(it.quantity || it.qty || 1);
+                        const taxPerUnit = Number(prod?.tax || it.tax_per_unit || 0);
+                        const taxAmount = Number((taxPerUnit * qty).toFixed(2));
+                        taxSumAcc += taxAmount;
+                        // Per your schema: uploaded_files are linked by `order_id` (numeric). Attach files for this order and product.
+                        let uploadedFiles = [];
+                        try {
+                            const orderIds = new Set();
+                            if (data?.id !== undefined && data?.id !== null) orderIds.add(String(data.id));
+                            if (data?.order_id !== undefined && data?.order_id !== null) orderIds.add(String(data.order_id));
+                            if (orderId !== undefined && orderId !== null) orderIds.add(String(orderId));
+                            // Also try numeric parse of orderId
+                            const parsed = parseInt(orderId, 10);
+                            if (!isNaN(parsed)) orderIds.add(String(parsed));
+
+                            if (Array.isArray(norm) && norm.length > 0) {
+                                // Attach files whose order_id matches and (optionally) match product_id
+                                uploadedFiles = norm.filter(f => {
+                                    try {
+                                        if (!f) return false;
+                                        const fOrder = (f.order_id ?? f.orderId ?? f.order) || null;
+                                        if (!fOrder) return false;
+                                        if (!orderIds.has(String(fOrder))) return false;
+                                        // If uploaded_files has a product_id, prefer matching product; otherwise include it
+                                        if (f.product_id) {
+                                            return String(f.product_id) === String(it.product_id);
+                                        }
+                                        return true;
+                                    } catch (e) { return false; }
+                                });
+                            }
+                            // If still empty, attach any order-level files (regardless of product)
+                            if ((!uploadedFiles || uploadedFiles.length === 0) && Array.isArray(norm) && norm.length > 0) {
+                                uploadedFiles = norm.filter(f => {
+                                    try { return f && (orderIds.has(String(f.order_id ?? f.orderId ?? f.order ?? ''))); } catch(e) { return false; }
+                                });
+                            }
+                        } catch (e) { /* non-fatal */ }
+                        try { console.debug('[OrdersList] attached_files_for_item', { order_item_id: it.order_item_id ?? it.id, product_id: it.product_id, attached: Array.isArray(uploadedFiles) ? uploadedFiles.length : 0 }); } catch(e) {}
+                        its.push({
+                            order_item_id: it.order_item_id ?? it.id ?? null,
+                            product_id: it.product_id,
+                            quantity: it.quantity ?? it.qty ?? 1,
+                            unit_price: (it.total_price != null && it.quantity) ? (Number(it.total_price) / Number(it.quantity)) : (it.base_price ?? it.price ?? 0),
+                            total_price: it.total_price ?? ((it.base_price || it.total || 0) * (it.quantity || qty)),
+                            product: { name: prod?.name || it.name || 'Product', image_url: img },
+                            weight: Number(prod?.weight || it.weight || 0),
+                            variants: Array.isArray(variantsMap[it.order_item_id]) ? variantsMap[it.order_item_id] : [],
+                            tax_per_unit: taxPerUnit,
+                            tax_amount: taxAmount,
+                            uploaded_files: uploadedFiles,
+                            raw: it,
+                        });
+                    }
+                    data.items = its;
+                    data._itemsSubtotal = its.reduce((s, it) => s + (Number(it.total_price || 0) || 0), 0);
+                    data._itemsTax = taxSumAcc;
+                } catch (e) { /* ignore items fetch errors */ }
+
+                // Attempt to load payments related to this order (to display payment method / amount)
+                try {
+                    const payIds = Array.from(new Set([String(orderId), String(data?.id), String(data?.order_id)].filter(Boolean)));
+                    const { data: pays, error: payErr } = await supabase.from('payments').select('*').in('order_id', payIds);
+                    if (!payErr && Array.isArray(pays)) {
+                        data._payments = pays;
+                        // attempt to derive a payment summary
+                        const first = pays[0];
+                        if (first) {
+                            data._payment_method = first.method || first.payment_method || first.type || first.gateway || null;
+                            data._paid_amount = Number(first.amount || first.paid || 0) || null;
+                        }
+                    }
+                } catch (e) { /* ignore payments */ }
+
+                // Enrich order with user/profile contact info when order has a user_id
+                try {
+                    const uid = data.user_id ?? data.user ?? data.customer_id ?? data.account_id ?? null;
+                    if (uid) {
+                        // try profiles table first
+                        try {
+                            const { data: prof, error: profErr } = await supabase.from('profiles').select('user_id, id, display_name, full_name, name, first_name, last_name, email, phone, mobile, avatar_url').eq('user_id', String(uid)).maybeSingle();
+                            if (!profErr && prof) {
+                                data._user_profile = prof;
+                                data.customer_email = data.customer_email || prof.email || data.email || null;
+                                data.customer_phone = data.customer_phone || prof.phone || prof.mobile || data.phone || null;
+                                try { data.customer_name = data.customer_name || (prof.display_name || prof.full_name || [prof.first_name, prof.last_name].filter(Boolean).join(' ').trim()) || null; } catch(e) {}
+                            }
+                        } catch (e) { /* ignore profile fetch */ }
+
+                        // fallback: try customers table
+                        if (!data._user_profile) {
+                            try {
+                                const { data: cust, error: custErr } = await supabase.from('customers').select('id, customer_id, full_name, name, first_name, last_name, email, phone').eq('id', String(uid)).maybeSingle();
+                                if (!custErr && cust) {
+                                    data._user_profile = cust;
+                                    data.customer_email = data.customer_email || cust.email || null;
+                                    data.customer_phone = data.customer_phone || cust.phone || null;
+                                    try { data.customer_name = data.customer_name || (cust.full_name || cust.name || [cust.first_name, cust.last_name].filter(Boolean).join(' ').trim()) || null; } catch(e) {}
+                                }
+                            } catch (e) { /* ignore */ }
+                        }
+
+                        // fallback: try custom users table
+                        if (!data._user_profile) {
+                            try {
+                                const { data: urec, error: uErr } = await supabase.from('users').select('id, display_name, full_name, name, first_name, last_name, email').eq('id', String(uid)).maybeSingle();
+                                if (!uErr && urec) {
+                                    data._user_profile = urec;
+                                    data.customer_email = data.customer_email || urec.email || null;
+                                    try { data.customer_name = data.customer_name || (urec.display_name || urec.full_name || [urec.first_name, urec.last_name].filter(Boolean).join(' ').trim()) || null; } catch(e) {}
+                                }
+                            } catch (e) { /* ignore */ }
+                        }
+                    }
+                } catch (e) { /* ignore user/profile enrichment errors */ }
+
                 const { row: shippingQuickRow, attempted: shippingQuickAttempts } = await fetchShippingAddressRow(data);
                 const candidateLog = Array.isArray(shippingQuickAttempts) ? [...shippingQuickAttempts] : [];
                 if (shippingQuickRow) {
@@ -1274,36 +1746,36 @@ const OrdersList = ({ externalSearch = '' }) => {
                                                     </div>
                                                 </div>
                                             </div>
-                                        )}
-                                    </div>
-                                </div>
-                            </th>
-                            <th className="px-4 py-2">Total Amount</th>
-                            <th className="px-4 py-2"></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {filtered.map((r) => (
-                            <tr key={r.id} className="border-t">
-                                <td className="px-4 py-3 align-top text-[#2B4269] font-medium">{`Order #${r.id}`}</td>
-                                <td className="px-4 py-3 align-top flex items-center gap-2">
-                                    <img src="/logo-icon/profile-icon.svg" alt="" aria-hidden className="w-6 h-6 rounded-full" />
-                                    <span className="text-gray-800">{r.customer}</span>
-                                </td>
-                                <td className="px-4 py-3 align-top text-gray-700">{r.date}</td>
-                                <td className="px-4 py-3 align-top">{statusBadge(r.status)}</td>
-                                <td className="px-4 py-3 align-top text-gray-800">{peso(r.amount)}</td>
-                                <td className="px-4 py-3 align-top">
-                                    <button onClick={() => openViewModal(r.id)} className="px-3 py-1 rounded-md w-[109px] border border-[#939393] text-sm text-gray-700 hover:bg-gray-50">View</button>
-                                </td>
-                            </tr>
-                        ))}
-                        </tbody>
-                    </table>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </th>
+                                    <th className="px-4 py-2">Total Amount</th>
+                                    <th className="px-4 py-2"></th>
+                                </tr>
+                                </thead>
+                                <tbody>
+                                {filtered.map((r) => (
+                                    <tr key={r.id} className="border-t">
+                                        <td className="px-4 py-3 align-top text-[#2B4269] font-medium">{`Order #${r.id}`}</td>
+                                        <td className="px-4 py-3 align-top flex items-center gap-2">
+                                            <img src="/logo-icon/profile-icon.svg" alt="" aria-hidden className="w-6 h-6 rounded-full" />
+                                            <span className="text-gray-800">{r.customer}</span>
+                                        </td>
+                                        <td className="px-4 py-3 align-top text-gray-700">{r.date}</td>
+                                        <td className="px-4 py-3 align-top">{statusBadge(r.status)}</td>
+                                        <td className="px-4 py-3 align-top text-gray-800">{peso(r.amount)}</td>
+                                        <td className="px-4 py-3 align-top">
+                                            <button onClick={() => openViewModal(r.id)} className="px-3 py-1 rounded-md w-[109px] border border-[#939393] text-sm text-gray-700 hover:bg-gray-50">View</button>
+                                        </td>
+                                    </tr>
+                                ))}
+                                </tbody>
+                            </table>
                 </div>
 
             {/* View Order Modal */}
-            <Modal open={!!viewOrderDetails} onClose={closeViewModal}>
+            <Modal open={!!viewOrderDetails} onClose={closeViewModal} width={"w-[400px]"}>
                 <div className="p-6 max-w-[520px]">
                     {viewLoading ? (
                         <div className="p-6 text-center">Loading…</div>
@@ -1320,88 +1792,175 @@ const OrdersList = ({ externalSearch = '' }) => {
                             </div>
                         </div>
 
+                        {/* Contact */}
                         <div className="mt-4 border-t border-dashed border-gray-200 pt-4">
                             <h3 className="text-sm font-semibold text-[#12263F] mb-3">Contact</h3>
                             <div className="grid grid-cols-2 gap-6">
                                 <div>
                                     <div className="text-xs text-gray-500">Email Address</div>
                                     <div className="text-sm text-blue-600 underline">
-                                        {
-                                            (viewOrderDetails?.shipping_address_row?.email)
+                                        {(viewOrderDetails?.shipping_address_row?.email)
                                             || (viewOrderDetails?.billing_address_row?.email)
                                             || viewOrderDetails?.customer_email
                                             || viewOrderDetails?.email
                                             || viewOrderDetails?.contact_email
-                                            || '—'
-                                        }
+                                            || '—'}
                                     </div>
                                 </div>
                                 <div>
                                     <div className="text-xs text-gray-500">Phone</div>
                                     <div className="text-sm">
-                                        {
-                                            (viewOrderDetails?.shipping_address_row?.phone_number)
+                                        {(viewOrderDetails?.shipping_address_row?.phone_number)
                                             || (viewOrderDetails?.billing_address_row?.phone_number)
                                             || viewOrderDetails?.phone
                                             || viewOrderDetails?.contact_phone
                                             || viewOrderDetails?.mobile
-                                            || '—'
-                                        }
+                                            || '—'}
                                     </div>
                                 </div>
                             </div>
                         </div>
 
+                        {/* Order Info */}
                         <div className="mt-6 border-t border-dashed border-gray-200 pt-4">
-                            <h4 className="text-sm font-semibold mb-2">Shipping Address</h4>
-                            <div className="text-sm text-gray-700 leading-relaxed">
-                                {
-                                    (function() {
-                                        const a = viewOrderDetails?.shipping_address_row;
-                                        if (a && (a.street_address || a.first_name || a.last_name || a.city || a.province)) {
-                                            const lines = [];
-                                            const name = [a.first_name, a.last_name].filter(Boolean).join(' ').trim();
-                                            if (name) lines.push(name);
-                                            if (a.street_address) lines.push(a.street_address);
-                                            if (a.barangay) lines.push(a.barangay);
-                                            const cityLine = [a.city, a.province].filter(Boolean).join(', ').trim();
-                                            if (cityLine) lines.push(cityLine);
-                                            if (a.postal_code) lines.push(a.postal_code);
-                                            return lines.map((l,i) => (<div key={i}>{l}</div>));
-                                        }
-                                        // Fallback to plain text fields
-                                        const fallback = viewOrderDetails?.shipping_address || viewOrderDetails?.shipping || '—';
-                                        return String(fallback).split('\n').map((line, i) => (<div key={i}>{line || '—'}</div>));
-                                    })()
-                                }
+                            <h4 className="text-sm font-semibold mb-3">Order Info</h4>
+                            <div className="grid grid-cols-2 gap-4 text-sm text-gray-700">
+                                <div className="text-xs text-gray-500">Date Ordered</div>
+                                <div>{(function(){ try { const d = new Date(viewOrderDetails?.date_ordered || viewOrderDetails?.created_at || viewOrderDetails?.placed_at || viewOrderDetails?.date); if (!isNaN(d)) return d.toISOString().slice(0,10); } catch(e){} return '—'; })()}</div>
+
+                                <div className="text-xs text-gray-500">Payment</div>
+                                <div>{viewOrderDetails?._payment_method || viewOrderDetails?.payment_method || (viewOrderDetails?._payments && viewOrderDetails._payments.length ? viewOrderDetails._payments[0].method || viewOrderDetails._payments[0].payment_method : null) || (viewOrderDetails?.payment_status ? `${viewOrderDetails.payment_status}` : '—')}</div>
+
+                                <div className="text-xs text-gray-500">Delivery</div>
+                                <div>{viewOrderDetails?.delivery_method || viewOrderDetails?.delivery || viewOrderDetails?.shipping_provider || '—'}</div>
+
+                                <div className="text-xs text-gray-500">Tracking No.</div>
+                                <div>{viewOrderDetails?.tracking_number || viewOrderDetails?.tracking_no || viewOrderDetails?.tracking || '—'}</div>
                             </div>
                         </div>
 
-                        <div className="mt-4 border-t border-dashed border-gray-200 pt-4">
-                            <h4 className="text-sm font-semibold mb-2">Billing Address</h4>
-                            <div className="text-sm text-gray-700 leading-relaxed">
-                                {
-                                    (function() {
-                                        const a = viewOrderDetails?.billing_address_row;
-                                        if (a && (a.street_address || a.first_name || a.last_name || a.city || a.province)) {
+                        {/* Items */}
+                        <div className="mt-6 border-t border-dashed border-gray-200 pt-4">
+                            <h4 className="text-sm font-semibold mb-3">Item(s) Ordered</h4>
+                            <div className="space-y-4">
+                                {Array.isArray(viewOrderDetails?.items) && viewOrderDetails.items.length > 0 ? (
+                                    viewOrderDetails.items.map((it, idx) => {
+                                        // Build full spec lines in the exact order used on Order page
+                                        const buildSpecs = () => {
+                                            const ORDER = [
+                                                'Technique',
+                                                'Printing',
+                                                'Color',
+                                                'Size',
+                                                'Material',
+                                                'Strap',
+                                                'Type',
+                                                'Accessories (Hook Clasp)',
+                                                'Accessories Color',
+                                                'Trim Color',
+                                                'Base',
+                                                'Hole',
+                                                'Pieces',
+                                                'Cut Style',
+                                                'Size (Customize)',
+                                                'Acrylic Pieces Quantity',
+                                            ];
+                                            const norm = (s) => String(s || '').trim();
+                                            const labelFor = (group, value) => {
+                                                const g = norm(group);
+                                                const v = norm(value);
+                                                if (/accessor/i.test(g) && /(hook|clasp)/i.test(v)) return 'Accessories (Hook Clasp)';
+                                                return g || '—';
+                                            };
+                                            const rawSpecs = [];
+                                            if (Array.isArray(it.variants)) {
+                                                for (const v of it.variants) {
+                                                    const label = labelFor(v?.group, v?.value);
+                                                    const val = toColorNameIfHex(v?.group, v?.value);
+                                                    rawSpecs.push({ label, value: val });
+                                                }
+                                            }
+                                            const map = rawSpecs.reduce((acc, s) => { acc[s.label] = s.value; return acc; }, {});
                                             const lines = [];
-                                            const name = [a.first_name, a.last_name].filter(Boolean).join(' ').trim();
-                                            if (name) lines.push(name);
-                                            if (a.street_address) lines.push(a.street_address);
-                                            if (a.barangay) lines.push(a.barangay);
-                                            const cityLine = [a.city, a.province].filter(Boolean).join(', ').trim();
-                                            if (cityLine) lines.push(cityLine);
-                                            if (a.postal_code) lines.push(a.postal_code);
-                                            return lines.map((l,i) => (<div key={i}>{l}</div>));
-                                        }
-                                        const fallback = viewOrderDetails?.billing_address || viewOrderDetails?.billing || '—';
-                                        return String(fallback).split('\n').map((line, i) => (<div key={i}>{line || '—'}</div>));
-                                    })()
-                                }
+                                            for (const label of ORDER) {
+                                                if (map[label]) lines.push(`${label}: ${map[label]}`);
+                                            }
+                                            return lines;
+                                        };
+                                        const designFiles = Array.isArray(it.uploaded_files) ? it.uploaded_files : [];
+                                        const designBlock = (() => {
+                                            if (designFiles.length === 0) return null;
+                                            const first = designFiles[0];
+                                            const extra = Math.max(0, designFiles.length - 1);
+                                            return (
+                                                <div className="mt-2 flex items-center gap-2">
+                                                    <div className="flex items-center gap-2 border rounded px-2 py-1 bg-white">
+                                                        <div className="w-10 h-10 overflow-hidden rounded bg-gray-100 flex items-center justify-center">
+                                                            {first?.image_url ? (
+                                                                <img src={first.image_url} alt={first.file_name || 'design'} className="w-full h-full object-cover" />
+                                                            ) : (
+                                                                <img src="/logo-icon/image.svg" alt="file" className="w-4 h-4" />
+                                                            )}
+                                                        </div>
+                                                        <div className="text-xs text-gray-600 truncate max-w-[140px]">{first?.file_name || 'uploaded design'}</div>
+                                                    </div>
+                                                    {extra > 0 && (
+                                                        <div className="inline-flex items-center justify-center bg-transparent text-black text-[15px] font-semibold rounded-full w-6 h-6">+{extra}</div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })();
+
+                                        return (
+                                            <div key={idx} className="flex items-start gap-4">
+                                                <img src={it.product?.image_url || it.image_url || it.image || (it.raw && (it.raw.product_image || it.raw.thumbnail)) || '/logo-icon/profile-icon.svg'} alt="" className="w-12 h-12 rounded border bg-white p-1 object-cover" />
+                                                <div className="flex-1">
+                                                    <div className="font-semibold text-sm text-gray-800">{(it.product && it.product.name) || it.name || it.product_name}</div>
+                                                    <div className="mt-2">
+                                                        {designBlock ? (
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="flex-1">
+                                                                    <div className="flex items-center gap-3 border rounded-md bg-white px-3 py-2">
+                                                                        <div className="w-10 h-10 overflow-hidden rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
+                                                                            {designFiles[0]?.image_url ? (
+                                                                                <img src={designFiles[0].image_url} alt={designFiles[0].file_name || 'design'} className="w-full h-full object-cover" />
+                                                                            ) : (
+                                                                                <img src="/logo-icon/image.svg" alt="file" className="w-4 h-4" />
+                                                                            )}
+                                                                        </div>
+                                                                        <div className="text-sm text-gray-700 truncate">{designFiles[0]?.file_name || 'uploaded design'}</div>
+                                                                    </div>
+                                                                </div>
+                                                                {designFiles.length > 1 && (
+                                                                    <div className="inline-flex items-center justify-center bg-gray-100 text-black text-[13px] font-semibold rounded-full w-7 h-7">+{designFiles.length - 1}</div>
+                                                                )}
+                                                            </div>
+                                                        ) : null}
+
+                                                        <div className="text-xs text-gray-600 mt-2">
+                                                            {buildSpecs().map((line, i) => (<div key={i}>{line}</div>))}
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="text-xs text-gray-600 mt-2">Qty: {it.quantity ?? 1}</div>
+                                                    <div className="text-sm text-gray-900 mt-1">{peso(it.total_price ?? it.line_total ?? (Number(it.price || 0) * (it.quantity || 1)))}</div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })
+                                ) : (
+                                    <div className="text-sm text-gray-500">No item details available.</div>
+                                )}
                             </div>
                         </div>
 
-                      
+                        {/* Totals */}
+                        <div className="mt-6 border-t border-dashed border-gray-200 pt-4 text-sm text-gray-800">
+                            <div className="flex items-center justify-between"><div>Subtotal</div><div>{peso(viewOrderDetails?._itemsSubtotal ?? viewOrderDetails?.subtotal ?? viewOrderDetails?.sub_total ?? 0)}</div></div>
+                            <div className="flex items-center justify-between mt-2"><div>Shipping</div><div>{peso(viewOrderDetails?.shipping_amount ?? viewOrderDetails?.shipping_cost ?? viewOrderDetails?.shipping ?? 0)}</div></div>
+                            <div className="flex items-center justify-between mt-2"><div>Taxes</div><div>{peso(viewOrderDetails?.taxes ?? viewOrderDetails?.tax ?? 0)}</div></div>
+                            <div className="flex items-center justify-between mt-3 font-semibold text-gray-900"><div>Total</div><div>{peso(viewOrderDetails?.total ?? viewOrderDetails?.amount ?? ((viewOrderDetails?._itemsSubtotal ?? viewOrderDetails?.subtotal ?? viewOrderDetails?.sub_total ?? 0) + (viewOrderDetails?.shipping_amount ?? viewOrderDetails?.shipping_cost ?? viewOrderDetails?.shipping ?? 0)))}</div></div>
+                        </div>
 
                         <div className="mt-6 pt-4 border-t flex items-center justify-between gap-4">
                             <button className="bg-[#9E3E3E] hover:bg-[#873434] text-white px-4 py-2 rounded-md font-semibold" onClick={() => cancelOrder(viewOrderDetails?.order_id ?? viewOrderDetails?.id)}>CANCEL ORDER</button>
@@ -1410,18 +1969,6 @@ const OrdersList = ({ externalSearch = '' }) => {
                                 <button className="px-4 py-2 bg-[#1F3A57] hover:bg-[#172a41] text-white rounded-md font-semibold" onClick={() => setShowUpdateModal(true)}>UPDATE</button>
                             </div>
                         </div>
-                        {/* Debug info: show attempted address candidate keys and any resolved address rows */}
-                        {viewOrderDetails?._address_candidates && (
-                            <details className="mt-3 text-xs text-gray-500">
-                                <summary>Debug: address lookup</summary>
-                                <div className="mt-2">
-                                    <div><strong>candidates:</strong> {String((viewOrderDetails._address_candidates || []).join(', ') || 'none')}</div>
-                                    <div className="mt-2"><strong>resolved:</strong>
-                                        <pre className="whitespace-pre-wrap bg-gray-50 p-2 rounded mt-1">{JSON.stringify(viewOrderDetails._resolved_addresses || [], null, 2)}</pre>
-                                    </div>
-                                </div>
-                            </details>
-                        )}
                         </>
                     )}
                 </div>
@@ -3455,6 +4002,18 @@ const AdminContents = () => {
     const [ordersSearch, setOrdersSearch] = useState('');
     const [usersSearch, setUsersSearch] = useState('');
     const [showAddProduct, setShowAddProduct] = useState(false);
+    // Dashboard: recent orders preview
+    const [recentOrders, setRecentOrders] = useState([]);
+    const [recentLoading, setRecentLoading] = useState(false);
+    const [dashboardViewOrderDetails, setDashboardViewOrderDetails] = useState(null);
+    const [dashboardViewLoading, setDashboardViewLoading] = useState(false);
+    const [showDashboardOrderModal, setShowDashboardOrderModal] = useState(false);
+    // Dashboard KPIs
+    const [totalUsers, setTotalUsers] = useState(0);
+    const [totalSales, setTotalSales] = useState(0);
+    const [totalOrders, setTotalOrders] = useState(0);
+    const [ordersByStatus, setOrdersByStatus] = useState({});
+    const [salesByDay, setSalesByDay] = useState([]); // [{label: '2023-10-01', value: 123}, ...]
 
     // Create product and link variants in Supabase
     const createProductInSupabase = async (payload) => {
@@ -3585,13 +4144,119 @@ const AdminContents = () => {
         window.addEventListener('admin-nav-select', handler);
         const addHandler = () => setShowAddProduct(true);
         window.addEventListener('admin-products-add', addHandler);
+        // load recent orders for dashboard preview and basic KPIs/charts
+        let cancelled = false;
+        (async () => {
+            try {
+                setRecentLoading(true);
+                const { data: recs } = await supabase.from('orders').select('*').order('created_at', { ascending: false }).limit(5);
+                if (!cancelled && Array.isArray(recs)) setRecentOrders(recs.slice(0,3));
+
+                // KPIs: total users (fast count), total sales & orders (aggregate client-side for now), orders by status, sales by day
+                try {
+                    const usersRes = await supabase.from('users').select('id', { count: 'exact', head: true });
+                    const usersCount = usersRes?.count || 0;
+                    if (!cancelled) setTotalUsers(usersCount);
+                } catch (e) { /* ignore */ }
+
+                try {
+                    // fetch recent orders (up to 1000) to compute aggregates client-side
+                    const { data: allOrders } = await supabase.from('orders').select('order_id,id,total_price,status,created_at').order('created_at', { ascending: false }).limit(1000);
+                    if (Array.isArray(allOrders) && !cancelled) {
+                        // total sales
+                        const total = allOrders.reduce((s, o) => s + (Number(o.total_price) || 0), 0);
+                        setTotalSales(total);
+                        // total orders => use latest order_id when available otherwise length
+                        const latestOrderId = allOrders.length > 0 ? (allOrders[0].order_id ?? allOrders[0].id) : 0;
+                        setTotalOrders(latestOrderId || allOrders.length);
+                        // orders by status
+                        const byStatus = {};
+                        for (const o of allOrders) {
+                            const st = o.status || 'unknown';
+                            byStatus[st] = (byStatus[st] || 0) + 1;
+                        }
+                        setOrdersByStatus(byStatus);
+                        // sales by day (last 7 days)
+                        const map = {};
+                        for (const o of allOrders) {
+                            const d = o.created_at ? new Date(o.created_at).toISOString().slice(0,10) : null;
+                            if (!d) continue;
+                            map[d] = (map[d] || 0) + (Number(o.total_price) || 0);
+                        }
+                        // build last 7 days sorted asc
+                        const days = [];
+                        for (let i = 6; i >= 0; i--) {
+                            const dt = new Date();
+                            dt.setDate(dt.getDate() - i);
+                            const label = dt.toISOString().slice(0,10);
+                            days.push({ label, value: Math.round((map[label] || 0) * 100) / 100 });
+                        }
+                        setSalesByDay(days);
+                    }
+                } catch (e) { console.debug('dashboard aggregates error', e); }
+            } catch (e) { /* ignore */ } finally { if (!cancelled) setRecentLoading(false); }
+        })();
         return () => {
             window.removeEventListener('admin-nav-select', handler);
             window.removeEventListener('admin-products-add', addHandler);
+            cancelled = true;
         };
     }, []);
 
     const containerClass = 'bg-white border border-black';
+
+    // Small inline chart helpers (kept minimal & dependency-free)
+    const MiniPieChart = ({ data = {}, size = 120 }) => {
+        const items = Object.entries(data || {}).map(([k,v], i) => ({ key:k, value: v || 0, color: ['#3B82F6','#6366F1','#F97316','#10B981','#EF4444'][i % 5] }));
+        const total = items.reduce((s,it) => s + (it.value || 0), 0) || 1;
+        let angle = 0;
+        const cx = size/2, cy = size/2, r = (size/2) - 2;
+        const arcs = items.map((it) => {
+            const start = angle;
+            const portion = (it.value / total) * Math.PI * 2;
+            const end = start + portion;
+            angle = end;
+            const large = portion > Math.PI ? 1 : 0;
+            const x1 = cx + r * Math.cos(start - Math.PI/2);
+            const y1 = cy + r * Math.sin(start - Math.PI/2);
+            const x2 = cx + r * Math.cos(end - Math.PI/2);
+            const y2 = cy + r * Math.sin(end - Math.PI/2);
+            const d = `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z`;
+            return { d, color: it.color, label: it.key, value: it.value };
+        });
+        return (
+            <div className="flex items-center gap-3">
+                <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+                    {arcs.map((a, i) => (<path key={i} d={a.d} fill={a.color} stroke="#fff" strokeWidth="0.5" />))}
+                </svg>
+                <div className="text-sm">
+                    {items.slice(0,4).map((it, i) => (
+                        <div key={i} className="flex items-center gap-2"><span style={{background: it.color}} className="w-3 h-3 inline-block"/> <span className="text-xs">{it.key} ({it.value})</span></div>
+                    ))}
+                </div>
+            </div>
+        );
+    };
+
+    const MiniBarChart = ({ data = [], width = 200, height = 80 }) => {
+        const max = Math.max(...(data.map(d => d.value || 0)), 1);
+        return (
+            <svg width={width} height={height} className="block">
+                {data.map((d, i) => {
+                    const barW = (width / data.length) - 6;
+                    const x = i * (width / data.length) + 4;
+                    const h = Math.round(((d.value || 0) / max) * (height - 20));
+                    const y = height - h - 10;
+                    return (
+                        <g key={i}>
+                            <rect x={x} y={y} width={barW} height={h} rx="3" fill="#60A5FA" />
+                            <text x={x + barW/2} y={height - 2} fontSize="9" textAnchor="middle" fill="#374151">{d.label.slice(5)}</text>
+                        </g>
+                    );
+                })}
+            </svg>
+        );
+    };
 
     return (
         <>
@@ -3633,22 +4298,7 @@ const AdminContents = () => {
                                     className="w-[241px] pl-9 pr-3 py-2 border rounded-md text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-black/20"
                                 />
                             </div>
-                            <button
-                                type="button"
-                                className="inline-flex items-center gap-2 px-4 py-2 border border-[#2B4269] text-[#2B4269] rounded-md text-sm font-medium hover:bg-[#2B4269]/5"
-                                onClick={() => window.dispatchEvent(new CustomEvent('admin-products-add'))}
-                            >
-                                <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    viewBox="0 0 24 24"
-                                    fill="currentColor"
-                                    className="w-5 h-5"
-                                    aria-hidden="true"
-                                >
-                                    <path d="M12 5c.414 0 .75.336.75.75V11.25H18.25a.75.75 0 0 1 0 1.5H12.75V18.25a.75.75 0 0 1-1.5 0V12.75H5.75a.75.75 0 0 1 0-1.5h5.5V5.75c0-.414.336-.75.75-.75Z" />
-                                </svg>
-                                <span>Add Product</span>
-                            </button>
+                            {/* Add Product button removed */}
                         </div>
                     )}
                     {selected === 'Orders' && (
@@ -3691,9 +4341,108 @@ const AdminContents = () => {
             </div>
 
             <div>
-                <div style={{ display: selected === 'Dashboard' ? 'block' : 'none' }} className={containerClass}>
-                    <h2 className="text-lg font-semibold mb-3">Dashboard</h2>
-                    
+                <div style={{ display: selected === 'Dashboard' ? 'block' : 'none' }} className="bg-[#F8FAFC] px-2 py-4">
+                    <div className="grid grid-cols-4 gap-4 mb-4">
+                        {/* KPI Cards */}
+                        <div className="bg-white rounded-lg border border-gray-200 p-5 flex flex-col gap-2 shadow-sm">
+                            <div className="flex items-center gap-2 text-gray-500 text-sm font-semibold"><span className="material-icons">groups</span> Total Users</div>
+                            <div className="flex items-end gap-2"><span className="text-3xl font-bold text-[#25324B]">{totalUsers ?? 0}</span><span className="text-green-600 text-sm font-bold">+10%</span></div>
+                        </div>
+                        <div className="bg-white rounded-lg border border-gray-200 p-5 flex flex-col gap-2 shadow-sm">
+                            <div className="flex items-center gap-2 text-gray-500 text-sm font-semibold"><span className="material-icons">assignment</span> Total Orders</div>
+                            <div className="flex items-end gap-2"><span className="text-3xl font-bold text-[#25324B]">{totalOrders ?? 0}</span><span className="text-green-600 text-sm font-bold">+8%</span></div>
+                        </div>
+                        <div className="bg-white rounded-lg border border-gray-200 p-5 flex flex-col gap-2 shadow-sm">
+                            <div className="flex items-center gap-2 text-gray-500 text-sm font-semibold"><span className="material-icons">payments</span> Total Sales</div>
+                            <div className="flex items-end gap-2"><span className="text-3xl font-bold text-[#25324B]">{typeof totalSales === 'number' ? (totalSales === 0 ? '₱0' : '₱' + (Number(totalSales) || 0).toLocaleString()) : '₱0'}</span><span className="text-green-600 text-sm font-bold">+55%</span></div>
+                        </div>
+                        <div className="bg-white rounded-lg border border-gray-200 p-5 flex flex-col gap-2 shadow-sm">
+                            <div className="flex items-center gap-2 text-gray-500 text-sm font-semibold"><span className="material-icons">pending_actions</span> Total Pending</div>
+                            <div className="flex items-end gap-2"><span className="text-3xl font-bold text-[#25324B]">187</span><span className="text-green-600 text-sm font-bold">+12%</span></div>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                        <div className="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
+                            <div className="font-bold text-[#25324B] text-lg mb-2">Orders By Status</div>
+                            <div className="flex gap-6 items-center">
+                                <MiniPieChart data={ordersByStatus} size={180} />
+                                <div className="flex flex-col gap-2 text-sm">
+                                    <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-[#6EE7B7] inline-block"/> Delivered - 60%</div>
+                                    <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-[#FDE68A] inline-block"/> In Progress - 30%</div>
+                                    <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-[#FCA5A5] inline-block"/> Cancelled - 10%</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
+                            <div className="font-bold text-[#25324B] text-lg mb-2">Stock Status</div>
+                            <div className="flex gap-6 items-center">
+                                <MiniBarChart data={salesByDay} width={220} height={100} />
+                                <div className="flex flex-col gap-2 text-sm">
+                                    <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-[#6EE7B7] inline-block"/> Active - 28</div>
+                                    <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-[#FDE68A] inline-block"/> Low Stock - 1</div>
+                                    <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-[#FCA5A5] inline-block"/> Out of Stock - 1</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-4">
+                        <div className="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
+                            <div className="font-bold text-[#25324B] text-lg mb-2">Recent Orders</div>
+                            <table className="w-full text-sm mb-2">
+                                <thead>
+                                    <tr className="text-left text-gray-600">
+                                        <th className="pb-2">Order ID</th>
+                                        <th className="pb-2">Customer</th>
+                                        <th className="pb-2">Date Ordered</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {recentOrders.map((r) => (
+                                        <tr key={r.id} className="border-t">
+                                            <td className="py-2">Order #{r.order_id ?? r.id}</td>
+                                            <td className="py-2">{r.customer_name || r.customer_email || r.customer || '—'}</td>
+                                            <td className="py-2">{(r.created_at || r.date_ordered) ? new Date(r.created_at || r.date_ordered).toISOString().slice(0,10) : '—'}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                            <button className="w-full bg-gray-100 text-gray-500 py-2 rounded font-semibold text-sm">View All Orders</button>
+                        </div>
+                        <div className="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
+                            <div className="font-bold text-[#25324B] text-lg mb-2">New Customers</div>
+                            <table className="w-full text-sm mb-2">
+                                <thead>
+                                    <tr className="text-left text-gray-600">
+                                        <th className="pb-2">Full Name</th>
+                                        <th className="pb-2">Email Address</th>
+                                        <th className="pb-2">Date Joined</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {/* Example static rows, replace with real data if available */}
+                                    <tr className="border-t">
+                                        <td className="py-2 flex items-center gap-2"><span className="material-icons text-gray-400">person</span> Maria Santos</td>
+                                        <td className="py-2">maria.santos@gmail.com</td>
+                                        <td className="py-2">2025-08-01</td>
+                                    </tr>
+                                    <tr className="border-t">
+                                        <td className="py-2 flex items-center gap-2"><span className="material-icons text-gray-400">person</span> John Doe</td>
+                                        <td className="py-2">john.doe@gmail.com</td>
+                                        <td className="py-2">2025-08-01</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                            <button className="w-full bg-gray-100 text-gray-500 py-2 rounded font-semibold text-sm">View All Users</button>
+                        </div>
+                        <div className="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
+                            <div className="font-bold text-[#25324B] text-lg mb-2">Stock Notifications</div>
+                            <div className="flex flex-col gap-2 mb-2">
+                                <div className="flex items-center gap-2"><span className="bg-[#FDE68A] text-yellow-800 px-2 py-1 rounded text-xs font-bold">Low Stock</span> Custom Cap <span className="text-gray-500 text-xs">5 left</span></div>
+                                <div className="flex items-center gap-2"><span className="bg-[#FCA5A5] text-red-800 px-2 py-1 rounded text-xs font-bold">Out of Stock</span> Custom Rounded T-shirt <span className="text-gray-500 text-xs">0 left</span></div>
+                            </div>
+                            <button className="w-full bg-gray-100 text-gray-500 py-2 rounded font-semibold text-sm">View All Stocks</button>
+                        </div>
+                    </div>
                 </div>
 
                 <div style={{ display: selected === 'Stocks' ? 'block' : 'none' }} className={`${containerClass} mt-1`}>
