@@ -175,30 +175,97 @@ const CartPage = () => {
 
           console.log(`Processed variants for cart_id ${it.cart_id}:`, JSON.stringify(variants, null, 2));
 
-          // Fetch inventory data using the get_cart_inventory RPC
+          // Fetch inventory data: prefer real-time product-level row by product_id, fallback to RPC
           let inventory = { quantity: 0, low_stock_limit: 0, combination_id: null };
           try {
-            const { data: inventoryData, error: inventoryError } = await supabase
-              .rpc('get_cart_inventory', { p_cart_id: it.cart_id });
+            let found = false;
 
-            if (inventoryError) {
-              console.warn(`Error fetching inventory for cart ${it.cart_id}:`, inventoryError);
+            // 1) Prefer combination-aware stock via RPC (respects selected variant combos)
+            try {
+              const { data: inventoryData, error: inventoryError } = await supabase
+                .rpc('get_cart_inventory', { p_cart_id: it.cart_id });
+              if (inventoryError) {
+                console.warn(`Error fetching inventory RPC for cart ${it.cart_id}:`, inventoryError);
+                setInputErrors((p) => ({
+                  ...p,
+                  [it.cart_id]: "Unable to fetch stock information. Item may be unavailable.",
+                }));
+              } else if (inventoryData) {
+                const row = Array.isArray(inventoryData) ? inventoryData[0] : inventoryData;
+                if (row) {
+                  const qtyRaw = row.out_quantity ?? row.quantity ?? row.qty ?? row.available_quantity ?? row.inventory_quantity ?? row.count ?? 0;
+                  const lowRaw = row.out_low_stock_limit ?? row.low_stock_limit ?? row.low_stock ?? 0;
+                  const comb = row.out_combination_id ?? row.combination_id ?? row.combination ?? null;
+                  inventory = {
+                    quantity: Number(qtyRaw) || 0,
+                    low_stock_limit: Number(lowRaw) || 0,
+                    combination_id: comb,
+                  };
+                  found = true;
+                  console.debug(`RPC inventory used for cart ${it.cart_id}:`, row);
+                }
+              }
+            } catch (rpcErr) {
+              console.warn(`RPC inventory call failed for cart ${it.cart_id}:`, rpcErr);
               setInputErrors((p) => ({
                 ...p,
                 [it.cart_id]: "Unable to fetch stock information. Item may be unavailable.",
               }));
-            } else if (inventoryData && inventoryData.length > 0) {
-              inventory = {
-                quantity: Number(inventoryData[0].out_quantity) || 0,
-                low_stock_limit: Number(inventoryData[0].out_low_stock_limit) || 0,
-                combination_id: inventoryData[0].out_combination_id,
-              };
-            } else {
-              console.warn(`No inventory data found for cart ${it.cart_id}`);
-              setInputErrors((p) => ({
-                ...p,
-                [it.cart_id]: "Item out of stock or unavailable.",
-              }));
+            }
+
+            // 2) Fallback to product-level inventory row when combination data is unavailable
+            if (!found && it.product_id) {
+              try {
+                const { data: invRow, error: invErr } = await supabase
+                  .from('inventory')
+                  .select('inventory_id, quantity, combination_id, low_stock_limit')
+                  .eq('product_id', it.product_id)
+                  .limit(1)
+                  .maybeSingle();
+                if (!invErr && invRow && invRow.inventory_id != null) {
+                  inventory = {
+                    quantity: Number(invRow.quantity) || 0,
+                    low_stock_limit: Number(invRow.low_stock_limit) || 0,
+                    combination_id: invRow.combination_id || null,
+                  };
+                  found = true;
+                  console.debug(`Product-level inventory used for cart ${it.cart_id} product ${it.product_id}:`, invRow);
+                }
+              } catch (prodErr) {
+                console.warn('Product-level inventory query failed for cart', it.cart_id, it.product_id, prodErr);
+              }
+            }
+
+            // 3) Last-resort targeted fallback (kept for compatibility): try known inventory id 2117
+            if (!found) {
+              try {
+                const { data: invById, error: invByIdErr } = await supabase
+                  .from('inventory')
+                  .select('inventory_id, quantity, combination_id, low_stock_limit')
+                  .eq('inventory_id', 2117)
+                  .limit(1)
+                  .maybeSingle();
+                if (!invByIdErr && invById && invById.inventory_id != null) {
+                  inventory = {
+                    quantity: Number(invById.quantity) || 0,
+                    low_stock_limit: Number(invById.low_stock_limit) || 0,
+                    combination_id: invById.combination_id || null,
+                  };
+                  found = true;
+                  console.debug(`Inventory fallback by id 2117 used for cart ${it.cart_id}:`, invById);
+                } else {
+                  setInputErrors((p) => ({
+                    ...p,
+                    [it.cart_id]: "Item out of stock or unavailable.",
+                  }));
+                }
+              } catch (idErr) {
+                console.warn(`Inventory-by-id fallback failed for cart ${it.cart_id}:`, idErr);
+                setInputErrors((p) => ({
+                  ...p,
+                  [it.cart_id]: "Item out of stock or unavailable.",
+                }));
+              }
             }
           } catch (err) {
             console.warn(`Exception fetching inventory for cart ${it.cart_id}:`, err);
@@ -649,26 +716,36 @@ const CartPage = () => {
                           />
                           <div>
                             <p className="font-semibold text-black font-dm-sans">{c.product?.name || `Product ${c.product_id}`}</p>
-                            <p className="text-sm text-gray-600 font-dm-sans">Project Name: None</p>
-                            {c.dimensions && c.dimensions.length > 0 && (
-                              <p className="text-sm text-gray-600 font-dm-sans">Size: {`${c.dimensions[0].length || 0} x ${c.dimensions[0].width || 0}`} inches</p>
-                            )}
                             {Array.isArray(c.uploaded_files) && c.uploaded_files.length > 0 && (
                               <div className="mt-2 flex items-center gap-2">
-                                {c.uploaded_files.map((f, idx) => (
-                                  <div key={f.file_id || f.id || idx} className="flex items-center gap-2 border rounded px-2 py-1 bg-white">
-                                    <div className="w-10 h-10 overflow-hidden rounded bg-gray-100 flex items-center justify-center">
-                                      {f.image_url ? (
-                                        // image_url may be a public URL
-                                        <img src={f.image_url} alt={f.file_name || 'design'} className="w-full h-full object-cover" />
-                                      ) : (
-                                        <img src="/logo-icon/image.svg" alt="file" className="w-4 h-4" />
+                                {/* Show only the first uploaded file as a thumbnail+filename box; render +N badge outside that box (sibling) */}
+                                {(() => {
+                                  const first = c.uploaded_files[0];
+                                  const extra = Math.max(0, (c.uploaded_files.length || 0) - 1);
+                                  return (
+                                    <>
+                                      <div key={first?.file_id || first?.id || 0} className="flex items-center gap-2 border rounded px-2 py-1 bg-white">
+                                        <div className="w-10 h-10 overflow-hidden rounded bg-gray-100 flex items-center justify-center">
+                                          {first?.image_url ? (
+                                            <img src={first.image_url} alt={first.file_name || 'design'} className="w-full h-full object-cover" />
+                                          ) : (
+                                            <img src="/logo-icon/image.svg" alt="file" className="w-4 h-4" />
+                                          )}
+                                        </div>
+                                        <div className="text-xs text-gray-600 truncate max-w-[140px]">{first?.file_name || 'uploaded design'}</div>
+                                      </div>
+                                      {extra > 0 && (
+                                        <div className="inline-flex items-center justify-center bg-transparent text-black text-[15px] font-semibold rounded-full w-6 h-6">
+                                          +{extra}
+                                        </div>
                                       )}
-                                    </div>
-                                    <div className="text-xs text-gray-600 truncate max-w-[140px]">{f.file_name || 'uploaded design'}</div>
-                                  </div>
-                                ))}
+                                    </>
+                                  );
+                                })()}
                               </div>
+                            )}
+                            {c.dimensions && c.dimensions.length > 0 && (
+                              <p className="text-sm text-gray-600 font-dm-sans">Size: {`${c.dimensions[0].length || 0} x ${c.dimensions[0].width || 0}`} inches</p>
                             )}
                             {c.variants?.length > 0 && (
                               <div className="mt-1">
@@ -699,7 +776,7 @@ const CartPage = () => {
                         <div className="col-span-2 text-center">
                           <div className="inline-flex items-center border rounded-md">
                             <button
-                              className="px-1 py-1 bg-white text-black border disabled:opacity-50"
+                              className="px-1 py-1 bg-white text-black border disabled:opacity-50 focus:outline-none"
                               onClick={() => updateQuantity(c, -1)}
                               disabled={actionLoadingIds[c.cart_id] || (c.inventory?.quantity || 0) === 0}
                             >
@@ -775,7 +852,7 @@ const CartPage = () => {
                               />
                             </div>
                             <button
-                              className="px-1 py-1 bg-white text-black border disabled:opacity-50"
+                              className="px-1 py-1 bg-white text-black border disabled:opacity-50 focus:outline-none"
                               onClick={() => updateQuantity(c, +1)}
                               disabled={actionLoadingIds[c.cart_id] || (c.inventory?.quantity || 0) === 0}
                             >

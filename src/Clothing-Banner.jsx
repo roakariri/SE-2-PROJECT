@@ -3,14 +3,16 @@ import Header from "./components/visitor/Header";
 import ClothingBannerInfo from "./components/Product-Pages/sinage-posters/Clothing-Banner-Info";
 import Navigation from "./components/registered/Navigation";
 import Footer from "./components/visitor/Footer";
+import ChatbotPage from "./components/ChatBot/Chatbot-page";
 
 function ClothingBanner() {
   const { session } = UserAuth();
   return (
     <div className="font-dm-sans">
-      {session ? <Navigation /> : <Header />}
-      <ClothingBannerInfo />
-      <Footer />
+  {session ? <Navigation /> : <Header />}
+  <ClothingBannerInfo />
+  <ChatbotPage />
+  <Footer />
     </div>
   );
 }

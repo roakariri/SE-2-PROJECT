@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabaseClient';
 import '../../checkboxes.css';
@@ -42,7 +42,7 @@ const DealsCatalog = () => {
         };
         fetchFavs();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [session, dealsProducts.length]);
+    }, [session, dealsProducts.length, favoriteIds]);
 
     // Load deals rows and fetch their corresponding products (keep order by order_count desc)
     useEffect(() => {
@@ -262,16 +262,16 @@ const DealsCatalog = () => {
                             <div className="relative" ref={sortRef}>
                                 <button type="button" className="border border-gray-800 w-[215px] bg-white text-black font-dm-sans rounded-md px-3 py-2 inline-flex items-center gap-2" onClick={() => setIsSortOpen(v => !v)} aria-haspopup="listbox" aria-expanded={isSortOpen}>
                                     {{ relevance: 'Sort by Relevance', newest: 'Newest First', lowToHigh: 'Price: Low to High', highToLow: 'Price: High to Low', bestSelling: 'Best Selling', nameAZ: 'Name: A to Z', nameZA: 'Name: Z to A' }[sortOption] || 'Sort by Relevance'}
-                                    <img src={isSortOpen ? '/logo-icon/arrow-up.svg' : '/logo-icon/arrow-down.svg'} alt="" className="ml-[30px] w-4 h-4" onError={(e) => { try { e.currentTarget.replaceWith(document.createTextNode(isSortOpen ? '▲' : '▼')); } catch {} }} />
+                                    <img src={isSortOpen ? '/logo-icon/arrow-up.svg' : '/logo-icon/arrow-down.svg'} alt="" className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4" onError={(e) => { try { e.currentTarget.replaceWith(document.createTextNode(isSortOpen ? '▲' : '▼')); } catch (err) { void err; } }} />
                                 </button>
                                 {isSortOpen && (
                                     <div className="absolute right-0 mt-2 w-[215px] border border-gray-800 bg-white rounded-md shadow z-20">
                                         <ul className="py-1 text-black" role="listbox">
                                             <li><button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('relevance'); setIsSortOpen(false); }}>Sort by Relevance</button></li>
-                                            <li><button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('newest'); setIsSortOpen(false); }}>Newest First</button></li>
+                                            
                                             <li><button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('lowToHigh'); setIsSortOpen(false); }}>Price: Low to High</button></li>
                                             <li><button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('highToLow'); setIsSortOpen(false); }}>Price: High to Low</button></li>
-                                            <li><button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('bestSelling'); setIsSortOpen(false); }}>Best Selling</button></li>
+                                            
                                             <li><button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('nameAZ'); setIsSortOpen(false); }}>Name: A to Z</button></li>
                                             <li><button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('nameZA'); setIsSortOpen(false); }}>Name: Z to A</button></li>
                                         </ul>

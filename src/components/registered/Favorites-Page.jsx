@@ -197,8 +197,8 @@ const FavoritesPage = () => {
                                                 return next;
                                             });
                                             // Remove from favorites in Supabase (background)
-                                            const { data: { session } } = await supabase.auth.getSession();
-                                            const user = session?.user;
+                                            const { data: { session: currentSession } } = await supabase.auth.getSession();
+                                            const user = currentSession?.user;
                                             if (!user) return;
                                             await supabase
                                                 .from('favorites')

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "../../supabaseClient";
 import { UserAuth } from "../../context/AuthContext";
@@ -221,8 +221,10 @@ const OrderConfirmationPage = () => {
 	const [shipping, setShipping] = useState(null);
 	const [items, setItems] = useState([]);
 	const [subtotal, setSubtotal] = useState(0);
+	const [taxTotal, setTaxTotal] = useState(0);
 	const [paymentLabel, setPaymentLabel] = useState('');
 	const [paymentId, setPaymentId] = useState(null);
+	const [isGeneratingInvoice, setIsGeneratingInvoice] = useState(false);
 
 	useEffect(() => {
 		// Try to load last payment method stored by Checkout
@@ -320,7 +322,7 @@ const OrderConfirmationPage = () => {
 				if (productIds.length > 0) {
 					const { data: prodRows, error: prodErr } = await supabase
 						.from('products')
-						.select('id, name, image_url, weight, product_types ( name, product_categories ( name ) )')
+						.select('id, name, image_url, weight, tax, product_types ( name, product_categories ( name ) )')
 						.in('id', productIds);
 					if (prodErr) {
 						console.warn('Failed to fetch products for order items', prodErr);
@@ -347,10 +349,15 @@ const OrderConfirmationPage = () => {
 
 				const built = [];
 				let sub = 0;
+				let taxSum = 0;
 				for (const it of oi) {
 					const prod = productsMap[it.product_id] || null;
 					const img = prod ? await resolveImage(prod) : '/logo-icon/logo.png';
 					sub += Number(it.total_price || 0);
+					const qty = Number(it.quantity || 1);
+					const taxPerUnit = Number(prod?.tax) || 0;
+					const taxAmount = Number((taxPerUnit * qty).toFixed(2));
+					taxSum += taxAmount;
 					// Try to fetch uploaded design files for this item using cart_id linkage when available,
 					// then fallback to product_id+user_id, then user-only.
 					let uploadedFilesForItem = [];
@@ -445,6 +452,8 @@ const OrderConfirmationPage = () => {
 						img,
 						quantity: it.quantity || 1,
 						total: Number(it.total_price || 0),
+						tax_per_unit: taxPerUnit,
+						tax_amount: taxAmount,
 						variants: Array.isArray(variantsMap[it.order_item_id])
 							? variantsMap[it.order_item_id].map(v => ({ group: v.variant_group_name, value: v.variant_value_name }))
 							: [],
@@ -455,12 +464,14 @@ const OrderConfirmationPage = () => {
 				if (!cancelled) {
 					setItems(built);
 					setSubtotal(Number(sub.toFixed(2)));
+					setTaxTotal(Number(taxSum.toFixed(2)));
 				}
 			} catch (e) {
 				if (!cancelled) {
 					setOrder(null);
 					setItems([]);
 					setSubtotal(0);
+					setTaxTotal(0);
 				}
 			} finally {
 				if (!cancelled) setLoading(false);
@@ -485,11 +496,197 @@ const OrderConfirmationPage = () => {
 			return Number((base + per * totalWeightGrams).toFixed(2));
 		}
 		// Fallback: delta
-		const delta = Number(order?.total_price || 0) - Number(subtotal || 0);
+		const delta = Number(order?.total_price || 0) - Number(subtotal || 0) - Number(taxTotal || 0);
 		return Math.max(0, Number(delta.toFixed(2)));
-	}, [shipping?.base_rate, shipping?.rate_per_grams, totalWeightGrams, order?.total_price, subtotal]);
-	const taxes = 0;
+	}, [shipping?.base_rate, shipping?.rate_per_grams, totalWeightGrams, order?.total_price, subtotal, taxTotal]);
+	const taxes = taxTotal;
 	const total = Number(order?.total_price || 0);
+	const customerEmail = session?.user?.email || '';
+	const orderIdValue = order?.order_id;
+	const shippingDisplay = useMemo(() => {
+		if (!shipping) return 'Standard Delivery';
+		const base = shipping.name || 'Standard Delivery';
+		return shipping.description ? `${base} — ${shipping.description}` : base;
+	}, [shipping?.name, shipping?.description]);
+	const paymentDisplay = paymentLabel || 'Paid';
+	const handleGenerateInvoice = useCallback(async () => {
+		if (!orderIdValue) return;
+		try {
+			setIsGeneratingInvoice(true);
+			const { jsPDF } = await import('jspdf');
+			const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+			const marginX = 48;
+			const topY = 60;
+			const bottomMargin = 60;
+			let cursorY = topY;
+			const pageHeight = doc.internal.pageSize.getHeight();
+			const ensureSpace = (amount = 16) => {
+				if (cursorY + amount > pageHeight - bottomMargin) {
+					doc.addPage();
+					cursorY = topY;
+				}
+			};
+			const advance = (amount = 16) => {
+				ensureSpace(amount);
+				cursorY += amount;
+			};
+			const write = (text, x = marginX) => {
+				doc.text(String(text ?? ''), x, cursorY);
+			};
+			const wrap = (value, width = 340) => doc.splitTextToSize(String(value ?? ''), width);
+			// Use ASCII-friendly currency label to avoid missing-glyph issues in jsPDF built-in fonts.
+			// Many built-in PDF fonts (helvetica/times/courier) don't include the peso sign (₱)
+			// and jsPDF may render a replacement character (like ±). Use "PHP" to ensure
+			// the currency label is visible. If you prefer the actual ₱ glyph, we can embed
+			// a Unicode-capable TTF and register it with jsPDF instead.
+			const formatCurrency = (value) => `PHP ${Number(value || 0).toFixed(2)}`;
+
+			doc.setFont('helvetica', 'bold');
+			doc.setFontSize(18);
+			write('E-Invoice');
+			doc.setFontSize(12);
+			doc.setFont('helvetica', 'normal');
+
+			advance(24);
+			write(`Order #: ${orderIdValue}`);
+			advance(16);
+			write(`Order Date: ${orderDateLabel || '—'}`);
+			advance(16);
+			write(`Estimated Delivery: ${estimatedDateLabel || '—'}`);
+
+			advance(24);
+			doc.setFont('helvetica', 'bold');
+			write('Customer Details');
+			doc.setFont('helvetica', 'normal');
+
+			advance(16);
+			const customerName = [address?.first_name, address?.last_name].filter(Boolean).join(' ') || '—';
+			write(`Name: ${customerName}`);
+			advance(16);
+			write(`Email: ${customerEmail || '—'}`);
+			advance(16);
+			const phoneDisplay = address?.phone_number ? formatDisplayPHMobile(address.phone_number) : '—';
+			write(`Phone: ${phoneDisplay}`);
+
+			// Add a larger gap between Customer Details and Shipping Address for readability
+			advance(32);
+		doc.setFont('helvetica', 'bold');
+			write('Shipping Address');
+			doc.setFont('helvetica', 'normal');
+			const addressLines = [
+				address?.street_address,
+				[address?.barangay, address?.city].filter(Boolean).join(', '),
+				[address?.province, address?.postal_code].filter(Boolean).join(' '),
+			].filter((line) => line && line.trim());
+			if (addressLines.length === 0) {
+				advance(14);
+				write('—');
+			} else {
+				addressLines.flatMap((line) => wrap(line, 360)).forEach((line, idx) => {
+					advance(idx === 0 ? 14 : 12);
+					write(line);
+				});
+			}
+
+			advance(24);
+			doc.setFont('helvetica', 'bold');
+			write('Delivery');
+			doc.setFont('helvetica', 'normal');
+			advance(14);
+			write(shippingDisplay || 'Standard Delivery');
+
+			advance(18);
+			doc.setFont('helvetica', 'bold');
+			write('Payment');
+			doc.setFont('helvetica', 'normal');
+			advance(14);
+			write(paymentDisplay);
+
+			advance(24);
+			doc.setFont('helvetica', 'bold');
+			write('Items');
+			doc.setFont('helvetica', 'normal');
+
+			advance(18);
+			doc.setFont('helvetica', 'bold');
+			write('Product');
+			doc.text('Qty', marginX + 360, cursorY);
+			doc.setFont('helvetica', 'normal');
+
+			items.forEach((item) => {
+				const qty = Number(item.quantity || 1);
+					const specificationLines = (() => {
+						if (!Array.isArray(item.variants) || item.variants.length === 0) return [];
+						const ORDER = [
+							'Design','Technique','Printing','Color','Size','Material','Strap','Type','Accessories (Hook Clasp)','Accessories Color','Trim Color','Base','Hole','Pieces','Cut Style','Size (Customize)','Acrylic Pieces Quantity'
+						];
+						const norm = (s) => String(s || '').trim();
+						const labelFor = (group, value) => {
+							const g = norm(group).toLowerCase();
+							const v = norm(value);
+							if (/accessor/i.test(g) && /(hook|clasp)/i.test(v)) return 'Accessories (Hook Clasp)';
+							return group || '—';
+						};
+						const indexFor = (label) => {
+							const i = ORDER.findIndex((x) => x.toLowerCase() === String(label || '').toLowerCase());
+							return i === -1 ? 999 : i;
+						};
+						const specs = item.variants.map((variant) => {
+							const label = labelFor(variant?.group, variant?.value);
+							const value = toColorNameIfHex(variant?.group, variant?.value) || variant?.value || '';
+							return { label, value, order: indexFor(label) };
+						}).sort((a,b) => (a.order - b.order) || a.label.localeCompare(b.label));
+						return specs.flatMap(s => wrap(`${s.label}: ${s.value}`, 260));
+					})();
+				const designLines = (() => {
+					const files = Array.isArray(item.uploaded_files) ? item.uploaded_files : [];
+					if (files.length === 0) return [];
+					const first = files[0];
+					const label = first?.file_name ? `Design: ${first.file_name}` : 'Design: Uploaded file';
+					// Use peso sign instead of plus in the PDF note per request
+					const extra = files.length > 1 ? `(₱${files.length - 1} more)` : null;
+					const base = wrap(label, 260);
+					return extra ? [...base, ...wrap(extra, 260)] : base;
+				})();
+				const nameLines = wrap(item.name || 'Product', 260);
+				const allLines = [...nameLines, ...specificationLines, ...designLines];
+				if (allLines.length === 0) allLines.push('—');
+				allLines.forEach((line, index) => {
+					advance(index === 0 ? 18 : 12);
+					write(line);
+					if (index === 0) {
+						doc.text(String(qty), marginX + 360, cursorY);
+					}
+				});
+			});
+
+			advance(24);
+			doc.setFont('helvetica', 'bold');
+			write('Summary');
+			doc.setFont('helvetica', 'normal');
+
+			const summaryRows = [
+				['Subtotal', formatCurrency(subtotal)],
+				['Shipping', formatCurrency(shippingCost)],
+				['Taxes', formatCurrency(taxes)],
+				['Total', formatCurrency(total)],
+			];
+
+			summaryRows.forEach(([label, amount], idx) => {
+				advance(idx === 0 ? 18 : 12);
+				if (idx === summaryRows.length - 1) doc.setFont('helvetica', 'bold');
+				write(label);
+				doc.text(amount, marginX + 260, cursorY);
+				if (idx === summaryRows.length - 1) doc.setFont('helvetica', 'normal');
+			});
+
+			doc.save(`invoice-${orderIdValue}.pdf`);
+		} catch (error) {
+			console.error('Failed to generate invoice PDF', error);
+		} finally {
+			setIsGeneratingInvoice(false);
+		}
+	}, [address, customerEmail, estimatedDateLabel, items, orderDateLabel, orderIdValue, paymentDisplay, shippingDisplay, shippingCost, subtotal, taxes, total]);
 
 	return (
 		<div className="min-h-screen w-full bg-white overflow-y-auto  font-dm-sans">
@@ -503,15 +700,25 @@ const OrderConfirmationPage = () => {
 					<div className="lg:col-span-2 w-[808px]">
 						<h1 className="text-[#171738] font-bold  text-3xl mb-4">Order Confirmation</h1>
 						
-                        <div className="bg-white p-4 mb-4">
-							<div className="flex items-start gap-3">
-								<div className="mt-1">
+						<div className="bg-white p-4 mb-4">
+							<div className="flex flex-wrap items-start justify-between gap-4">
+								<div className="flex items-start gap-3">
+									<div className="mt-1">
 									<img src="/logo-icon/confirmation-icon.svg" onError={(e)=>{e.currentTarget.src='/logo-icon/white-check.svg';}} alt="ok" className="w-[55px] h-[55px]" />
+									</div>
+									<div>
+										<p className="text-[#171738] font-dm-sans text-[20px] ">Order #{order?.order_id || '—'}</p>
+										<p className="text-gray-700 text-[20px]font-dm-sans font-semibold">Thank you for your order!</p>
+									</div>
 								</div>
-								<div>
-									<p className="text-[#171738] font-dm-sans text-[20px] ">Order #{order?.order_id || '—'}</p>
-									<p className="text-gray-700 text-[20px]font-dm-sans font-semibold">Thank you for your order!</p>
-								</div>
+								<button
+									type="button"
+									onClick={handleGenerateInvoice}
+									disabled={!order?.order_id || isGeneratingInvoice}
+									className="ml-auto rounded-md border border-[#171738] bg-white px-4 py-2 text-sm font-semibold text-[#171738] transition hover:bg-[#171738] hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+								>
+									{isGeneratingInvoice ? 'Generating…' : 'Download e-Invoice'}
+								</button>
 							</div>
 						</div>
 
@@ -634,26 +841,31 @@ const OrderConfirmationPage = () => {
 															return i === -1 ? 999 : i;
 														};
 														const specs = [];
-														// Prepend uploaded design as a pill like Cart/Checkout
-														if (Array.isArray(it.uploaded_files) && it.uploaded_files.length > 0) {
-															const first = it.uploaded_files[0];
-															const imgUrl = first.image_url || '';
-															specs.push({
-																label: 'Design',
-																value: (
-																	<span className="inline-flex items-center gap-2 border rounded px-2 py-1 bg-white">
-																		<span className="w-6 h-6 overflow-hidden rounded bg-gray-100 flex items-center justify-center">
-																			{imgUrl ? (
-																				<img src={imgUrl} alt={first.file_name || 'design'} className="w-full h-full object-cover" />
+														const designFiles = Array.isArray(it.uploaded_files) ? it.uploaded_files : [];
+														const designBlock = (() => {
+															if (designFiles.length === 0) return null;
+															const first = designFiles[0];
+															const extra = Math.max(0, designFiles.length - 1);
+															return (
+																<div className="mt-2 flex items-center gap-2">
+																	<div className="flex items-center gap-2 border rounded px-2 py-1 bg-white">
+																		<div className="w-10 h-10 overflow-hidden rounded bg-gray-100 flex items-center justify-center">
+																			{first?.image_url ? (
+																				<img src={first.image_url} alt={first.file_name || 'design'} className="w-full h-full object-cover" />
 																			) : (
-																				<img src="/logo-icon/image.svg" alt="file" className="w-3 h-3" />
+																				<img src="/logo-icon/image.svg" alt="file" className="w-4 h-4" />
 																			)}
-																		</span>
-																		<span className="text-xs text-gray-600 truncate max-w-[140px]">{first.file_name || 'uploaded design'}</span>
-																	</span>
-																),
-															});
-														}
+																		</div>
+																		<div className="text-xs text-gray-600 truncate max-w-[140px]">{first?.file_name || 'uploaded design'}</div>
+																	</div>
+																	{extra > 0 && (
+																		<div className="inline-flex items-center justify-center bg-transparent text-black text-[15px] font-semibold rounded-full w-6 h-6">
+																			+{extra}
+																		</div>
+																	)}
+																</div>
+															);
+														})();
 														if (Array.isArray(it.variants)) {
 															for (const v of it.variants) {
 																const label = labelFor(v?.group, v?.value);
@@ -667,9 +879,10 @@ const OrderConfirmationPage = () => {
 														});
 														return (
 															<>
+																{designBlock}
 																{specs.map((s, idx) => (
 																	<div key={`${idx}-${s.label}`}>
-																		{String(s.label || '').toLowerCase() === 'design' ? s.value : (<>{s.label}: {s.value}</>)}
+																		{s.label}: {s.value}
 																	</div>
 																))}
 																<div>Qty: {it.quantity}</div>
@@ -692,10 +905,6 @@ const OrderConfirmationPage = () => {
 								<div className="flex justify-between  text-[16px] font-semibold text-gray-400">
 									<span>Subtotal</span>
 									<span className="text-black font-semibold">₱{subtotal.toFixed(2)}</span>
-								</div>
-								<div className="flex text-[14px] justify-between font-semibold text-gray-400 italic">
-									<span>Total weight</span>
-									<span className="text-black font-semibold">{totalWeightGrams.toLocaleString()} g</span>
 								</div>
 								<div className="flex justify-between  text-[16px] font-semibold text-gray-400">
 									<span>Shipping</span>

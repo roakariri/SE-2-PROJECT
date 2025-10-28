@@ -30,8 +30,11 @@ const ProductInfo = () => {
     const [lastFavResp, setLastFavResp] = useState(null);
     const [detailsOpen, setDetailsOpen] = useState(true);
     const [quantity, setQuantity] = useState(1);
+    const [maxQuantity, setMaxQuantity] = useState(Number.MAX_SAFE_INTEGER);
     const [variantGroups, setVariantGroups] = useState([]);
     const [selectedVariants, setSelectedVariants] = useState({});
+    const [editingCartId, setEditingCartId] = useState(null);
+    const [fromCart, setFromCart] = useState(false);
 
     // If we're on /p/:slug use that param; otherwise fall back to last path segment
     const pathParts = location.pathname.split('/').filter(Boolean);
@@ -205,6 +208,52 @@ const ProductInfo = () => {
         }
         setSelectedVariants(initial);
     }, [variantGroups]);
+
+    // Fast-path: hydrate from navigation state when editing from Cart.
+    // This attempts a tolerant match of nav-provided variants to the loaded variantGroups
+    // before hitting any DB restore path (ProductInfo does not always fetch cart rows).
+    useEffect(() => {
+        try {
+            if (!variantGroups || !variantGroups.length) return;
+            const cartRow = location.state?.cartRow;
+            if (!cartRow || !location.state?.fromCart) return;
+            if (Object.keys(selectedVariants || {}).length) return;
+
+            const navVariants = Array.isArray(cartRow?.variants) ? cartRow.variants : null;
+            if (!navVariants) return;
+
+            const normalize = (s) => String(s || '').toLowerCase().trim();
+            const fallback = {};
+
+            for (const nv of navVariants) {
+                const gName = normalize(nv.group || nv.group_name || nv.groupName);
+                const vName = normalize(nv.value || nv.value_name || nv.valueName);
+                const group = variantGroups.find(gg => {
+                    const gn = normalize(gg.name || '');
+                    return gn === gName || gn.includes(gName) || gName.includes(gn);
+                });
+                if (!group) continue;
+                const match = (group.values || []).find(v => normalize(v.name || v.value || '') === vName || String(v.id) === String(nv.product_variant_value_id ?? nv.id ?? nv.variant_value_id));
+                if (match) fallback[String(group.id)] = match;
+            }
+
+            if (Object.keys(fallback).length) {
+                setSelectedVariants(fallback);
+                if (Number(cartRow.quantity) > 0) setQuantity(Number(cartRow.quantity));
+                // Apply inventory-derived max quantity when available from the cart row
+                try {
+                    const invQty = Number(cartRow?.inventory?.quantity);
+                    if (!isNaN(invQty) && invQty > 0) setMaxQuantity(invQty);
+                } catch (e) {
+                    /* ignore */
+                }
+                setFromCart(true);
+                setEditingCartId(cartRow.cart_id || null);
+            }
+        } catch (e) {
+            console.debug('[tryHydrateFromNav][ProductInfo] failed', e);
+        }
+    }, [variantGroups, location.state]);
 
     // Resolve imageKey to a public URL (robust: accepts full urls, leading slashes, and tries common buckets)
     useEffect(() => {
@@ -631,7 +680,7 @@ const ProductInfo = () => {
     };
 
     const toggleDetails = () => setDetailsOpen((s) => !s);
-    const incrementQuantity = () => setQuantity((q) => q + 1);
+    const incrementQuantity = () => setQuantity((q) => Math.min(maxQuantity || Number.MAX_SAFE_INTEGER, q + 1));
     const decrementQuantity = () => setQuantity((q) => Math.max(1, q - 1));
 
     const selectVariant = (groupId, value) => {
@@ -1389,7 +1438,8 @@ const ProductInfo = () => {
 
                         <div className="mb-6">
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">UPLOAD DESIGN</div>
-                            <UploadDesign productId={productId} session={session} />
+                            {/* When editing from cart, enable edit mode and pass the cart id so UploadDesign will load existing files and respect upload limits */}
+                            <UploadDesign productId={productId} session={session} isEditMode={fromCart} cartId={editingCartId} setUploadedFileMetas={() => {}} />
                         </div>
 
                         <div className="mb-6">

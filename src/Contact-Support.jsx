@@ -2,6 +2,7 @@ import { UserAuth } from "./context/AuthContext";
 import ContactSupportPage from "./components/Legal Compliances/Contact-Support-page";
 import Header from "./components/visitor/Header";
 import Footer from "./components/visitor/Footer";
+import ChatbotPage from "./components/ChatBot/Chatbot-page";
 import Navigation from "./components/registered/Navigation";
 
 function ContactSupport() {
@@ -9,9 +10,10 @@ function ContactSupport() {
   return (
 
     <div className="font-dm-sans">
-      {session ? <Navigation /> : <Header />}
-      <ContactSupportPage />
-      <Footer />
+  {session ? <Navigation /> : <Header />}
+  <ContactSupportPage />
+  <ChatbotPage />
+  <Footer />
     </div>
  
   );

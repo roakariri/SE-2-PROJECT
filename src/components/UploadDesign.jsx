@@ -1,7 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabaseClient';
 
-export default function UploadDesign({ productId, session, hidePreviews = false, isEditMode = false, cartId = null }) {
+export const UPLOAD_MAX_FILES = 3;
+
+const getEffectiveCount = (metas, files) => {
+    const metaCount = Array.isArray(metas) ? metas.length : 0;
+    const fileCount = Array.isArray(files) ? files.length : 0;
+    return Math.max(metaCount, fileCount);
+};
+
+export default function UploadDesign({ productId, session, hidePreviews = false, isEditMode = false, cartId = null, setUploadedFileMetas: parentSetUploadedFileMetas, maxFiles = UPLOAD_MAX_FILES, initialMetas = null }) {
     const fileInputRef = useRef(null);
     const [uploading, setUploading] = useState(false);
     const [uploadedFiles, setUploadedFiles] = useState([]);
@@ -9,6 +17,28 @@ export default function UploadDesign({ productId, session, hidePreviews = false,
     const [uploadedFilePaths, setUploadedFilePaths] = useState([]);
     const [uploadedPreviewUrls, setUploadedPreviewUrls] = useState([]);
     const [uploadError, setUploadError] = useState(null);
+    // totalUploadedCount accounts for DB-loaded files plus newly selected ones without double-counting
+    const totalUploadedCount = getEffectiveCount(uploadedFileMetas, uploadedFiles);
+
+    // Hydrate local state when parent provides preloaded metadata (e.g., editing a cart row)
+    useEffect(() => {
+        if (!Array.isArray(initialMetas) || initialMetas.length === 0) return;
+        setUploadedFileMetas((prev) => {
+            if (Array.isArray(prev) && prev.length > 0) return prev;
+            const normalized = initialMetas
+                .map((meta) => {
+                    if (!meta) return null;
+                    const fid = meta.file_id ?? meta.id;
+                    return {
+                        ...meta,
+                        id: fid,
+                        file_id: fid,
+                    };
+                })
+                .filter(Boolean);
+            return normalized;
+        });
+    }, [initialMetas]);
 
     const getCurrentUserId = async () => {
         if (session?.user?.id) return session.user.id;
@@ -26,6 +56,14 @@ export default function UploadDesign({ productId, session, hidePreviews = false,
         const files = Array.from(e.target.files || []);
         if (files.length === 0) return;
         setUploadError(null);
+
+        // Limit total uploaded files to `maxFiles` (consider already-saved uploadedFileMetas as well)
+    const currentTotal = getEffectiveCount(uploadedFileMetas, uploadedFiles);
+        if (currentTotal + files.length > maxFiles) {
+            setUploadError(`Maximum ${maxFiles} files allowed`);
+            try { if (fileInputRef.current) fileInputRef.current.value = null; } catch (e) {}
+            return;
+        }
 
     const MAX_BYTES = 10 * 1024 * 1024;
     // only allow PNG, JPG/JPEG, SVG (include common svg mime fallbacks)
@@ -53,7 +91,7 @@ export default function UploadDesign({ productId, session, hidePreviews = false,
         }
 
         setUploading(true);
-        const uploadedFilesLocal = [];
+                const uploadedFilesLocal = [];
         const uploadedMetasLocal = [];
         const uploadedPathsLocal = [];
 
@@ -97,9 +135,11 @@ export default function UploadDesign({ productId, session, hidePreviews = false,
                 uploadedPathsLocal.push(filePath);
             }
 
-            setUploadedFiles(prev => [...prev, ...uploadedFilesLocal]);
+                setUploadedFiles(prev => [...prev, ...uploadedFilesLocal]);
             setUploadedFileMetas(prev => [...prev, ...uploadedMetasLocal]);
-            setUploadedFilePaths(prev => [...prev, ...uploadedPathsLocal]);
+            if (parentSetUploadedFileMetas) {
+                parentSetUploadedFileMetas(prev => [...prev, ...uploadedMetasLocal]);
+            }
             setUploadError(null);
         } catch (err) {
             console.error('Upload error:', err);
@@ -136,6 +176,9 @@ export default function UploadDesign({ productId, session, hidePreviews = false,
         } finally {
             setUploadedFiles(prev => prev.filter((_, i) => i !== index));
             setUploadedFileMetas(prev => prev.filter((_, i) => i !== index));
+            if (parentSetUploadedFileMetas) {
+                parentSetUploadedFileMetas(prev => prev.filter((_, i) => i !== index));
+            }
             setUploadedFilePaths(prev => prev.filter((_, i) => i !== index));
             setUploadedPreviewUrls(prev => prev.filter((_, i) => i !== index));
         }
@@ -167,6 +210,9 @@ export default function UploadDesign({ productId, session, hidePreviews = false,
         if (!isEditMode) {
             // clear any previously loaded metas when not editing
             setUploadedFileMetas([]);
+            if (parentSetUploadedFileMetas) {
+                parentSetUploadedFileMetas([]);
+            }
             setUploadedFilePaths([]);
             return;
         }
@@ -195,6 +241,9 @@ export default function UploadDesign({ productId, session, hidePreviews = false,
                     if (!isMounted) return;
                     if (Array.isArray(fallback.data) && fallback.data.length > 0) {
                         setUploadedFileMetas(fallback.data);
+                        if (parentSetUploadedFileMetas) {
+                            parentSetUploadedFileMetas(fallback.data);
+                        }
                         setUploadedFilePaths([]);
                     }
                     return;
@@ -204,6 +253,9 @@ export default function UploadDesign({ productId, session, hidePreviews = false,
                 if (Array.isArray(data) && data.length > 0) {
                     const normalizedData = data.map(r => ({ ...r, id: r.file_id ?? r.id }));
                     setUploadedFileMetas(normalizedData);
+                    if (parentSetUploadedFileMetas) {
+                        parentSetUploadedFileMetas(normalizedData);
+                    }
                     setUploadedFilePaths([]);
                 }
             } catch (err) {
@@ -262,6 +314,9 @@ export default function UploadDesign({ productId, session, hidePreviews = false,
                     if (!res.error && Array.isArray(res.data) && res.data.length > 0) {
                         const normalizedData = res.data.map(r => ({ ...r, id: r.file_id ?? r.id }));
                         setUploadedFileMetas(normalizedData);
+                        if (parentSetUploadedFileMetas) {
+                            parentSetUploadedFileMetas(normalizedData);
+                        }
                         setUploadedFilePaths([]);
                     }
                 } catch (refetchErr) {
@@ -279,15 +334,15 @@ export default function UploadDesign({ productId, session, hidePreviews = false,
     return (
         <div className="flex items-center gap-4">
             {/* accept only PNG, JPG/JPEG, SVG (include .svg extension for better platform support) */}
-            <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/svg+xml,.svg" className="hidden" onChange={handleFileChange} multiple />
+                <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/svg+xml,.svg" className="hidden" onChange={handleFileChange} multiple />
             <div className="flex items-center gap-4">
-                <button type="button" className="bg-[#27496d] text-white px-4 py-2 rounded flex items-center gap-2 focus:outline-none focus:ring-0" onClick={() => fileInputRef.current && fileInputRef.current.click()} disabled={uploading} aria-busy={uploading}>
+                <button type="button" className="bg-[#27496d] text-white px-4 py-2 rounded flex items-center gap-2 focus:outline-none focus:ring-0 disabled:bg-gray-400 disabled:cursor-not-allowed" onClick={() => fileInputRef.current && fileInputRef.current.click()} disabled={uploading || totalUploadedCount >= maxFiles} aria-busy={uploading}>
                     <img src="/logo-icon/upload.svg" alt="upload" className="h-4 w-4" />
                     <span>{uploading ? 'UPLOADING...' : 'UPLOAD FILE'}</span>
                 </button>
 
                 {!hidePreviews && uploadedPreviewUrls && uploadedPreviewUrls.length > 0 && (
-                    <div className="flex gap-2">
+                    <div className="grid grid-cols-2 gap-2">
                         {uploadedPreviewUrls.map((url, i) => (
                             <div key={i} className="relative">
                                 <div className="border border-dashed rounded flex flex-row items-center justify-center gap-2 px-3 h-10" style={{ borderColor: '#d1d5db', minWidth: '160px' }}>

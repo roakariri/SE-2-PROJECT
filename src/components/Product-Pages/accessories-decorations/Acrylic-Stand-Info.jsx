@@ -40,6 +40,7 @@ const Acrylicstand = () => {
     const [uploadedFileMetas, setUploadedFileMetas] = useState([]); // DB rows
     const [uploadResetKey, setUploadResetKey] = useState(0);
     const [showUploadUI, setShowUploadUI] = useState(true);
+    const [showUploadError, setShowUploadError] = useState(false);
 
     const slug = location.pathname.split('/').filter(Boolean).pop();
     const hasLoggedViewRef = useRef(false);
@@ -139,11 +140,148 @@ const Acrylicstand = () => {
             setEditingCartId(cartRow.cart_id);
             setQuantity(cartRow.quantity || 1);
 
-            // Prefill dimensions if available
-            if (cartRow.length) setLength(cartRow.length);
-            if (cartRow.width) setWidth(cartRow.width);
+            const asNumber = (val) => {
+                if (val === null || val === undefined || val === '') return null;
+                const num = Number(val);
+                return Number.isNaN(num) ? null : num;
+            };
+
+            // Prefill dimensions from either flattened columns or nested cart_dimensions
+            const navLength = asNumber(cartRow.length ?? cartRow.stand_length ?? cartRow.length_cm);
+            const navWidth = asNumber(cartRow.width ?? cartRow.stand_width ?? cartRow.width_cm);
+            if (navLength != null) setLength(navLength);
+            if (navWidth != null) setWidth(navWidth);
+
+            const navDims = Array.isArray(cartRow.dimensions) ? cartRow.dimensions : [];
+            if (navDims.length > 0) {
+                const primaryDim = navDims.find(d => !String(d?.target || '').toLowerCase().includes('base')) ?? navDims[0];
+                const baseDim = navDims.find(d => String(d?.target || '').toLowerCase().includes('base'));
+
+                const primaryLength = asNumber(primaryDim?.length ?? primaryDim?.length_cm ?? primaryDim?.height ?? primaryDim?.height_cm);
+                const primaryWidth = asNumber(primaryDim?.width ?? primaryDim?.width_cm ?? primaryDim?.depth ?? primaryDim?.depth_cm);
+                if (primaryLength != null) setLength(primaryLength);
+                if (primaryWidth != null) setWidth(primaryWidth);
+
+                const baseLengthCandidate = asNumber(
+                    baseDim?.length ??
+                    baseDim?.base_length ??
+                    baseDim?.length_cm ??
+                    cartRow.base_length ??
+                    cartRow.base_length_cm ??
+                    (primaryDim?.base_length ?? primaryDim?.base_length_cm)
+                );
+                const baseWidthCandidate = asNumber(
+                    baseDim?.width ??
+                    baseDim?.base_width ??
+                    baseDim?.width_cm ??
+                    cartRow.base_width ??
+                    cartRow.base_width_cm ??
+                    (primaryDim?.base_width ?? primaryDim?.base_width_cm)
+                );
+                if (baseLengthCandidate != null) setBaseLength(baseLengthCandidate);
+                if (baseWidthCandidate != null) setBaseWidth(baseWidthCandidate);
+            }
         }
     }, [location.state]);
+
+    // Seed uploaded design metadata from navigation state so Edit → Update works before Supabase fetch returns
+    useEffect(() => {
+        if (!location.state?.fromCart) return;
+        const navFiles = location.state?.cartRow?.uploaded_files;
+        if (!Array.isArray(navFiles) || navFiles.length === 0) return;
+        setUploadedFileMetas((prev) => {
+            if (Array.isArray(prev) && prev.length > 0) return prev;
+            const normalized = navFiles
+                .map((file) => {
+                    if (!file) return null;
+                    const fid = file.file_id ?? file.id;
+                    return {
+                        ...file,
+                        id: fid,
+                        file_id: fid,
+                    };
+                })
+                .filter(Boolean);
+            return normalized;
+        });
+        setShowUploadUI(true);
+    }, [location.state]);
+
+    // Try to hydrate selectedVariants / quantity from navigation state when editing from cart.
+    // This is a fast-path to avoid waiting for the DB restore when possible.
+    useEffect(() => {
+        const tryHydrateFromNav = () => {
+            try {
+                const cartRow = location.state?.cartRow;
+                if (!fromCart || !cartRow) return false;
+                if (!Array.isArray(variantGroups) || variantGroups.length === 0) return false;
+
+                const normalizeName = (s) => String(s || '').toLowerCase().trim();
+                const matchByGroupId = (groupId) => variantGroups.find((gg) => String(gg.id) === String(groupId));
+                const matchByGroupName = (name) => {
+                    const target = normalizeName(name);
+                    return variantGroups.find((gg) => {
+                        const ggName = normalizeName(gg.name);
+                        return ggName === target || ggName.includes(target) || target.includes(ggName);
+                    });
+                };
+                const matchValue = (group, candidate) => {
+                    const vName = normalizeName(candidate?.value ?? candidate?.name ?? candidate);
+                    const pvvid = String(candidate?.product_variant_value_id ?? candidate?.variant_value_id ?? candidate?.id ?? candidate);
+                    return (group?.values || []).find((val) => {
+                        const namesMatch = normalizeName(val.name) === vName || normalizeName(val.value) === vName;
+                        const idsMatch = String(val.product_variant_value_id ?? val.id) === pvvid;
+                        return namesMatch || idsMatch;
+                    });
+                };
+
+                const seeded = {};
+
+                const navCartVariants = Array.isArray(cartRow?.cart_variants) ? cartRow.cart_variants : [];
+                for (const cv of navCartVariants) {
+                    const pv = cv?.product_variant_values;
+                    const vv = pv?.variant_values;
+                    if (!pv || !vv) continue;
+                    const gid = vv.variant_group_id ?? vv.variant_groups?.variant_group_id ?? vv.variant_groups?.id;
+                    const group = matchByGroupId(gid) || matchByGroupName(vv.variant_groups?.name ?? vv.variant_groups_name ?? vv.group_name ?? cv.group_name);
+                    if (!group) continue;
+                    const matchedVal = matchValue(group, {
+                        value: vv.value_name,
+                        name: vv.value_name,
+                        product_variant_value_id: pv.product_variant_value_id,
+                        variant_value_id: vv.variant_value_id,
+                    });
+                    if (matchedVal) {
+                        seeded[String(group.id)] = matchedVal;
+                    }
+                }
+
+                if (!Object.keys(seeded).length) {
+                    const navVariants = Array.isArray(cartRow?.variants) ? cartRow.variants : [];
+                    for (const nv of navVariants) {
+                        if (!nv) continue;
+                        const group = matchByGroupName(nv.group);
+                        if (!group) continue;
+                        const matched = matchValue(group, nv);
+                        if (matched) seeded[String(group.id)] = matched;
+                    }
+                }
+
+                if (Object.keys(seeded).length) {
+                    setSelectedVariants((prev) => ({ ...prev, ...seeded }));
+                    if (cartRow.quantity) setQuantity(Number(cartRow.quantity) || 1);
+                    return true;
+                }
+            } catch (e) {
+                console.debug('[Acrylic-Stand] tryHydrateFromNav failed', e);
+            }
+            return false;
+        };
+
+        if (fromCart && editingCartId && variantGroups && variantGroups.length) {
+            tryHydrateFromNav();
+        }
+    }, [fromCart, editingCartId, variantGroups, location.state]);
 
     // Keep quantity in sync during edit session
     useEffect(() => {
@@ -184,9 +322,37 @@ const Acrylicstand = () => {
                 if (error || !data) return;
                 if (Number(data.quantity) > 0) setQuantity(Number(data.quantity));
                 if (Array.isArray(data.cart_dimensions) && data.cart_dimensions.length > 0) {
-                    const dim = data.cart_dimensions[0];
-                    if (dim.length != null) setLength(Number(dim.length));
-                    if (dim.width != null) setWidth(Number(dim.width));
+                    const parseNum = (val) => {
+                        if (val === null || val === undefined || val === '') return null;
+                        const num = Number(val);
+                        return Number.isNaN(num) ? null : num;
+                    };
+
+                    const dims = data.cart_dimensions;
+                    const primaryDim = dims.find(d => !String(d?.target || '').toLowerCase().includes('base')) ?? dims[0];
+                    const baseDim = dims.find(d => String(d?.target || '').toLowerCase().includes('base'));
+
+                    const lengthCandidate = parseNum(primaryDim?.length ?? primaryDim?.length_cm ?? primaryDim?.height ?? primaryDim?.height_cm);
+                    const widthCandidate = parseNum(primaryDim?.width ?? primaryDim?.width_cm ?? primaryDim?.depth ?? primaryDim?.depth_cm);
+                    if (lengthCandidate != null) setLength(lengthCandidate);
+                    if (widthCandidate != null) setWidth(widthCandidate);
+
+                    const baseLengthCandidate = parseNum(
+                        baseDim?.length ??
+                        baseDim?.base_length ??
+                        baseDim?.length_cm ??
+                        primaryDim?.base_length ??
+                        primaryDim?.base_length_cm
+                    );
+                    const baseWidthCandidate = parseNum(
+                        baseDim?.width ??
+                        baseDim?.base_width ??
+                        baseDim?.width_cm ??
+                        primaryDim?.base_width ??
+                        primaryDim?.base_width_cm
+                    );
+                    if (baseLengthCandidate != null) setBaseLength(baseLengthCandidate);
+                    if (baseWidthCandidate != null) setBaseWidth(baseWidthCandidate);
                 }
                 if (Array.isArray(data.cart_variants)) {
                     const vMap = {};
@@ -204,7 +370,26 @@ const Acrylicstand = () => {
                             price: Number(cv.price ?? pv.price ?? 0)
                         };
                     });
-                    if (Object.keys(vMap).length) setSelectedVariants(vMap);
+                    if (Object.keys(vMap).length) {
+                        setSelectedVariants(vMap);
+                    } else {
+                        // Fallback: try to hydrate from the navigation cartRow if present
+                        const cartRow = location.state?.cartRow;
+                        const navVariants = Array.isArray(cartRow?.variants) ? cartRow.variants : null;
+                        if (navVariants && Array.isArray(variantGroups) && variantGroups.length) {
+                            const fallback = {};
+                            const normalize = (s) => String(s || '').toLowerCase().trim();
+                            for (const nv of navVariants) {
+                                const gName = normalize(nv.group);
+                                const vName = normalize(nv.value);
+                                const group = variantGroups.find(gg => normalize(gg.name) === gName || normalize(gg.name).includes(gName) || gName.includes(normalize(gg.name)));
+                                if (!group) continue;
+                                const match = (group.values || []).find(v => normalize(v.name) === vName || normalize(v.value) === vName || String(v.id) === String(nv.product_variant_value_id ?? nv.product_variant_value_id));
+                                if (match) fallback[String(group.id)] = match;
+                            }
+                            if (Object.keys(fallback).length) setSelectedVariants(fallback);
+                        }
+                    }
                 }
             } catch (e) {
                 console.debug('[EditCart] restore stand cart failed', e);
@@ -360,7 +545,6 @@ const Acrylicstand = () => {
                     .from('inventory')
                     .select('inventory_id, quantity, low_stock_limit')
                     .eq('combination_id', match.combination_id)
-                    .eq('status', 'in_stock')
                     .single();
                 console.log('[Stock][AcrylicStand] inventory', { inv, invError });
                 if (invError || !inv) {
@@ -653,6 +837,7 @@ const Acrylicstand = () => {
     const [reviewsLoading, setReviewsLoading] = useState(false);
     const [reviewsAvailable, setReviewsAvailable] = useState(false);
     const [reviews, setReviews] = useState([]);
+    const [starFilterRating, setStarFilterRating] = useState(0);
     const [reviewAuthors, setReviewAuthors] = useState({});
     const [verifiedBuyerMap, setVerifiedBuyerMap] = useState({});
     const [isReviewFormOpen, setIsReviewFormOpen] = useState(false);
@@ -970,8 +1155,6 @@ const Acrylicstand = () => {
             return;
         }
 
-        setIsAdding(true);
-
         const userId = session?.user?.id ?? await getCurrentUserId();
         if (!userId) {
             console.debug('[AcrylicStand] user not signed in, redirecting to signin');
@@ -979,6 +1162,14 @@ const Acrylicstand = () => {
             navigate("/signin");
             return;
         }
+
+        if (!uploadedFileMetas || uploadedFileMetas.length === 0) {
+            setShowUploadError(true);
+            setTimeout(() => setShowUploadError(false), 2000);
+            return;
+        }
+
+        setIsAdding(true);
 
         setCartError(null);
         setCartSuccess(null);
@@ -1014,12 +1205,30 @@ const Acrylicstand = () => {
 
                 if (deleteVariantsError) throw deleteVariantsError;
 
-                const variantInserts = Object.entries(selectedVariants).map(([groupId, value]) => ({
-                    cart_id: editingCartId,
-                    user_id: userId,
-                    cartvariant_id: value?.variant_value_id ?? value?.id ?? value,
-                    price: Number(value?.price) || 0,
-                }));
+                const variantInserts = [];
+                const skipped = [];
+                for (const value of Object.values(selectedVariants || {})) {
+                    const rawId = value?.variant_value_id ?? value?.product_variant_value_id ?? value?.id ?? value;
+                    if (isSyntheticVariantId(rawId)) {
+                        skipped.push(rawId);
+                        continue;
+                    }
+                    const cartVariantId = resolveVariantInsertId(rawId);
+                    if (cartVariantId == null) {
+                        skipped.push(rawId);
+                        continue;
+                    }
+                    variantInserts.push({
+                        cart_id: editingCartId,
+                        user_id: userId,
+                        cartvariant_id: cartVariantId,
+                        price: Number(value?.price) || 0,
+                    });
+                }
+
+                if (skipped.length > 0) {
+                    console.debug('[AcrylicStand] skipped variant ids during edit update', { skipped, editingCartId });
+                }
 
                 if (variantInserts.length > 0) {
                     const { error: variantsError } = await supabase.from("cart_variants").insert(variantInserts);
@@ -1073,13 +1282,15 @@ const Acrylicstand = () => {
                 if (varError) throw varError;
 
                 const existingVarSet = new Set((cartVariants || []).map((v) => `${v.cartvariant_id}`));
-                // Build selectedVarSet but ignore synthetic/non-numeric ids (e.g., 'custom_size')
-                const selectedVarIds = Object.values(selectedVariants || {}).map((val) => (val?.variant_value_id ?? val?.id ?? val));
-                const selectedVarSet = new Set(selectedVarIds.reduce((acc, id) => {
-                    const n = Number(id);
-                    if (!isNaN(n) && Number.isFinite(n)) acc.push(String(n));
-                    return acc;
-                }, []));
+                const selectedVarIds = Object.values(selectedVariants || {})
+                    .map((val) => val?.variant_value_id ?? val?.product_variant_value_id ?? val?.id ?? val)
+                    .filter((id) => !isSyntheticVariantId(id))
+                    .map((id) => {
+                        const normalized = resolveVariantInsertId(id);
+                        return normalized == null ? null : String(normalized);
+                    })
+                    .filter(Boolean);
+                const selectedVarSet = new Set(selectedVarIds);
 
                 if (existingVarSet.size === selectedVarSet.size && [...existingVarSet].every((v) => selectedVarSet.has(v))) {
                     cartMatched = true;
@@ -1136,21 +1347,27 @@ const Acrylicstand = () => {
 
                 cartId = cartData.cart_id;
 
-                // Only insert variants that have numeric IDs (skip synthetic custom_size/custom_base_size)
-                const variantInserts = Object.entries(selectedVariants).map(([groupId, value]) => {
-                    const rawId = value?.variant_value_id ?? value?.id ?? value;
-                    const numericId = Number(rawId);
-                    return {
+                const variantInserts = [];
+                const skipped = [];
+                for (const value of Object.values(selectedVariants || {})) {
+                    const rawId = value?.variant_value_id ?? value?.product_variant_value_id ?? value?.id ?? value;
+                    if (isSyntheticVariantId(rawId)) {
+                        skipped.push(rawId);
+                        continue;
+                    }
+                    const cartVariantId = resolveVariantInsertId(rawId);
+                    if (cartVariantId == null) {
+                        skipped.push(rawId);
+                        continue;
+                    }
+                    variantInserts.push({
                         cart_id: cartId,
                         user_id: userId,
-                        cartvariant_id: numericId,
+                        cartvariant_id: cartVariantId,
                         price: Number(value?.price) || 0,
-                        _raw_id: rawId,
-                    };
-                }).filter(item => !isNaN(item.cartvariant_id) && Number.isFinite(item.cartvariant_id)).map(({_raw_id, ...keep}) => keep);
-                // Log any skipped synthetic variants for debugging
-                const skipped = Object.entries(selectedVariants || {}).map(([g, v]) => v?.variant_value_id ?? v?.id ?? v).filter(id => isNaN(Number(id)));
-                if (skipped.length > 0) console.debug('[AcrylicStand] skipped synthetic variant ids when inserting cart_variants', { skipped });
+                    });
+                }
+                if (skipped.length > 0) console.debug('[AcrylicStand] skipped variant ids when inserting cart_variants', { skipped });
 
                 if (variantInserts.length > 0) {
                     console.debug('[AcrylicStand] inserting cart_variants', { cartId, variantInserts });
@@ -1210,11 +1427,24 @@ const Acrylicstand = () => {
     };
 
     const toggleDetails = () => setDetailsOpen((s) => !s);
-    const incrementQuantity = () => setQuantity((q) => q + 1);
+    const incrementQuantity = () => setQuantity((q) => Math.min(q + 1, stockInfo?.quantity || Infinity));
     const decrementQuantity = () => setQuantity((q) => Math.max(1, q - 1));
 
     const selectVariant = (groupId, value) => {
         setSelectedVariants(prev => ({ ...prev, [groupId]: value }));
+    };
+
+    const isSyntheticVariantId = (rawId) => {
+        if (rawId == null) return true;
+        const str = String(rawId).toLowerCase();
+        return str === 'custom_size' || str === 'custom_base_size' || str.startsWith('custom_');
+    };
+
+    const resolveVariantInsertId = (rawId) => {
+        if (rawId == null) return null;
+        const num = Number(rawId);
+        if (!Number.isNaN(num) && Number.isFinite(num)) return num;
+        return String(rawId);
     };
 
     // totalPrice is derived state: base price + selected variant prices + size adjustments, multiplied by quantity
@@ -1641,14 +1871,14 @@ const Acrylicstand = () => {
                             {Object.values(selectedVariants).filter(v => v?.id).length > 0 ? (
                                 stockInfo ? (
                                     stockInfo.quantity === 0 ? (
-                                        <span className="text-red-600 font-semibold">Out of Stocks</span>
-                                    ) : stockInfo.quantity <= 5 ? (
-                                        <span className="text-yellow-600 font-semibold">Low on Stocks: {stockInfo.quantity}</span>
+                                        <span className="text-black font-semibold">Out of stock</span>
+                                    ) : stockInfo.quantity === 1 ? (
+                                        <span className="text-black font-semibold">Stock: {stockInfo.quantity}</span>
                                     ) : (
-                                        <span className="text-green-700 font-semibold">Stock: {stockInfo.quantity}</span>
+                                        <span className="text-black font-semibold">Stocks: {stockInfo.quantity}</span>
                                     )
                                 ) : (
-                                    <span className="text font-semibold">Checking stocks.</span>
+                                    <span className="text font-semibold">Checking stock.</span>
                                 )
                             ) : (
                                 <span className="text-gray-500">Select all variants to see stock.</span>
@@ -1865,16 +2095,25 @@ const Acrylicstand = () => {
                         
 
                         <div className="mb-6">
-                            <div className="text-[16px] font-semibold text-gray-700 mb-2">UPLOAD DESIGN</div>
-                            <UploadDesign key={uploadResetKey} productId={productId} session={session} hidePreviews={!showUploadUI} isEditMode={fromCart && !!editingCartId} cartId={fromCart ? editingCartId : null} setUploadedFileMetas={setUploadedFileMetas} />
+                            <div className="text-[16px] font-semibold text-gray-700 mb-2">UPLOAD DESIGN{showUploadError && <span className="text-red-600 text-sm"> *Required</span>}</div>
+                            <UploadDesign
+                                key={uploadResetKey}
+                                productId={productId}
+                                session={session}
+                                hidePreviews={!showUploadUI}
+                                isEditMode={fromCart && !!editingCartId}
+                                cartId={fromCart ? editingCartId : null}
+                                setUploadedFileMetas={setUploadedFileMetas}
+                                initialMetas={uploadedFileMetas}
+                            />
                         </div>
 
                         <div className="mb-6">
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">QUANTITY</div>
                             <div className="inline-flex items-center border border-black rounded">
-                                <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={decrementQuantity} aria-label="Decrease quantity" disabled={quantity <= 1}>-</button>
+                                <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={decrementQuantity} aria-label="Decrease quantity" disabled={quantity <= 1 || (stockInfo && stockInfo.quantity <= 0)}>-</button>
                                 <div className="px-4 text-black" aria-live="polite">{quantity}</div>
-                                <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={incrementQuantity} aria-label="Increase quantity">+</button>
+                                <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={incrementQuantity} aria-label="Increase quantity" disabled={stockInfo && stockInfo.quantity <= 0}>+</button>
                             </div>
                         </div>
 
@@ -1882,9 +2121,9 @@ const Acrylicstand = () => {
                             <button
                                 type="button"
                                 onClick={handleAddToCart}
-                                disabled={isAdding}
+                                disabled={isAdding || (stockInfo && stockInfo.quantity <= 0)}
                                 aria-busy={isAdding}
-                                className={`bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0 ${isAdding ? 'opacity-60 pointer-events-none' : ''}`}
+                                className={`bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0 ${(isAdding || (stockInfo && stockInfo.quantity <= 0)) ? 'opacity-60 pointer-events-none' : ''}`}
                             >
                                 {cartSuccess ? cartSuccess : (isAdding ? (fromCart ? 'UPDATING...' : 'ADDING...') : (fromCart ? 'UPDATE CART' : 'ADD TO CART'))}
                             </button>
@@ -1983,6 +2222,36 @@ const Acrylicstand = () => {
                     <div className="px-4 tablet:px-6">
                         <hr className="mt-2 border-t border-gray-300" />
                     </div>
+                    {/* Star Filter Section */}
+                    {!isReviewFormOpen && (
+                        <div className="px-4 tablet:px-6 pt-4">
+                            <div className="flex items-center gap-2">
+                                <div className="text-sm font-medium text-[#111233]">Filter by:</div>
+                                <div className="flex flex-wrap gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setStarFilterRating(0)}
+                                        className={`px-3 py-1 text-sm rounded border ${starFilterRating === 0 ? 'bg-gray-200 text-gray-700 font-semibold border-gray-400' : 'bg-white text-gray-700 border-gray-300'} focus:outline-none focus:ring-0`}
+                                    >
+                                        All
+                                    </button>
+                                    {[5, 4, 3, 2, 1].map((rating) => (
+                                        <button
+                                            key={rating}
+                                            type="button"
+                                            onClick={() => setStarFilterRating(rating)}
+                                            className={`px-3 py-1 text-sm rounded border flex items-center gap-1 ${starFilterRating === rating ? 'bg-gray-200 text-gray-700 font-semibold border-gray-400' : 'bg-white text-gray-700 border-gray-300'} focus:outline-none focus:ring-0`}
+                                        >
+                                            <svg className="h-4 w-4 text-yellow-400" viewBox="0 0 20 20" fill="currentColor" stroke="currentColor" strokeWidth="1.5" xmlns="http://www.w3.org/2000/svg">
+                                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.449a1 1 0 00-.364 1.118l1.287 3.957c.3 .921-.755 1.688-1.54 1.118L10 15.347l-3.488 2.679c-.784 .57-1.838-.197-1.54-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.525 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69L9.05 2.927z" />
+                                            </svg>
+                                            {rating}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    )}
                     {isReviewFormOpen && (
                         <div className="px-4 pb-4 tablet:px-6 tablet:pb-6 pt-4">
                             <div className="space-y-3">
@@ -2014,11 +2283,15 @@ const Acrylicstand = () => {
                                 <div>
                                     <textarea
                                         value={reviewText}
-                                        onChange={(e) => setReviewText(e.target.value)}
+                                        onChange={(e) => setReviewText(e.target.value.slice(0, 300))}
+                                        maxLength={300}
                                         rows={4}
                                         placeholder="Share your experience with this product..."
                                         className="w-full border border-black rounded-md p-3 outline-none focus:ring-0 resize-y"
                                     />
+                                    <div className="text-right text-sm text-gray-500 mt-1">
+                                        {reviewText.length}/300
+                                    </div>
                                 </div>
 
                                 <div className="flex flex-col gap-2">
@@ -2088,6 +2361,33 @@ const Acrylicstand = () => {
                             <div className="w-full mt-5">
                                 <hr className="mt-2 border-t border-gray-300" />
                             </div>
+                            <div className="pt-4">
+                                <div className="flex items-center gap-2">
+                                    <div className="text-sm font-medium text-[#111233]">Filter by:</div>
+                                    <div className="flex flex-wrap gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setStarFilterRating(0)}
+                                            className={`px-3 py-1 text-sm rounded border ${starFilterRating === 0 ? 'bg-gray-200 text-gray-700 font-semibold border-gray-400' : 'bg-white text-gray-700 border-gray-300'} focus:outline-none focus:ring-0`}
+                                        >
+                                            All
+                                        </button>
+                                        {[5, 4, 3, 2, 1].map((rating) => (
+                                            <button
+                                                key={rating}
+                                                type="button"
+                                                onClick={() => setStarFilterRating(rating)}
+                                                className={`px-3 py-1 text-sm rounded border flex items-center gap-1 ${starFilterRating === rating ? 'bg-gray-200 text-gray-700 font-semibold border-gray-400' : 'bg-white text-gray-700 border-gray-300'} focus:outline-none focus:ring-0`}
+                                            >
+                                                <svg className="h-4 w-4 text-yellow-400" viewBox="0 0 20 20" fill="currentColor" stroke="currentColor" strokeWidth="1.5" xmlns="http://www.w3.org/2000/svg">
+                                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.449a1 1 0 00-.364 1.118l1.287 3.957c.3 .921-.755 1.688-1.54 1.118L10 15.347l-3.488 2.679c-.784 .57-1.838-.197-1.54-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.525 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69L9.05 2.927z" />
+                                                </svg>
+                                                {rating}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     )}
                 </div>
@@ -2096,57 +2396,67 @@ const Acrylicstand = () => {
                 <div className="max-w-[1200px] mx-auto w-full laptop:px-2 phone:p-2 tablet:p-2 mt-2">
                     <div className="border border-black mt-[-30px] rounded-md border-t-0 rounded-t-none p-4 tablet:p-6">
                         <div className="divide-y max-h-[60vh] overflow-y-auto pr-1">
-                            {reviews.map((rev) => {
-                                const name = reviewAuthors[rev.user_id] || (rev?.user_id ? `User-${String(rev.user_id).slice(0, 8)}` : 'User');
-                                const masked = maskName(name);
-                                const created = parseReviewDate(rev.created_at);
-                                const timeLabel = created ? formatTimeAgo(created) : '';
-                                const isVerified = !!verifiedBuyerMap[rev.user_id];
-                                const images = [rev.image_1_url, rev.image_2_url, rev.image_3_url].filter(Boolean);
-                                return (
-                                    <div key={rev.id} className="py-5">
-                                        <div className="flex items-start gap-3">
-                                            <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 text-xs select-none">{(name || 'U').charAt(0)}</div>
-                                            <div className="flex-1 min-w-0">
-                                                <div className="flex items-center gap-2 text-[14px] text-[#111233]">
-                                                    <span className="font-semibold">{masked}</span>
-                                                    {isVerified && (
-                                                        <span className="text-[10px] uppercase tracking-wide bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded">Verified</span>
+                            {(() => {
+                                const filteredReviews = starFilterRating === 0 ? reviews : reviews.filter(rev => Number(rev.rating) === starFilterRating);
+                                if (filteredReviews.length === 0) {
+                                    return (
+                                        <div className="py-5 text-center">
+                                            <p className="font-dm-sans text-gray-500">No helpful reviews.</p>
+                                        </div>
+                                    );
+                                }
+                                return filteredReviews.map((rev) => {
+                                    const name = reviewAuthors[rev.user_id] || (rev?.user_id ? `User-${String(rev.user_id).slice(0, 8)}` : 'User');
+                                    const masked = maskName(name);
+                                    const created = parseReviewDate(rev.created_at);
+                                    const timeLabel = created ? formatTimeAgo(created) : '';
+                                    const isVerified = !!verifiedBuyerMap[rev.user_id];
+                                    const images = [rev.image_1_url, rev.image_2_url, rev.image_3_url].filter(Boolean);
+                                    return (
+                                        <div key={rev.id} className="py-5">
+                                            <div className="flex items-start gap-3">
+                                                <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 text-xs select-none">{(name || 'U').charAt(0)}</div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2 text-[14px] text-[#111233]">
+                                                        <span className="font-semibold">{masked}</span>
+                                                        {isVerified && (
+                                                            <span className="text-[10px] uppercase tracking-wide bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded">Verified</span>
+                                                        )}
+                                                    </div>
+                                                    {timeLabel && (
+                                                        <div className="text-[12px] text-gray-500 mt-0.5">{timeLabel}</div>
                                                     )}
-                                                </div>
-                                                {timeLabel && (
-                                                    <div className="text-[12px] text-gray-500 mt-0.5">{timeLabel}</div>
-                                                )}
-                                                <div className="mt-2 flex items-left  ml-[-50px] gap-1">
-                                                    {Array.from({ length: 5 }).map((_, i) => (
-                                                        <svg key={i} className={`h-4 w-4 ${i < (Number(rev.rating)||0) ? 'text-yellow-400' : 'text-gray-300'}`} viewBox="0 0 20 20" fill={i < (Number(rev.rating)||0) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5" xmlns="http://www.w3.org/2000/svg">
-                                                            <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.449a1 1 0 00-.364 1.118l1.287 3.957c.3 .921-.755 1.688-1.54 1.118L10 15.347l-3.488 2.679c-.784 .57-1.838-.197-1.54-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.525 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69L9.05 2.927z" />
-                                                        </svg>
-                                                    ))}
-                                                </div>
-                                                {rev.comment && (
-                                                    <p className="mt-5 ml-[-50px] font-dm-sans text-[14px] text-[#111233]">{rev.comment}</p>
-                                                )}
-                                                {images.length > 0 && (
-                                                    <div className="mt-3 ml-[-50px] flex flex-wrap gap-2">
-                                                        {images.map((src, idx) => (
-                                                            <button
-                                                                key={idx}
-                                                                type="button"
-                                                                className="block p-0 m-0 bg-transparent focus:outline-none focus:ring-0 w-20 h-20 aspect-square shrink-0 border border-black rounded"
-                                                                onClick={() => openLightbox(images, idx)}
-                                                                aria-label="Open image"
-                                                            >
-                                                                <img src={src} alt={`review-${rev.id}-${idx}`} className="w-full h-full object-cover" />
-                                                            </button>
+                                                    <div className="mt-2 flex items-left  ml-[-50px] gap-1">
+                                                        {Array.from({ length: 5 }).map((_, i) => (
+                                                            <svg key={i} className={`h-4 w-4 ${i < (Number(rev.rating)||0) ? 'text-yellow-400' : 'text-gray-300'}`} viewBox="0 0 20 20" fill={i < (Number(rev.rating)||0) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5" xmlns="http://www.w3.org/2000/svg">
+                                                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.449a1 1 0 00-.364 1.118l1.287 3.957c.3 .921-.755 1.688-1.54 1.118L10 15.347l-3.488 2.679c-.784 .57-1.838-.197-1.54-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.525 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69L9.05 2.927z" />
+                                                            </svg>
                                                         ))}
                                                     </div>
-                                                )}
+                                                    {rev.comment && (
+                                                        <p className="mt-5 ml-[-50px] font-dm-sans text-[14px] text-[#111233] break-words">{rev.comment}</p>
+                                                    )}
+                                                    {images.length > 0 && (
+                                                        <div className="mt-3 ml-[-50px] flex flex-wrap gap-2">
+                                                            {images.map((src, idx) => (
+                                                                <button
+                                                                    key={idx}
+                                                                    type="button"
+                                                                    className="block p-0 m-0 bg-transparent focus:outline-none focus:ring-0 w-20 h-20 aspect-square shrink-0 border border-black rounded"
+                                                                    onClick={() => openLightbox(images, idx)}
+                                                                    aria-label="Open image"
+                                                                >
+                                                                    <img src={src} alt={`review-${rev.id}-${idx}`} className="w-full h-full object-cover" />
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                );
-                            })}
+                                    );
+                                });
+                            })()}
                         </div>
                     </div>
                 </div>

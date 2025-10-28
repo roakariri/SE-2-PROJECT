@@ -35,13 +35,13 @@ const normalizeHexCode = (value) => {
 };
 
 // Reusable modal wrapper
-const Modal = ({ open, onClose, children }) => {
+const Modal = ({ open, onClose, children, width }) => {
     if (!open) return null;
     return (
         <div className="fixed inset-0 z-[100]">
             <div className="absolute inset-0 bg-black/40" onClick={onClose} />
             <div className="absolute inset-0 flex items-start justify-center overflow-y-auto">
-                <div className="mt-16 mb-8 w-[680px] max-w-[95vw] bg-white rounded-md shadow-lg border">
+                <div className={`mt-16 mb-8 ${width || 'w-[680px]'} max-w-[95vw] bg-white rounded-md shadow-lg border`}>
                     {children}
                 </div>
             </div>
@@ -1902,6 +1902,543 @@ const ProductsList = ({ externalSearch = '' }) => {
     );
 };
 
+// Admin > Users: list rows from user_info table
+const UsersList = ({ externalSearch = '' }) => {
+    const [rows, setRows] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
+
+    useEffect(() => {
+        let mounted = true;
+        const load = async () => {
+            setLoading(true);
+            setError(null);
+            try {
+                // Fetch up to 2000 users (adjust as needed)
+                const pageSize = 2000;
+                const { data, error } = await supabase
+                    .from('user_info')
+                    .select('*')
+                    .order('created_at', { ascending: false })
+                    .limit(pageSize);
+                if (error) throw error;
+                const mapped = (data || []).map(u => {
+                    const full = u.full_name || u.display_name || `${u.first_name || ''} ${u.last_name || ''}`.trim() || (u.email ? u.email.split('@')[0] : 'User');
+                    const email = u.email || u.email_address || u.contact_email || '';
+                    const joined = (u.created_at || u.date_joined || u.joined_at) ? (new Date(u.created_at || u.date_joined || u.joined_at)).toISOString().slice(0,10) : '';
+                    const role = u.role || u.user_role || u.type || 'Customer';
+                    // Prefer last_signed_in_at for last activity (timestampz). Fallback to other known columns.
+                    const lastActivityRaw = u.last_signed_in_at || u.last_activity || u.last_active_at || u.updated_at;
+                    const lastAct = lastActivityRaw ? (new Date(lastActivityRaw)).toISOString().slice(0,10) : '';
+                    return { id: u.id || u.user_id || u.uid || u.email, full, email, joined, role, lastAct };
+                });
+                if (mounted) setRows(mapped);
+            } catch (e) {
+                if (mounted) setError(e?.message || String(e));
+            } finally {
+                if (mounted) setLoading(false);
+            }
+        };
+        load();
+        return () => { mounted = false; };
+    }, []);
+
+    const q = String(externalSearch || '').trim().toLowerCase();
+    const filtered = q ? rows.filter(r => (r.full || '').toLowerCase().includes(q) || (r.email || '').toLowerCase().includes(q)) : rows;
+
+    // View modal state
+    const [viewUser, setViewUser] = useState(null);
+    const [viewLoading, setViewLoading] = useState(false);
+
+    // inline validation errors for admin edit (match Account page rules)
+    const [firstNameError, setFirstNameError] = useState('');
+    const [lastNameError, setLastNameError] = useState('');
+
+    const openViewModal = async (userIdOrEmail) => {
+        setViewLoading(true);
+        setViewUser(null);
+        try {
+            // Try to fetch user by id first, otherwise try by email
+            let userRow = null;
+            try {
+                const { data, error } = await supabase.from('user_info').select('*').eq('id', userIdOrEmail).maybeSingle();
+                if (!error && data) userRow = data;
+            } catch (e) { /* ignore */ }
+            if (!userRow) {
+                try {
+                    const { data, error } = await supabase.from('user_info').select('*').eq('email', userIdOrEmail).maybeSingle();
+                    if (!error && data) userRow = data;
+                } catch (e) { /* ignore */ }
+            }
+
+            // Fallback: if the passed id is actually an email string present in rows, try match by email
+            if (!userRow && String(userIdOrEmail || '').includes('@')) {
+                try {
+                    const { data, error } = await supabase.from('user_info').select('*').eq('email', userIdOrEmail).maybeSingle();
+                    if (!error && data) userRow = data;
+                } catch (e) { /* ignore */ }
+            }
+
+            // Compute order aggregates: total orders and last order date
+            let totalOrders = 0;
+            let lastOrderDate = '';
+            try {
+                if (userRow) {
+                    // Try by user id first, then by email fields
+                    const userId = userRow.id;
+                    const byId = await supabase.from('orders').select('order_id, created_at').or(`user_id.eq.${userId}`).order('created_at', { ascending: false }).limit(1);
+                    if (!byId.error && Array.isArray(byId.data)) {
+                        // count separately
+                        const { count, error: cntErr } = await supabase.from('orders').select('*', { count: 'exact', head: true }).or(`user_id.eq.${userId}`);
+                        if (!cntErr) totalOrders = Number(count || 0);
+                        if (byId.data.length > 0) lastOrderDate = (new Date(byId.data[0].created_at)).toISOString().slice(0,10);
+                    } else {
+                        // fallback by email
+                        const email = userRow.email;
+                        if (email) {
+                            const byEmail = await supabase.from('orders').select('order_id, created_at').or(`customer_email.eq.${email},email.eq.${email}`).order('created_at', { ascending: false }).limit(1);
+                            if (!byEmail.error && Array.isArray(byEmail.data)) {
+                                const { count, error: cntErr } = await supabase.from('orders').select('*', { count: 'exact', head: true }).or(`customer_email.eq.${email},email.eq.${email}`);
+                                if (!cntErr) totalOrders = Number(count || 0);
+                                if (byEmail.data.length > 0) lastOrderDate = (new Date(byEmail.data[0].created_at)).toISOString().slice(0,10);
+                            }
+                        }
+                    }
+                }
+            } catch (e) { /* ignore order aggregation errors */ }
+
+            // Prefer authoritative display name from auth.users when available,
+            // then derive first/last name similar to Account page logic
+            let authDisplayName = null;
+            try {
+                const { data: authData, error: authErr } = await supabase.from('auth.users').select('id, raw_user_meta_data').eq('id', userRow?.id).maybeSingle();
+                if (!authErr && authData) {
+                    authDisplayName = authData.raw_user_meta_data?.display_name || authData.raw_user_meta_data?.full_name || authData.raw_user_meta_data?.name || null;
+                }
+            } catch (e) {
+                // ignore access errors (client may not have permission); will try RPC next
+            }
+            if (!authDisplayName) {
+                try {
+                    const ids = userRow?.id ? [String(userRow.id)] : [];
+                    if (ids.length > 0) {
+                        const { data: rpcData, error: rpcErr } = await supabase.rpc('get_user_public_names', { ids });
+                        if (!rpcErr && Array.isArray(rpcData) && rpcData.length > 0) {
+                            authDisplayName = rpcData[0]?.name || rpcData[0]?.display_name || null;
+                        }
+                    }
+                } catch (e) {
+                    // ignore RPC errors
+                }
+            }
+
+            // derive first/last
+            let derivedFirst = userRow?.first_name || '';
+            let derivedLast = userRow?.last_name || '';
+            const finalDisplayName = (authDisplayName || userRow?.display_name || userRow?.full_name || '').trim();
+            if (finalDisplayName) {
+                const parts = finalDisplayName.split(/\s+/).filter(Boolean);
+                // If display name has three words, treat last two as the surname
+                if (parts.length === 3) {
+                    derivedFirst = parts[0] || derivedFirst;
+                    derivedLast = `${parts[1]} ${parts[2]}`.trim() || derivedLast;
+                } else {
+                    derivedFirst = parts[0] || derivedFirst;
+                    derivedLast = parts[1] || derivedLast;
+                }
+            }
+
+            const out = {
+                id: userRow?.id || null,
+                first_name: derivedFirst || '',
+                last_name: derivedLast || '',
+                full_name: userRow?.full_name || userRow?.display_name || finalDisplayName || '',
+                email: userRow?.email || '',
+                role: userRow?.role || userRow?.user_role || 'Customer',
+                date_joined: userRow?.created_at ? (new Date(userRow.created_at)).toISOString().slice(0,10) : (userRow?.date_joined ? (new Date(userRow.date_joined)).toISOString().slice(0,10) : ''),
+                last_activity: userRow?.last_signed_in_at ? (new Date(userRow.last_signed_in_at)).toISOString().slice(0,10) : (userRow?.last_activity ? (new Date(userRow.last_activity)).toISOString().slice(0,10) : ''),
+                total_orders: totalOrders,
+                last_order: lastOrderDate,
+            };
+            setViewUser(out);
+        } catch (e) {
+            console.error('openViewModal error', e);
+            setViewUser(null);
+        } finally {
+            setViewLoading(false);
+        }
+    };
+
+    const closeViewModal = () => { setViewUser(null); };
+
+    // Edit state
+    const [isEditing, setIsEditing] = useState(false);
+    const [editForm, setEditForm] = useState({ first_name: '', last_name: '', email: '', role: '' });
+    const [editSaving, setEditSaving] = useState(false);
+
+    // Name validation helpers copied from Account page to keep rules identical
+    const validateName = (name) => {
+        if (typeof name !== 'string' || name.trim().length === 0) return false;
+        const allowed = /^[A-Za-z'\- ]+$/;
+        if (!allowed.test(name)) return false;
+        for (let i = 1; i < name.length; i++) {
+            const prev = name[i - 1];
+            const cur = name[i];
+            if ((prev === ' ' || prev === '-' || prev === "'") && prev === cur) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    const isLikelyInvalidName = (raw) => {
+        try {
+            const s = String(raw || '').toLowerCase().replace(/[^a-z]/g, '');
+            if (!s) return false;
+            const counts = {};
+            for (const ch of s) counts[ch] = (counts[ch] || 0) + 1;
+            const maxCount = Math.max(...Object.values(counts));
+            if (s.length >= 3 && maxCount / s.length >= 0.7) return true;
+            for (let L = 1; L <= 3; L++) {
+                if (s.length % L !== 0) continue;
+                const part = s.slice(0, L);
+                if (part.repeat(s.length / L) === s && s.length / L >= 2) return true;
+            }
+            return false;
+        } catch (e) { return false; }
+    };
+
+    const handleEditFirstNameChange = (e) => {
+        const raw = e?.target?.value || '';
+        let val = String(raw).replace(/[0-9]/g, '');
+        if (val.length > 32) {
+            val = val.slice(0, 32);
+            setEditForm(f => ({ ...f, first_name: val }));
+            setFirstNameError('First name cannot exceed 32 characters.');
+            return;
+        }
+        if (val && String(val).trim().includes(' ')) {
+            setEditForm(f => ({ ...f, first_name: val }));
+            setFirstNameError('Choose only one of your first names.');
+            return;
+        }
+        if (isLikelyInvalidName(val)) {
+            setFirstNameError('Please enter a valid name.');
+            return;
+        }
+        setEditForm(f => ({ ...f, first_name: val }));
+        if (val === '') { setFirstNameError(''); return; }
+        if (!validateName(val)) setFirstNameError('Only letters and special characters are allowed. No consecutive repeated special characters.');
+        else setFirstNameError('');
+    };
+
+    const handleEditLastNameChange = (e) => {
+        const raw = e?.target?.value || '';
+        let val = String(raw).replace(/[0-9]/g, '');
+        if (val.length > 32) {
+            val = val.slice(0, 32);
+            setEditForm(f => ({ ...f, last_name: val }));
+            setLastNameError('Last name cannot exceed 32 characters.');
+            return;
+        }
+        if (isLikelyInvalidName(val)) {
+            setLastNameError('Please enter a valid last name.');
+            return;
+        }
+        setEditForm(f => ({ ...f, last_name: val }));
+        if (val === '') { setLastNameError(''); return; }
+        const words = String(val).trim().split(/\s+/).filter(Boolean);
+        if (words.length > 2) {
+            setLastNameError('Last name may contain at most two words (e.g., "De La").');
+            return;
+        }
+        if (!validateName(val)) setLastNameError('Only letters and special characters are allowed. No consecutive repeated special characters.');
+        else setLastNameError('');
+    };
+
+    const startEdit = () => {
+        if (!viewUser) return;
+        setEditForm({
+            first_name: viewUser.first_name || '',
+            last_name: viewUser.last_name || '',
+            email: viewUser.email || '',
+            role: viewUser.role || 'Customer',
+        });
+        // clear previous inline errors
+        setFirstNameError('');
+        setLastNameError('');
+        setIsEditing(true);
+    };
+
+    const cancelEdit = () => {
+        setIsEditing(false);
+        // reset editForm to viewUser values
+        if (viewUser) setEditForm({ first_name: viewUser.first_name || '', last_name: viewUser.last_name || '', email: viewUser.email || '', role: viewUser.role || 'Customer' });
+        // clear inline errors
+        setFirstNameError('');
+        setLastNameError('');
+    };
+
+    const saveEdit = async () => {
+        if (!viewUser) return;
+        setEditSaving(true);
+        try {
+            // The `user_info` table in some schemas stores a single full/display name
+            // instead of separate first_name/last_name columns. Update only columns
+            // that are present to avoid schema cache errors (see runtime error: "Could not find the 'first_name' column").
+            const firstVal = String(editForm.first_name || '').trim();
+            const lastVal = String(editForm.last_name || '').trim();
+            const fullVal = `${firstVal} ${lastVal}`.trim() || null;
+            const payload = {
+                // prefer full_name and display_name which are commonly present on `user_info`
+                full_name: fullVal,
+                display_name: fullVal,
+            };
+            // Validate name rules like Account page: first name single word, last name max 2 words and required
+            if (!lastVal || String(lastVal).trim() === '') {
+                window.alert('Last name is required.');
+                setEditSaving(false);
+                return;
+            }
+            if (String(firstVal || '').trim().includes(' ')) {
+                window.alert('First name must be a single word (no spaces).');
+                setEditSaving(false);
+                return;
+            }
+            const lnWordsCheck = String(lastVal || '').trim().split(/\s+/).filter(Boolean);
+            if (lnWordsCheck.length > 2) {
+                window.alert('Last name may contain at most two words (e.g., "De La").');
+                setEditSaving(false);
+                return;
+            }
+
+            // First, attempt to update auth.users via a secure RPC (if available).
+            // This RPC should be implemented server-side (SECURITY DEFINER) to allow updating auth user metadata.
+            let authUpdated = false;
+            try {
+                const rpcPayload = {
+                    id: String(viewUser.id),
+                    first_name: payload.first_name,
+                    last_name: payload.last_name,
+                    display_name: payload.full_name,
+                };
+                const { data: rpcData, error: rpcErr } = await supabase.rpc('update_user_public_name', rpcPayload);
+                if (!rpcErr) {
+                    authUpdated = true;
+                } else {
+                    console.warn('update_user_public_name RPC error', rpcErr);
+                }
+            } catch (e) {
+                // RPC may not exist or client may not have permission; ignore and fallback
+                console.warn('rpc update_user_public_name failed', e);
+            }
+
+            // Always update user_info for consistency/fallback.
+            // However column names vary by schema. Re-fetch the existing row to decide which column(s) we can update.
+            const { data: existingRow, error: existErr } = await supabase.from('user_info').select('*').eq('id', viewUser.id).maybeSingle();
+            if (existErr) throw existErr;
+            const dbPayload = {};
+            // prefer separate first/last when available
+            if (existingRow && Object.prototype.hasOwnProperty.call(existingRow, 'first_name')) dbPayload.first_name = firstVal || null;
+            if (existingRow && Object.prototype.hasOwnProperty.call(existingRow, 'last_name')) dbPayload.last_name = lastVal || null;
+            // prefer full_name / display_name / name / full in that order
+            if (existingRow && Object.prototype.hasOwnProperty.call(existingRow, 'full_name')) dbPayload.full_name = fullVal;
+            if (existingRow && Object.prototype.hasOwnProperty.call(existingRow, 'display_name')) dbPayload.display_name = fullVal;
+            if (existingRow && Object.prototype.hasOwnProperty.call(existingRow, 'name') && !dbPayload.full_name && !dbPayload.display_name) dbPayload.name = fullVal;
+            if (existingRow && Object.prototype.hasOwnProperty.call(existingRow, 'full') && !dbPayload.full_name && !dbPayload.display_name && !dbPayload.name) dbPayload.full = fullVal;
+
+            // If no known name column found, as a last resort attempt to update nothing to avoid schema errors
+            if (Object.keys(dbPayload).length === 0) {
+                console.warn('No writable name columns found on user_info for id', viewUser.id);
+            }
+
+            const { data, error } = Object.keys(dbPayload).length > 0
+                ? await supabase.from('user_info').update(dbPayload).eq('id', viewUser.id).select().maybeSingle()
+                : { data: existingRow, error: null };
+            if (error) throw error;
+            // Update local rows and viewUser (do NOT change email or role here)
+            const newFull = (data && (data.full_name || data.display_name || data.name || data.full)) || fullVal || (viewUser.full_name || `${viewUser.first_name || ''} ${viewUser.last_name || ''}`.trim());
+            setRows(prev => (prev || []).map(r => (String(r.id) === String(viewUser.id) ? { ...r, full: newFull } : r)));
+            // Keep the viewUser first/last values in sync in the UI even if user_info stores only full_name
+            setViewUser(prev => ({ ...prev, first_name: firstVal || '', last_name: lastVal || '', full_name: newFull }));
+            setIsEditing(false);
+            if (authUpdated) {
+                window.alert('User saved (auth profile updated)');
+            } else {
+                window.alert('User saved (auth update not available; user_info updated)');
+            }
+        } catch (e) {
+            console.error('saveEdit error', e);
+            window.alert('Failed to save user: ' + (e.message || String(e)));
+        } finally {
+            setEditSaving(false);
+        }
+    };
+
+    const deleteUser = async (id) => {
+        if (!id) return;
+        if (!window.confirm('Delete this user? This action cannot be undone.')) return;
+        try {
+            const { error } = await supabase.from('user_info').delete().eq('id', id);
+            if (error) throw error;
+            // remove from local rows
+            setRows(prev => (prev || []).filter(r => String(r.id) !== String(id)));
+            setViewUser(null);
+            window.alert('User deleted');
+        } catch (e) {
+            console.error('deleteUser error', e);
+            window.alert('Failed to delete user: ' + (e.message || String(e)));
+        }
+    };
+
+    return (
+        <div>
+            {loading && (
+                <div className="flex items-center gap-2 text-gray-600 px-4 py-2">Loading users…</div>
+            )}
+            <div className="overflow-x-auto p-0">
+                <div className="h-[700px] overflow-y-auto">
+                    <table className="w-full table-fixed rounded-md">
+                        <colgroup>
+                            <col style={{ width: '18%' }} />
+                            <col style={{ width: '29%' }} />
+                            <col style={{ width: '14%' }} />
+                            <col style={{ width: '10%' }} />
+                            <col style={{ width: '12%' }} />
+                            <col style={{ width: '10%' }} />
+                        </colgroup>
+                        <thead className="sticky top-0 bg-[#DFE7F4] border-b border-[#939393]">
+                            <tr className="text-left text-[16px] text-gray-600">
+                                <th className="px-4 py-2">Full Name</th>
+                                <th className="px-4 py-2">Email Address</th>
+                                <th className="px-4 py-2">Date Joined</th>
+                                <th className="px-4 py-2">Role</th>
+                                <th className="px-4 py-2">Last Activity</th>
+                                <th className="px-4 py-2"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {filtered.map(u => (
+                                <tr key={String(u.id)} className="border-t">
+                                    <td className="px-4 py-3 align-top flex items-center gap-3">
+                                        <img src="/logo-icon/profile-icon.svg" alt="" aria-hidden className="w-8 h-8 rounded-full" />
+                                        <div className="text-gray-800 font-medium">{u.full}</div>
+                                    </td>
+                                    <td className="px-4 py-3 align-top text-gray-700">{u.email || '—'}</td>
+                                    <td className="px-4 py-3 align-top text-gray-700">{u.joined || '—'}</td>
+                                    <td className="px-4 py-3 align-top">
+                                        <span className={`inline-flex items-center px-2 py-1 rounded text-sm ${u.role && String(u.role).toLowerCase().includes('admin') ? 'bg-blue-100 text-blue-800' : 'bg-orange-100 text-orange-800'}`}>{u.role}</span>
+                                    </td>
+                                    <td className="px-4 py-3 align-top text-gray-700">{u.lastAct || '—'}</td>
+                                    <td className="px-4 py-3 align-top">
+                                        <button onClick={() => openViewModal(u.id || u.email)} className="px-3 py-1 rounded-md w-[92px] border border-[#939393] text-sm text-gray-700 hover:bg-gray-50">View</button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {/* View User Modal */}
+            <Modal open={!!viewUser || viewLoading} onClose={closeViewModal} width="w-[450px]">
+                <div className="p-6 w-full">
+                    {viewLoading ? (
+                        <div className="p-6 text-center">Loading…</div>
+                    ) : (
+                        viewUser ? (
+                            <div>
+                                <div className="flex flex-col items-center">
+                                    <img src="/logo-icon/profile-icon.svg" alt="avatar" className="w-16 h-16 rounded-full mb-3" />
+                                    <div className="text-[20px] font-semibold text-[#12263F]">{viewUser.full_name || `${viewUser.first_name} ${viewUser.last_name}`}</div>
+                                </div>
+
+                                <div className="mt-4 border-t pt-4">
+                                    <h4 className="text-[16px] font-semibold mb-3">Basic Info</h4>
+                                    {isEditing ? (
+                                        <div className="grid grid-cols-2 gap-3 text-sm text-gray-700">
+                                            <div className="text-[14px] font-semibold text-gray-500">First Name</div>
+                                            <div>
+                                                <input type="text" value={editForm.first_name} onChange={handleEditFirstNameChange} className="w-full border rounded px-2 py-1 text-sm" />
+                                                {firstNameError && <p className="text-red-600 text-sm mt-1">{firstNameError}</p>}
+                                            </div>
+
+                                            <div className="text-[14px] font-semibold text-gray-500">Last Name</div>
+                                            <div>
+                                                <input type="text" value={editForm.last_name} onChange={handleEditLastNameChange} className="w-full border rounded px-2 py-1 text-sm" />
+                                                {lastNameError && <p className="text-red-600 text-sm mt-1">{lastNameError}</p>}
+                                            </div>
+
+                                            <div className="text-[14px] font-semibold text-gray-500">Email Address</div>
+                                            <div>
+                                                <div className="text-sm font-medium text-blue-700 underline">{viewUser.email || '—'}</div>
+                                            </div>
+
+                                            <div className="text-[14px] font-semibold text-gray-500">Role</div>
+                                            <div>
+                                                <div className="text-sm font-medium">{viewUser.role || 'Customer'}</div>
+                                            </div>
+
+                                            <div className="text-[14px] font-semibold text-gray-500">Date Joined</div>
+                                            <div className="text-sm font-medium">{viewUser.date_joined || '—'}</div>
+                                        </div>
+                                    ) : (
+                                        <div className="grid grid-cols-2 gap-1 text-sm text-gray-700">
+                                            <div className="text-[14px] font-semibold text-gray-500">First Name</div>
+                                            <div className="text-sm font-medium">{viewUser.first_name || '—'}</div>
+                                            <div className="text-[14px] font-semibold text-gray-500">Last Name</div>
+                                            <div className="text-sm font-medium">{viewUser.last_name || '—'}</div>
+
+                                            <div className="text-[14px] font-semibold text-gray-500">Email Address</div>
+                                            <div className="text-sm text-blue-600 underline font-medium">{viewUser.email || '—'}</div>
+                                            <div className="text-[14px] font-semibold text-gray-500">Role</div>
+                                            <div className="text-sm font-medium">{viewUser.role || 'Customer'}</div>
+                                            <div className="text-[14px] font-semibold text-gray-500">Date Joined</div>
+                                            <div className="text-sm font-medium">{viewUser.date_joined || '—'}</div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="mt-4 border-t pt-4">
+                                    <h4 className="text-[16px] font-semibold mb-3">Activity Logs</h4>
+                                    <div className="grid grid-cols-2 gap-2 text-sm text-gray-700">
+                                        <div className="text-[14px] font-semibold text-gray-500">Last Activity</div>
+                                        <div className="text-sm font-medium">{viewUser.last_activity || '—'}</div>
+                                        <div className="text-[14px] font-semibold text-gray-500">Total Orders</div>
+                                        <div className="text-sm font-medium">{viewUser.total_orders ?? 0}</div>
+                                        <div className="text-[14px] font-semibold text-gray-500">Last Order</div>
+                                        <div className="text-sm font-medium">{viewUser.last_order || '—'}</div>
+                                    </div>
+                                </div>
+
+                                <div className="mt-6 flex items-center justify-between gap-3">
+                                    {isEditing ? (
+                                        <div className="flex items-center justify-between gap-3">
+                                            <button
+                                                onClick={saveEdit}
+                                                disabled={editSaving || Boolean(firstNameError) || Boolean(lastNameError) || !String(editForm.last_name || '').trim() || String(editForm.first_name || '').trim().includes(' ') || (String(editForm.last_name || '').trim().split(/\s+/).filter(Boolean).length > 2)}
+                                                className="bg-green-600 text-white px-4 py-2 rounded-md font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                {editSaving ? 'Saving…' : 'SAVE'}
+                                            </button>
+                                            <button onClick={cancelEdit} disabled={editSaving} className="bg-red-600 text-white px-4 py-2 rounded-md font-semibold">CANCEL</button>
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center justify-end">
+                                            <button onClick={closeViewModal} className="px-4 py-2 border rounded-md text-sm">CLOSE</button>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="p-6 text-center">User not found</div>
+                        )
+                    )}
+                </div>
+            </Modal>
+        </div>
+    );
+};
+
 const StocksList = ({ externalSearch = '' }) => {
     const [rows, setRows] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -2916,6 +3453,7 @@ const AdminContents = () => {
     const [stocksSearch, setStocksSearch] = useState('');
     const [productsSearch, setProductsSearch] = useState('');
     const [ordersSearch, setOrdersSearch] = useState('');
+    const [usersSearch, setUsersSearch] = useState('');
     const [showAddProduct, setShowAddProduct] = useState(false);
 
     // Create product and link variants in Supabase
@@ -3131,6 +3669,24 @@ const AdminContents = () => {
                             </div>
                         </div>
                     )}
+                    {selected === 'Users' && (
+                        <div className="flex items-center gap-3 w-full max-w-md justify-end">
+                            <div className="relative w-[241px]">
+                                <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
+                                    <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
+                                        <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 3.473 9.8l3.613 3.614a.75.75 0 1 0 1.06-1.06l-3.614-3.614A5.5 5.5 0 0 0 9 3.5Zm-4 5.5a4 4 0 1 1 8 0 4 4 0 0 1-8 0Z" clipRule="evenodd" />
+                                    </svg>
+                                </span>
+                                <input
+                                    type="text"
+                                    value={usersSearch}
+                                    onChange={(e) => setUsersSearch(e.target.value)}
+                                    placeholder="Search user"
+                                    className="w-[241px] pl-9 pr-3 py-2 border rounded-md text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-black/20"
+                                />
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -3151,6 +3707,9 @@ const AdminContents = () => {
                 <div style={{ display: selected === 'Orders' ? 'block' : 'none' }} className={`${containerClass} mt-6`}>
                     <OrdersList externalSearch={ordersSearch} />
                     
+                </div>
+                <div style={{ display: selected === 'Users' ? 'block' : 'none' }} className={`${containerClass} mt-6`}>
+                    <UsersList externalSearch={usersSearch} />
                 </div>
             </div>
         </div>

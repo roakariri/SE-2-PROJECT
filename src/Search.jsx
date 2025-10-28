@@ -4,6 +4,7 @@ import Header from "./components/visitor/Header";
 import Navigation from "./components/registered/Navigation";
 import Footer from "./components/visitor/Footer";
 import SearchPage from "./components/visitor/Search-page";
+import ChatbotPage from "./components/ChatBot/Chatbot-page";
 
 
 
@@ -13,9 +14,10 @@ function Search() {
   const { session } = UserAuth();
   return (
     <>
-      {session ? <Navigation /> : <Header />}
-      <SearchPage />
-      <Footer />
+  {session ? <Navigation /> : <Header />}
+  <SearchPage />
+  <ChatbotPage />
+  <Footer />
     </>
   );
 }

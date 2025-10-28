@@ -1,6 +1,7 @@
 import { UserAuth } from "./context/AuthContext";
 
 import CheckoutPage from "./components/Order-Pages/Checkout-Page";
+import ChatbotPage from "./components/ChatBot/Chatbot-page";
 
 
 function Checkout() {
@@ -8,6 +9,7 @@ function Checkout() {
     return (
         <div className="font-dm-sans">
             <CheckoutPage />
+            <ChatbotPage />
         </div>
     );
 }

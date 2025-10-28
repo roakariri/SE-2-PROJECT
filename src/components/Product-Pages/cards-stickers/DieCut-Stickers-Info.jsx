@@ -42,6 +42,7 @@ const DieCutSticker = () => {
     const [uploadedFileMetas, setUploadedFileMetas] = useState([]); // DB rows
     const [uploadResetKey, setUploadResetKey] = useState(0);
     const [showUploadUI, setShowUploadUI] = useState(true);
+    const [showUploadError, setShowUploadError] = useState(false);
 
     // Cart editing state
     const [fromCart, setFromCart] = useState(!!location.state?.fromCart);
@@ -98,6 +99,13 @@ const DieCutSticker = () => {
 
         if (!productId) {
             setCartError("No product selected");
+            return;
+        }
+
+        // Check if files are uploaded
+        if (!uploadedFileMetas || uploadedFileMetas.length === 0) {
+            setShowUploadError(true);
+            setTimeout(() => setShowUploadError(false), 2000);
             return;
         }
 
@@ -496,10 +504,41 @@ const DieCutSticker = () => {
         }
     }, [location.state]);
 
-    // Authoritative fetch by cart_id (variants + quantity) so selection matches UI option ids
+    // Cart editing: Authoritative fetch by cart_id (variants + quantity) so selection matches UI option ids
+    // Try hydrating from navigation state first (faster & resilient when join rows lack nested product_variant_values)
     useEffect(() => {
+        const tryHydrateFromNav = () => {
+            try {
+                const cartRow = location.state?.cartRow;
+                if (!fromCart || !cartRow) return false;
+                const navVariants = Array.isArray(cartRow?.variants) ? cartRow.variants : null;
+                if (!navVariants || !Array.isArray(variantGroups) || variantGroups.length === 0) return false;
+                const fallback = {};
+                const normalize = (s) => String(s || '').toLowerCase().trim();
+                for (const nv of navVariants) {
+                    const gName = normalize(nv.group);
+                    const vName = normalize(nv.value);
+                    const group = variantGroups.find(gg => normalize(gg.name) === gName || normalize(gg.name).includes(gName) || gName.includes(normalize(gg.name)));
+                    if (!group) continue;
+                    const match = (group.values || []).find(v => normalize(v.name) === vName || normalize(v.value) === vName || String(v.id) === String(nv.product_variant_value_id ?? nv.product_variant_value_id));
+                    if (match) fallback[String(group.id)] = match;
+                }
+                if (Object.keys(fallback).length) {
+                    setSelectedVariants(fallback);
+                    if (cartRow.quantity) setQuantity(Number(cartRow.quantity) || 1);
+                    return true;
+                }
+            } catch (e) {
+                console.debug('[DieCut-Stickers] tryHydrateFromNav failed', e);
+            }
+            return false;
+        };
+
         const restoreFromCart = async () => {
             if (!fromCart || !editingCartId) return;
+
+            // Try nav-state hydration first
+            if (tryHydrateFromNav()) return;
 
             try {
                 const { data: cartData, error } = await supabase
@@ -558,7 +597,7 @@ const DieCutSticker = () => {
             }
         };
         restoreFromCart();
-    }, [fromCart, editingCartId]);
+    }, [fromCart, editingCartId, variantGroups, location.state]);
 
     // Resolve imageKey to a public URL (robust: accepts full urls, leading slashes, and tries common buckets)
     useEffect(() => {
@@ -828,6 +867,7 @@ const DieCutSticker = () => {
     const [reviewUploadError, setReviewUploadError] = useState(null);
     const [isSubmittingReview, setIsSubmittingReview] = useState(false);
     const reviewFileInputRef = useRef(null);
+    const [starFilterRating, setStarFilterRating] = useState(0);
 
     // Mask a name keeping only first and last character visible
     const maskName = (input) => {
@@ -1120,7 +1160,7 @@ const DieCutSticker = () => {
 
     const toggleDetails = () => setDetailsOpen((s) => !s);
     const incrementQuantity = () => setQuantity((q) => {
-        const maxStock = stockInfo?.quantity ?? Infinity;
+        const maxStock = stockInfo?.quantity ?? 0;
         return Math.min(q + 1, maxStock);
     });
     const decrementQuantity = () => setQuantity((q) => Math.max(1, q - 1));
@@ -1170,6 +1210,8 @@ const DieCutSticker = () => {
     });
 
     
+
+    const filteredReviews = starFilterRating === 0 ? reviews : reviews.filter(rev => Number(rev.rating) === starFilterRating);
 
     return (
         <div className="font-dm-sans w-full bg-cover bg-white phone:pt-[210px] tablet:pt-[220px] laptop:pt-[161px] phone:pb-40 tablet:pb-32 laptop:pb-24 z-0">
@@ -1289,14 +1331,14 @@ const DieCutSticker = () => {
                             {variantGroups.length === Object.values(selectedVariants).filter(v => v?.id).length ? (
                                 stockInfo ? (
                                     stockInfo.quantity === 0 ? (
-                                        <span className="text-red-600 font-semibold">Out of Stocks</span>
-                                    ) : stockInfo.quantity <= 5 ? (
-                                        <span className="text-yellow-600 font-semibold">Low on Stocks: {stockInfo.quantity}</span>
+                                        <span className="text-black font-semibold">Out of stock</span>
+                                    ) : stockInfo.quantity === 1 ? (
+                                        <span className="text-black font-semibold">Stock: {stockInfo.quantity}</span>
                                     ) : (
-                                        <span className="text-green-700 font-semibold">Stock: {stockInfo.quantity}</span>
+                                        <span className="text-black font-semibold">Stocks: {stockInfo.quantity}</span>
                                     )
                                 ) : (
-                                    <span className="text font-semibold">Checking stocks.</span>
+                                    <span className="text-black font-semibold">Out of stock</span>
                                 )
                             ) : (
                                 <span className="text-gray-500">Select all variants to see stock.</span>
@@ -1381,7 +1423,7 @@ const DieCutSticker = () => {
                         
 
                         <div className="mb-6">
-                            <div className="text-[16px] font-semibold text-gray-700 mb-2">UPLOAD DESIGN</div>
+                            <div className="text-[16px] font-semibold text-gray-700 mb-2">UPLOAD DESIGN {showUploadError && <span className="text-red-600 text-sm">*Required</span>}</div>
                             <UploadDesign
                                 key={uploadResetKey}
                                 productId={productId}
@@ -1395,10 +1437,10 @@ const DieCutSticker = () => {
 
                         <div className="mb-6">
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">QUANTITY</div>
-                            <div className="inline-flex items-center border border-blaack rounded">
+                            <div className="inline-flex items-center border border-black rounded">
                                 <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={decrementQuantity} aria-label="Decrease quantity" disabled={quantity <= 1}>-</button>
                                 <div className="px-4 text-black" aria-live="polite">{quantity}</div>
-                                <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={incrementQuantity} aria-label="Increase quantity">+</button>
+                                <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={incrementQuantity} aria-label="Increase quantity" disabled={quantity >= (stockInfo?.quantity ?? 0)}>+</button>
                             </div>
                         </div>
 
@@ -1505,6 +1547,35 @@ const DieCutSticker = () => {
                     <div className="px-4 tablet:px-6">
                         <hr className="mt-2 border-t border-gray-300" />
                     </div>
+                    {!isReviewFormOpen && (
+                        <div className="px-4 tablet:px-6 pt-4">
+                            <div className="flex items-center gap-2">
+                                <div className="text-sm font-medium text-[#111233]">Filter by:</div>
+                                <div className="flex flex-wrap gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setStarFilterRating(0)}
+                                        className={`px-3 py-1 text-sm rounded border ${starFilterRating === 0 ? 'bg-gray-200 text-gray-700 font-semibold border-gray-400' : 'bg-white text-gray-700 border-gray-300'} focus:outline-none focus:ring-0`}
+                                    >
+                                        All
+                                    </button>
+                                    {[5, 4, 3, 2, 1].map((rating) => (
+                                        <button
+                                            key={rating}
+                                            type="button"
+                                            onClick={() => setStarFilterRating(rating)}
+                                            className={`px-3 py-1 text-sm rounded border flex items-center gap-1 ${starFilterRating === rating ? 'bg-gray-200 text-gray-700 font-semibold border-gray-400' : 'bg-white text-gray-700 border-gray-300'} focus:outline-none focus:ring-0`}
+                                        >
+                                            <svg className="h-4 w-4 text-yellow-400" viewBox="0 0 20 20" fill="currentColor" stroke="currentColor" strokeWidth="1.5" xmlns="http://www.w3.org/2000/svg">
+                                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.449a1 1 0 00-.364 1.118l1.287 3.957c.3 .921-.755 1.688-1.54 1.118L10 15.347l-3.488 2.679c-.784 .57-1.838-.197-1.54-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.525 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69L9.05 2.927z" />
+                                            </svg>
+                                            {rating}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    )}
                     {isReviewFormOpen && (
                         <div className="px-4 pb-4 tablet:px-6 tablet:pb-6 pt-4">
                             <div className="space-y-3">
@@ -1536,11 +1607,14 @@ const DieCutSticker = () => {
                                 <div>
                                     <textarea
                                         value={reviewText}
-                                        onChange={(e) => setReviewText(e.target.value)}
+                                        onChange={(e) => setReviewText(e.target.value.slice(0, 300))}
                                         rows={4}
                                         placeholder="Share your experience with this product..."
                                         className="w-full border border-black rounded-md p-3 outline-none focus:ring-0 resize-y"
                                     />
+                                    <div className="text-right text-sm text-gray-500 mt-1">
+                                        {reviewText.length}/300
+                                    </div>
                                 </div>
 
                                 <div className="flex flex-col gap-2">
@@ -1610,6 +1684,34 @@ const DieCutSticker = () => {
                             <div className="w-full mt-5">
                                 <hr className="mt-2 border-t border-gray-300" />
                             </div>
+                            {/* Star Filter Section */}
+                            <div className="pt-4">
+                                <div className="flex items-center gap-2">
+                                    <div className="text-sm font-medium text-[#111233]">Filter by:</div>
+                                    <div className="flex flex-wrap gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setStarFilterRating(0)}
+                                            className={`px-3 py-1 text-sm rounded border ${starFilterRating === 0 ? 'bg-gray-200 text-gray-700 font-semibold border-gray-400' : 'bg-white text-gray-700 border-gray-300'} focus:outline-none focus:ring-0`}
+                                        >
+                                            All
+                                        </button>
+                                        {[5, 4, 3, 2, 1].map((rating) => (
+                                            <button
+                                                key={rating}
+                                                type="button"
+                                                onClick={() => setStarFilterRating(rating)}
+                                                className={`px-3 py-1 text-sm rounded border flex items-center gap-1 ${starFilterRating === rating ? 'bg-gray-200 text-gray-700 font-semibold border-gray-400' : 'bg-white text-gray-700 border-gray-300'} focus:outline-none focus:ring-0`}
+                                            >
+                                                <svg className="h-4 w-4 text-yellow-400" viewBox="0 0 20 20" fill="currentColor" stroke="currentColor" strokeWidth="1.5" xmlns="http://www.w3.org/2000/svg">
+                                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.449a1 1 0 00-.364 1.118l1.287 3.957c.3 .921-.755 1.688-1.54 1.118L10 15.347l-3.488 2.679c-.784 .57-1.838-.197-1.54-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.525 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69L9.05 2.927z" />
+                                                </svg>
+                                                {rating}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     )}
                 </div>
@@ -1618,57 +1720,63 @@ const DieCutSticker = () => {
                 <div className="max-w-[1200px] mx-auto w-full laptop:px-2 phone:p-2 tablet:p-2 mt-2">
                     <div className="border border-black mt-[-30px] rounded-md border-t-0 rounded-t-none p-4 tablet:p-6">
                         <div className="divide-y max-h-[60vh] overflow-y-auto pr-1">
-                            {reviews.map((rev) => {
-                                const name = reviewAuthors[rev.user_id] || (rev?.user_id ? `User-${String(rev.user_id).slice(0, 8)}` : 'User');
-                                const masked = maskName(name);
-                                const created = parseReviewDate(rev.created_at);
-                                const timeLabel = created ? formatTimeAgo(created) : '';
-                                const isVerified = !!verifiedBuyerMap[rev.user_id];
-                                const images = [rev.image_1_url, rev.image_2_url, rev.image_3_url].filter(Boolean);
-                                return (
-                                    <div key={rev.id} className="py-5">
-                                        <div className="flex items-start gap-3">
-                                            <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 text-xs select-none">{(name || 'U').charAt(0)}</div>
-                                            <div className="flex-1 min-w-0">
-                                                <div className="flex items-center gap-2 text-[14px] text-[#111233]">
-                                                    <span className="font-semibold">{masked}</span>
-                                                    {isVerified && (
-                                                        <span className="text-[10px] uppercase tracking-wide bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded">Verified</span>
+                            {filteredReviews.length === 0 ? (
+                                <div className="py-5 text-center text-gray-500">
+                                    No helpful reviews.
+                                </div>
+                            ) : (
+                                filteredReviews.map((rev) => {
+                                    const name = reviewAuthors[rev.user_id] || (rev?.user_id ? `User-${String(rev.user_id).slice(0, 8)}` : 'User');
+                                    const masked = maskName(name);
+                                    const created = parseReviewDate(rev.created_at);
+                                    const timeLabel = created ? formatTimeAgo(created) : '';
+                                    const isVerified = !!verifiedBuyerMap[rev.user_id];
+                                    const images = [rev.image_1_url, rev.image_2_url, rev.image_3_url].filter(Boolean);
+                                    return (
+                                        <div key={rev.id} className="py-5">
+                                            <div className="flex items-start gap-3">
+                                                <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 text-xs select-none">{(name || 'U').charAt(0)}</div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2 text-[14px] text-[#111233]">
+                                                        <span className="font-semibold">{masked}</span>
+                                                        {isVerified && (
+                                                            <span className="text-[10px] uppercase tracking-wide bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded">Verified</span>
+                                                        )}
+                                                    </div>
+                                                    {timeLabel && (
+                                                        <div className="text-[12px] text-gray-500 mt-0.5">{timeLabel}</div>
                                                     )}
-                                                </div>
-                                                {timeLabel && (
-                                                    <div className="text-[12px] text-gray-500 mt-0.5">{timeLabel}</div>
-                                                )}
-                                                <div className="mt-2 flex items-left  ml-[-50px] gap-1">
-                                                    {Array.from({ length: 5 }).map((_, i) => (
-                                                        <svg key={i} className={`h-4 w-4 ${i < (Number(rev.rating)||0) ? 'text-yellow-400' : 'text-gray-300'}`} viewBox="0 0 20 20" fill={i < (Number(rev.rating)||0) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5" xmlns="http://www.w3.org/2000/svg">
-                                                            <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.449a1 1 0 00-.364 1.118l1.287 3.957c.3 .921-.755 1.688-1.54 1.118L10 15.347l-3.488 2.679c-.784 .57-1.838-.197-1.54-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.525 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69L9.05 2.927z" />
-                                                        </svg>
-                                                    ))}
-                                                </div>
-                                                {rev.comment && (
-                                                    <p className="mt-5 ml-[-50px] font-dm-sans text-[14px] text-[#111233]">{rev.comment}</p>
-                                                )}
-                                                {images.length > 0 && (
-                                                    <div className="mt-3 ml-[-50px] flex flex-wrap gap-2">
-                                                        {images.map((src, idx) => (
-                                                            <button
-                                                                key={idx}
-                                                                type="button"
-                                                                className="block p-0 m-0 bg-transparent focus:outline-none focus:ring-0 w-20 h-20 aspect-square shrink-0 border border-black rounded"
-                                                                onClick={() => openLightbox(images, idx)}
-                                                                aria-label="Open image"
-                                                            >
-                                                                <img src={src} alt={`review-${rev.id}-${idx}`} className="w-full h-full object-cover" />
-                                                            </button>
+                                                    <div className="mt-2 flex items-left  ml-[-50px] gap-1">
+                                                        {Array.from({ length: 5 }).map((_, i) => (
+                                                            <svg key={i} className={`h-4 w-4 ${i < (Number(rev.rating)||0) ? 'text-yellow-400' : 'text-gray-300'}`} viewBox="0 0 20 20" fill={i < (Number(rev.rating)||0) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5" xmlns="http://www.w3.org/2000/svg">
+                                                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.449a1 1 0 00-.364 1.118l1.287 3.957c.3 .921-.755 1.688-1.54 1.118L10 15.347l-3.488 2.679c-.784 .57-1.838-.197-1.54-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.525 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69L9.05 2.927z" />
+                                                            </svg>
                                                         ))}
                                                     </div>
-                                                )}
+                                                    {rev.comment && (
+                                                        <p className="mt-5 ml-[-50px] font-dm-sans text-[14px] text-[#111233]">{rev.comment}</p>
+                                                    )}
+                                                    {images.length > 0 && (
+                                                        <div className="mt-3 ml-[-50px] flex flex-wrap gap-2">
+                                                            {images.map((src, idx) => (
+                                                                <button
+                                                                    key={idx}
+                                                                    type="button"
+                                                                    className="block p-0 m-0 bg-transparent focus:outline-none focus:ring-0 w-20 h-20 aspect-square shrink-0 border border-black rounded"
+                                                                    onClick={() => openLightbox(images, idx)}
+                                                                    aria-label="Open image"
+                                                                >
+                                                                    <img src={src} alt={`review-${rev.id}-${idx}`} className="w-full h-full object-cover" />
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                );
-                            })}
+                                    );
+                                })
+                            )}
                         </div>
                     </div>
                 </div>

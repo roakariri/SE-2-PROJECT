@@ -114,7 +114,11 @@ const AccountPage = () => {
     const [orders, setOrders] = React.useState([]);
     const [ordersLoading, setOrdersLoading] = React.useState(false);
     const [ordersSearch, setOrdersSearch] = React.useState("");
-    const [statusFilter, setStatusFilter] = React.useState('all'); // all | placed | in-production | ready | shipped | delivered
+    // Only allow: all | in-progress | delivered | cancelled
+    const [statusFilter, setStatusFilter] = React.useState('all');
+    // Date range picker state for Orders
+    const [showDateRangePicker, setShowDateRangePicker] = React.useState(false);
+    const [dateRange, setDateRange] = React.useState({ start: null, end: null });
 
     // Helper: format currency PHP
     const php = (n) => `₱${Number(n || 0).toFixed(2)}`;
@@ -122,15 +126,74 @@ const AccountPage = () => {
         try { const d = iso ? new Date(iso) : new Date(); return d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }); } catch { return String(iso || ''); }
     };
     const statusPill = (status) => {
+        // Normalize many internal statuses into three user-facing states
         const s = String(status || '').toLowerCase();
         if (s.includes('cancel')) return { label: 'Cancelled', className: 'text-red-600' };
         if (s.includes('deliver')) return { label: 'Delivered', className: 'text-green-600' };
-        if (s.includes('shipped')) return { label: 'Shipped', className: 'text-[#3B5B92]' };
-        if (s.includes('ready')) return { label: 'Ready for Shipment', className: 'text-[#F79E1B]' };
-        if (s.includes('production')) return { label: 'Order in Production', className: 'text-[#F79E1B]' };
-        if (s.includes('placed')) return { label: 'Order Placed', className: 'text-[#F79E1B]' };
-        // Fallback to given status text or default stage
-        return { label: status || 'Order Placed', className: 'text-[#F79E1B]' };
+        // Anything else is considered in-progress for the Orders UI
+        return { label: 'In Progress', className: 'text-[#F79E1B]' };
+    };
+
+    // Helper: determine if an order status matches the simple allowed filters
+    const matchesStatus = (order, filter) => {
+        const s = String(order?.status || '').toLowerCase();
+        if (filter === 'all') return true;
+        if (filter === 'delivered') return s.includes('deliver');
+        if (filter === 'cancelled') return s.includes('cancel');
+        if (filter === 'in-progress') return !s.includes('deliver') && !s.includes('cancel');
+        return true;
+    };
+
+    // Helper: format ISO-ish to yyyy-mm-dd for date input values
+    const toInputDate = (iso) => {
+        try {
+            if (!iso) return '';
+            const d = new Date(iso);
+            if (isNaN(d.getTime())) return '';
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        } catch { return ''; }
+    };
+
+    // Helper: combined matcher for search + status + date filter used by renderers
+    const orderMatches = (order) => {
+        if (ordersSearch) {
+            const q = ordersSearch.toLowerCase();
+            const matchOrderId = `#${order.id}`.toLowerCase().includes(q) || String(order.id).toLowerCase().includes(q);
+            const matchProductName = (order.productNames || []).some(n => String(n).toLowerCase().includes(q));
+            const matchProductId = (order.productIds || []).some(pid => String(pid).toLowerCase().includes(q));
+            const matchesSearch = matchOrderId || matchProductName || matchProductId;
+            if (!matchesSearch) return false;
+        }
+
+        // Status filter
+        if (!matchesStatus(order, statusFilter)) return false;
+
+        // Date range filter (if set)
+        try {
+            if (dateRange && (dateRange.start || dateRange.end)) {
+                const orderDate = order?.date ? new Date(order.date) : null;
+                if (!orderDate || isNaN(orderDate.getTime())) return false;
+                // Normalize bounds
+                if (dateRange.start) {
+                    const start = new Date(dateRange.start);
+                    start.setHours(0,0,0,0);
+                    if (orderDate < start) return false;
+                }
+                if (dateRange.end) {
+                    const end = new Date(dateRange.end);
+                    end.setHours(23,59,59,999);
+                    if (orderDate > end) return false;
+                }
+            }
+        } catch (e) {
+            // If date parsing fails, do not match the order when a date filter exists
+            if (dateRange && (dateRange.start || dateRange.end)) return false;
+        }
+
+        return true;
     };
 
     // Load user's orders with first product image and item count
@@ -290,9 +353,15 @@ const AccountPage = () => {
 
             // Prefer stored display_name from profiles, otherwise provider-derived
             const finalDisplayName = (profileData && profileData.display_name) || displayName || "User";
-            const nameParts = finalDisplayName.split(" ");
-            setFirstName(nameParts[0] || "");
-            setLastName(nameParts[1] || "");
+            const nameParts = String(finalDisplayName || '').trim().split(/\s+/).filter(Boolean);
+            // If display name has three words, treat the last two as the surname
+            if (nameParts.length === 3) {
+                setFirstName(nameParts[0] || "");
+                setLastName(`${nameParts[1]} ${nameParts[2]}`.trim());
+            } else {
+                setFirstName(nameParts[0] || "");
+                setLastName(nameParts[1] || "");
+            }
 
             const { data: addressData, error: addressError } = await supabase
                 .from("addresses")
@@ -417,6 +486,19 @@ const AccountPage = () => {
     // always lands on the 'homebase' tab. Deep-links via URL were previously
     // supported but caused refreshes to persist a non-home tab; this was changed
     // to ensure a consistent home-first UX.
+
+    // If navigation provided an initialTab via location.state (e.g. footer -> Order Tracking),
+    // honor it for this navigation only (won't persist on refresh because state is not in the URL).
+    React.useEffect(() => {
+        try {
+            const initial = location?.state?.initialTab;
+            if (initial) {
+                setActiveTab(initial);
+            }
+        } catch (err) {
+            // ignore
+        }
+    }, [location?.state?.initialTab]);
 
     // Listen for auth state changes (sign in / user update) and refresh profile so
     // display name shows immediately after account creation or update.
@@ -672,10 +754,46 @@ const AccountPage = () => {
         return true;
     };
 
+    // Heuristic to detect obviously invalid/repetitive names (used by profile + address editors)
+    const isLikelyInvalidName = (raw) => {
+        try {
+            const s = String(raw || '').toLowerCase().replace(/[^a-z]/g, '');
+            if (!s) return false;
+            const counts = {};
+            for (const ch of s) counts[ch] = (counts[ch] || 0) + 1;
+            const maxCount = Math.max(...Object.values(counts));
+            if (s.length >= 3 && maxCount / s.length >= 0.7) return true;
+            for (let L = 1; L <= 3; L++) {
+                if (s.length % L !== 0) continue;
+                const part = s.slice(0, L);
+                if (part.repeat(s.length / L) === s && s.length / L >= 2) return true;
+            }
+            return false;
+        } catch (e) { return false; }
+    };
+
     const handleFirstNameChange = (e) => {
         // strip digits so user cannot enter numbers
         const raw = e.target.value;
-        const val = String(raw).replace(/[0-9]/g, '');
+        let val = String(raw).replace(/[0-9]/g, '');
+        // enforce max length 32 (use same message as Signup)
+        if (val.length > 32) {
+            val = val.slice(0, 32);
+            setFirstName(val);
+            setFirstNameError("First name cannot exceed 32 characters.");
+            return;
+        }
+        // First name must be a single word (no spaces)
+        if (val && String(val).trim().includes(' ')) {
+            setFirstName(val);
+            setFirstNameError('Choose only one of your first names.');
+            return;
+        }
+        // block obviously invalid repetitive names
+        if (isLikelyInvalidName(val)) {
+            setFirstNameError('Please enter a valid name.');
+            return;
+        }
         setFirstName(val);
         if (val === "") {
             setFirstNameError("");
@@ -691,10 +809,28 @@ const AccountPage = () => {
     const handleLastNameChange = (e) => {
         // strip digits so user cannot enter numbers
         const raw = e.target.value;
-        const val = String(raw).replace(/[0-9]/g, '');
+        let val = String(raw).replace(/[0-9]/g, '');
+        // enforce max length 32 (use same message as Signup)
+        if (val.length > 32) {
+            val = val.slice(0, 32);
+            setLastName(val);
+            setLastNameError("Last name cannot exceed 32 characters.");
+            return;
+        }
+        // block obviously invalid repetitive names
+        if (isLikelyInvalidName(val)) {
+            setLastNameError('Please enter a valid last name.');
+            return;
+        }
         setLastName(val);
         if (val === "") {
             setLastNameError("");
+            return;
+        }
+        // Last name must be at most two words (one or two words allowed)
+        const words = String(val).trim().split(/\s+/).filter(Boolean);
+        if (words.length > 2) {
+            setLastNameError('Last name may contain at most two words (e.g., "De La").');
             return;
         }
         if (!validateName(val)) {
@@ -707,6 +843,29 @@ const AccountPage = () => {
     const handleSaveChanges = async () => {
         const user = session?.user;
         if (!user) return;
+
+        // Require last name to be present
+        if (!lastName || String(lastName).trim() === '') {
+            setLastNameError('Last name is required.');
+            return;
+        }
+
+        // Require last name to be at most two words (one or two words allowed)
+        const lnWords = String(lastName).trim().split(/\s+/).filter(Boolean);
+        if (lnWords.length > 2) {
+            setLastNameError('Last name may contain at most two words (e.g., "De La").');
+            return;
+        }
+
+        // enforce length limits before saving
+        if ((firstName || '').length > 32) {
+            setFirstNameError('First name cannot exceed 32 characters.');
+            return;
+        }
+        if ((lastName || '').length > 32) {
+            setLastNameError('Last name cannot exceed 32 characters.');
+            return;
+        }
 
         let avatar_url = null;
 
@@ -824,12 +983,35 @@ const AccountPage = () => {
         if (name === 'first_name' || name === 'last_name') {
             const raw = String(value || '');
             const hadDigits = /[0-9]/.test(raw);
-            newValue = raw.replace(/[0-9]/g, '');
-            if (name === 'first_name') {
-                setAddressFirstNameError(hadDigits ? 'Numbers are not allowed in the First Name.' : '');
-            } else {
-                setAddressLastNameError(hadDigits ? 'Numbers are not allowed in the Last Name.' : '');
+            // strip digits
+            let v = raw.replace(/[0-9]/g, '');
+            // enforce max length 32 and reuse signup messages
+            if (v.length > 32) {
+                v = v.slice(0, 32);
+                if (name === 'first_name') {
+                    setAddressFirstNameError('First name cannot exceed 32 characters.');
+                } else {
+                    setAddressLastNameError('Last name cannot exceed 32 characters.');
+                }
+                newValue = v;
+                // immediately update form with trimmed value and return early
+                setAddressForm((prev) => ({ ...prev, [name]: newValue }));
+                return;
             }
+                // If the new value looks obviously invalid (repetitive), stop the update and show error
+                if (v && isLikelyInvalidName(v)) {
+                    if (name === 'first_name') setAddressFirstNameError('Please enter a valid name.');
+                    else setAddressLastNameError('Please enter a valid last name.');
+                    // do not update the form value so user typing is effectively blocked until they correct
+                    return;
+                }
+                newValue = v;
+                // set digit-related error
+                if (name === 'first_name') {
+                    setAddressFirstNameError(hadDigits ? 'Numbers are not allowed in the First Name.' : '');
+                } else {
+                    setAddressLastNameError(hadDigits ? 'Numbers are not allowed in the Last Name.' : '');
+                }
         }
 
         setAddressForm((prev) => ({
@@ -872,11 +1054,37 @@ const AccountPage = () => {
         return digits.slice(-10);
     };
 
+    
+
     const handleAddressSubmit = async (e) => {
         e.preventDefault();
         if (!session?.user?.id) return;
 
         setAddressErrorMsg("");
+
+        // Enforce name length limits to match signup behavior
+        if ((addressForm.first_name || '').length > 32) {
+            setAddressFirstNameError('First name cannot exceed 32 characters.');
+            setAddressErrorMsg('Please fix the highlighted fields before saving.');
+            return;
+        }
+        if ((addressForm.last_name || '').length > 32) {
+            setAddressLastNameError('Last name cannot exceed 32 characters.');
+            setAddressErrorMsg('Please fix the highlighted fields before saving.');
+            return;
+        }
+
+        // Additional sanity check: reject obviously invalid names like repeated patterns (e.g., "wwwwww", "dadadads")
+        if (isLikelyInvalidName(addressForm.first_name)) {
+            setAddressFirstNameError('Please enter a valid name.');
+            setAddressErrorMsg('Please fix the highlighted fields before saving.');
+            return;
+        }
+        if (isLikelyInvalidName(addressForm.last_name)) {
+            setAddressLastNameError('Please enter a valid last name.');
+            setAddressErrorMsg('Please fix the highlighted fields before saving.');
+            return;
+        }
 
         // Validate required fields: ensure all address fields are present
         // Note: 'last_name' (surname) is optional per UX requirement
@@ -1231,45 +1439,14 @@ const AccountPage = () => {
                                 </span>
                             </div>
                             <div className="flex justify-end mt-2">
-                                <span className="text-gray-500 text-[18px] font-dm-sans">Showing {ordersLoading ? 0 : orders.filter(o => {
-                                    if (!ordersSearch) {
-                                        // no search term; apply only status filter
-                                        if (statusFilter === 'all') return true;
-                                        const s = String(o.status || '').toLowerCase();
-                                        if (statusFilter === 'placed') return s.includes('placed');
-                                        if (statusFilter === 'in-production') return s.includes('production');
-                                        if (statusFilter === 'ready') return s.includes('ready');
-                                        if (statusFilter === 'shipped') return s.includes('shipped');
-                                        if (statusFilter === 'delivered') return s.includes('deliver');
-                                        if (statusFilter === 'cancelled') return s.includes('cancel');
-                                        return true;
-                                    }
-                                    const q = ordersSearch.toLowerCase();
-                                    const matchOrderId = `#${o.id}`.toLowerCase().includes(q) || String(o.id).toLowerCase().includes(q);
-                                    const matchProductName = (o.productNames || []).some(n => String(n).toLowerCase().includes(q));
-                                    const matchProductId = (o.productIds || []).some(pid => String(pid).toLowerCase().includes(q));
-                                    const matchesSearch = matchOrderId || matchProductName || matchProductId;
-                                    if (!matchesSearch) return false;
-                                    if (statusFilter === 'all') return true;
-                                    const s = String(o.status || '').toLowerCase();
-                                    if (statusFilter === 'placed') return s.includes('placed');
-                                    if (statusFilter === 'in-production') return s.includes('production');
-                                    if (statusFilter === 'ready') return s.includes('ready');
-                                    if (statusFilter === 'shipped') return s.includes('shipped');
-                                    if (statusFilter === 'delivered') return s.includes('deliver');
-                                    if (statusFilter === 'cancelled') return s.includes('cancel');
-                                    return true;
-                                }).length} Orders</span>
+                                <span className="text-gray-500 text-[18px] font-dm-sans">Showing {ordersLoading ? 0 : orders.filter(orderMatches).length} Orders</span>
                             </div>
                             {/* Status filter chips and date range stub */}
                             <div className="flex items-center gap-[80px] mt-3 mb-3">
                                 <div className="flex-1 flex max-w-[600px] items-center gap-2 overflow-x-auto whitespace-nowrap p-3 pr-2" style={{ WebkitOverflowScrolling: 'touch' }}>
                                     {[
                                         { key: 'all', label: 'All' },
-                                        { key: 'placed', label: 'Order Placed' },
-                                        { key: 'in-production', label: 'Order in Production' },
-                                        { key: 'ready', label: 'Ready for Shipment' },
-                                        { key: 'shipped', label: 'Shipped' },
+                                        { key: 'in-progress', label: 'In Progress' },
                                         { key: 'delivered', label: 'Delivered' },
                                         { key: 'cancelled', label: 'Cancelled' },
                                     ].map(f => (
@@ -1280,11 +1457,57 @@ const AccountPage = () => {
                                         >{f.label}</button>
                                     ))}
                                 </div>
-                                <div className="shrink-0">
-                                    <button className="px-3 py-1 text-sm rounded border bg-white text-[#171738] border-gray-300 flex items-center gap-2">
-                                        <span>Select date range</span>
+                                <div className="shrink-0 relative">
+                                    <button
+                                        type="button"
+                                        className="px-3 py-1 text-sm rounded border bg-white text-[#171738] border-gray-300 flex items-center gap-2"
+                                        onClick={() => setShowDateRangePicker(v => !v)}
+                                    >
+                                        <span>
+                                            {dateRange && (dateRange.start || dateRange.end)
+                                                ? `${toInputDate(dateRange.start) || ''}${(dateRange.start || dateRange.end) ? ' → ' : ''}${toInputDate(dateRange.end) || ''}`.trim()
+                                                : 'Select date range'
+                                            }
+                                        </span>
                                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M7 10l5 5 5-5H7z"/></svg>
                                     </button>
+
+                                    {showDateRangePicker && (
+                                        <div className="absolute right-0 mt-2 bg-white border border-gray-200 rounded p-3 shadow z-20 w-[320px]">
+                                            <div className="flex flex-col gap-2">
+                                                <label className="text-sm text-black">From</label>
+                                                <input
+                                                    type="date"
+                                                    className="w-full border border-gray-300 rounded px-2 py-1"
+                                                    value={toInputDate(dateRange.start)}
+                                                    onChange={(e) => setDateRange(d => ({ ...d, start: e.target.value || null }))}
+                                                />
+                                                <label className="text-sm text-black">To</label>
+                                                <input
+                                                    type="date"
+                                                    className="w-full border border-gray-300 rounded px-2 py-1"
+                                                    value={toInputDate(dateRange.end)}
+                                                    onChange={(e) => setDateRange(d => ({ ...d, end: e.target.value || null }))}
+                                                />
+                                                <div className="flex justify-end gap-2 mt-2">
+                                                    <button
+                                                        type="button"
+                                                        className="px-3 py-1 border rounded text-sm"
+                                                        onClick={() => { setDateRange({ start: null, end: null }); setShowDateRangePicker(false); }}
+                                                    >
+                                                        Clear
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        className="px-3 py-1 bg-[#3B5B92] text-white rounded text-sm"
+                                                        onClick={() => { setShowDateRangePicker(false); }}
+                                                    >
+                                                        Apply
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                             
@@ -1297,34 +1520,7 @@ const AccountPage = () => {
                                     <div className="text-gray-500">You have not placed any orders.</div>
                                 ) : (
                                     orders
-                                        .filter(o => {
-                                            if (!ordersSearch) {
-                                                if (statusFilter === 'all') return true;
-                                                const s = String(o.status || '').toLowerCase();
-                                                if (statusFilter === 'placed') return s.includes('placed');
-                                                if (statusFilter === 'in-production') return s.includes('production');
-                                                if (statusFilter === 'ready') return s.includes('ready');
-                                                if (statusFilter === 'shipped') return s.includes('shipped');
-                                                if (statusFilter === 'delivered') return s.includes('deliver');
-                                                if (statusFilter === 'cancelled') return s.includes('cancel');
-                                                return true;
-                                            }
-                                            const q = ordersSearch.toLowerCase();
-                                            const matchOrderId = `#${o.id}`.toLowerCase().includes(q) || String(o.id).toLowerCase().includes(q);
-                                            const matchProductName = (o.productNames || []).some(n => String(n).toLowerCase().includes(q));
-                                            const matchProductId = (o.productIds || []).some(pid => String(pid).toLowerCase().includes(q));
-                                            const matchesSearch = matchOrderId || matchProductName || matchProductId;
-                                            if (!matchesSearch) return false;
-                                            if (statusFilter === 'all') return true;
-                                            const s = String(o.status || '').toLowerCase();
-                                            if (statusFilter === 'placed') return s.includes('placed');
-                                            if (statusFilter === 'in-production') return s.includes('production');
-                                            if (statusFilter === 'ready') return s.includes('ready');
-                                            if (statusFilter === 'shipped') return s.includes('shipped');
-                                            if (statusFilter === 'delivered') return s.includes('deliver');
-                                            if (statusFilter === 'cancelled') return s.includes('cancel');
-                                            return true;
-                                        })
+                                        .filter(orderMatches)
                                         .map((o) => {
                                             const pill = statusPill(o.status);
                                             return (
@@ -1473,8 +1669,8 @@ const AccountPage = () => {
                             <div className="flex w-full justify-end mt-6">
                                 <button
                                     type="button"
-                                    disabled={Boolean(firstNameError) || Boolean(lastNameError)}
-                                    className={`bg-[#3B5B92] text-white font-bold font-dm-sans px-6 py-2 rounded-md focus:outline-none focus:ring-0 ${ (firstNameError || lastNameError) ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[#2a4370]'}`}
+                                    disabled={Boolean(firstNameError) || Boolean(lastNameError) || !String(lastName || '').trim() || String(firstName || '').trim().includes(' ') || (String(lastName || '').trim().split(/\s+/).filter(Boolean).length > 2)}
+                                    className={`bg-[#3B5B92] text-white font-bold font-dm-sans px-6 py-2 rounded-md focus:outline-none focus:ring-0 ${ (firstNameError || lastNameError || !String(lastName || '').trim() || String(firstName || '').trim().includes(' ') || (String(lastName || '').trim().split(/\s+/).filter(Boolean).length > 2)) ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[#2a4370]'}`}
                                     onClick={handleSaveChanges}
                                 >
                                     {successMsg ? successMsg : "Save Changes"}
@@ -1499,7 +1695,7 @@ const AccountPage = () => {
                                         />
                                         {isCurrentPasswordIncorrect && (
                                             <span className="ml-4 text-red-600">
-                                                Incorrect password!!
+                                                Incorrect password.
                                             </span>
                                         )}
                                     </div>

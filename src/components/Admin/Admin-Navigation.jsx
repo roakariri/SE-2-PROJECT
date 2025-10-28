@@ -23,7 +23,7 @@ const AdminNavigation = () => {
     const [searchQuery, setSearchQuery] = useState('');
 
     return (
-        <div className={`fixed left-0 top-0 h-full bg-[#2B4269] shadow-lg transition-all duration-300 p-2 z-50 ${isCollapsed ? 'w-16' : 'w-[263px]'}`}>
+    <div className={`fixed left-0 top-0 h-full bg-[#2B4269] shadow-lg transition-all duration-300 p-2 z-50 flex flex-col ${isCollapsed ? 'w-16' : 'w-[263px]'}`}>
             {/* Header */}
             <div className="flex items-center justify-between p-4">
                 {!isCollapsed && (
@@ -87,7 +87,7 @@ const AdminNavigation = () => {
             </nav>
 
             {/* Footer */}
-            <div className="mt-[350px] ">
+            <div className="mt-auto p-3">
                 {!isCollapsed ? (
                     <div className="flex items-center space-x-3">
                         <button

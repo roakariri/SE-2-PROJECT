@@ -1,7 +1,13 @@
 
 
+import { useNavigate } from 'react-router-dom';
 
 const Footer = () => {
+    const navigate = useNavigate();
+    const goToOrders = (e) => {
+        e.preventDefault();
+        navigate('/account', { state: { initialTab: 'orders' } });
+    };
 
 
 
@@ -15,9 +21,15 @@ const Footer = () => {
                     <p className="text-[15px] text-white font-dm-sans">+63 9xxx xxx xxxx</p>
                     <p className="text-[15px] text-white font-dm-sans">goodprintsgreatprints@gmail.com</p>
                     <div className="flex flex-row justify-center laptop:justify-start gap-3 mt-3">
-                        <img src="/logo-icon/fb-icon.png" className="w-7 h-7" alt="Facebook" />
-                        <img src="/logo-icon/ig-icon.png" className="w-7 h-7" alt="Instagram" />
-                        <img src="/logo-icon/tiktok-icon.png" className="w-7 h-7" alt="TikTok" />
+                        <a href="https://www.facebook.com/people/Good-Prints-Great-Prints/61576837260520/" target="_blank" rel="noopener noreferrer">
+                            <img src="/logo-icon/fb-icon.png" className="w-7 h-7" alt="Facebook" />
+                        </a>
+                        <a href="https://www.instagram.com/goodprintsgreatprints" target="_blank" rel="noopener noreferrer">
+                            <img src="/logo-icon/ig-icon.png" className="w-7 h-7" alt="Instagram" />
+                        </a>
+                        <a href="https://www.tiktok.com/@goodprintsgreatprints" target="_blank" rel="noopener noreferrer">
+                            <img src="/logo-icon/tiktok-icon.png" className="w-7 h-7" alt="TikTok" />
+                        </a>
                     </div>
                 </div>
 
@@ -35,14 +47,15 @@ const Footer = () => {
                     <a href="/faqs"><p className="text-sm cursor-pointer hover:underline text-white font-dm-sans">FAQs</p></a>
 
                     <a href="/shipping"><p className="text-[15px] cursor-pointer hover:underline text-white font-dm-sans">Shipping</p></a>
-                    <a href="/order-tracking"><p className="text-[15px] cursor-pointer hover:underline text-white font-dm-sans">Order Tracking</p></a>
+                    {/* Navigate to the Account page and open Orders tab via navigation state */}
+                    <button type="button" onClick={goToOrders} className="text-[15px] focus:outline-none cursor-pointer hover:underline text-white font-dm-sans bg-transparent border-0 p-0 text-left">Order Tracking</button>
                     <a href="/contact-support"><p className="text-[15px] cursor-pointer hover:underline text-white font-dm-sans">Contact Support</p></a>
                 </div>
 
                 {/* More Services */}
                 <div className="flex flex-col gap-1 min-w-[120px] laptop:mt-[25px] phone:mt-[-30px]">
                     <a href="/return-policy"><p className="text-[15px] cursor-pointer hover:underline mt-2 text-white font-dm-sans">Returns Policy</p></a>
-                    <a href="/3d-print-services"><p className="text-[15px] cursor-pointer hover:underline text-white font-dm-sans">3D Print Services</p></a>
+                    
 
                 </div>
 
@@ -53,7 +66,7 @@ const Footer = () => {
                     <form className="flex gap-2 mt-2">
                         <input
                             type="email"
-                            placeholder="Email Address"
+                                  
                             className="px-3 py-2 rounded-l-md bg-white text-black focus:outline-none w-full"
                         />
                         <button type="button" className="bg-[#FFA07A] text-black px-4 py-2 rounded-r-md rounded-l-none ml-[-10px] font-semibold hover:bg-orange-600 transition">

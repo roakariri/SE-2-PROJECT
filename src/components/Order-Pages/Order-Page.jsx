@@ -150,6 +150,27 @@ const toColorNameIfHex = (group, value) => {
 	return value;
 };
 
+// Ensure uploaded design image URLs resolve from storage bucket when needed
+const resolveProductFilePublicUrl = (input) => {
+	try {
+		if (!input || typeof input !== 'string') return null;
+		if (/^https?:\/\//i.test(input)) return input;
+		try {
+			const u = new URL(input);
+			if (u.protocol && /^https?:$/i.test(u.protocol)) return input;
+		} catch {}
+		const marker = '/product-files/';
+		let path = input;
+		const idx = input.indexOf(marker);
+		if (idx !== -1) path = input.slice(idx + marker.length);
+		path = String(path || '').replace(/^\/+/, '');
+		const { data } = supabase.storage.from('product-files').getPublicUrl(path);
+		return data?.publicUrl || input;
+	} catch {
+		return input;
+	}
+};
+
 // Map raw status to one of our 5 stages
 const normalizeStage = (status) => {
 	const s = String(status || "").toLowerCase();
@@ -226,6 +247,9 @@ export default function OrderPage() {
 		const [address, setAddress] = React.useState(null);
 		const [shipping, setShipping] = React.useState(null);
 		const [paymentLabel, setPaymentLabel] = React.useState("");
+		const [taxTotal, setTaxTotal] = React.useState(0);
+		const [isGeneratingInvoice, setIsGeneratingInvoice] = React.useState(false);
+		const [isCancelling, setIsCancelling] = React.useState(false);
 
 	React.useEffect(() => {
 		let cancelled = false;
@@ -233,9 +257,13 @@ export default function OrderPage() {
 			try {
 				setLoading(true);
 				setError("");
-				if (!session) return;
+				if (!session) {
+					setTaxTotal(0);
+					return;
+				}
 				if (!orderId) {
 					setError("Missing order_id");
+					setTaxTotal(0);
 					return;
 				}
 						// Fetch order (include address/shipping/payment ids)
@@ -247,6 +275,7 @@ export default function OrderPage() {
 				if (ordErr) throw ordErr;
 				if (!ord || ord.user_id !== session.user.id) {
 					setError("Order not found");
+					setTaxTotal(0);
 					return;
 				}
 						// Fetch items (no nested join to avoid fragile relations)
@@ -264,13 +293,51 @@ export default function OrderPage() {
 				if (productIds.length > 0) {
 					const { data: prodRows } = await supabase
 						.from("products")
-						.select("id, name, image_url, weight, product_types ( name, product_categories ( name ) )")
+						.select("id, name, image_url, weight, tax, product_types ( name, product_categories ( name ) )")
 						.in("id", productIds);
 					productsMap = (prodRows || []).reduce((acc, p) => {
 						acc[p.id] = p;
 						return acc;
 					}, {});
 				}
+				const normalizeFiles = (arr) => (arr || []).map((f) => ({ ...f, id: f.id ?? f.file_id, file_id: f.file_id ?? f.id, image_url: resolveProductFilePublicUrl(f.image_url || '') }));
+				const uploadedFilesByProduct = {};
+				try {
+					if (ord?.order_id) {
+						const { data: filesByOrder } = await supabase
+							.from('uploaded_files')
+							.select('*')
+							.eq('order_id', ord.order_id)
+							.order('uploaded_at', { ascending: false });
+						(filesByOrder || []).forEach((f) => {
+							if (!f.product_id) return;
+							const list = uploadedFilesByProduct[f.product_id] || (uploadedFilesByProduct[f.product_id] = []);
+							list.push(f);
+						});
+					}
+				} catch {}
+				if (session?.user?.id) {
+					try {
+						const missingProductIds = productIds.filter((pid) => !uploadedFilesByProduct[pid]);
+						if (missingProductIds.length > 0) {
+							const { data: fallbackFiles } = await supabase
+								.from('uploaded_files')
+								.select('*')
+								.eq('user_id', session.user.id)
+								.in('product_id', missingProductIds)
+								.order('uploaded_at', { ascending: false })
+								.limit(50);
+							(fallbackFiles || []).forEach((f) => {
+								if (!f.product_id) return;
+								const list = uploadedFilesByProduct[f.product_id] || (uploadedFilesByProduct[f.product_id] = []);
+								list.push(f);
+							});
+						}
+					} catch {}
+				}
+				Object.keys(uploadedFilesByProduct).forEach((pid) => {
+					uploadedFilesByProduct[pid] = normalizeFiles(uploadedFilesByProduct[pid]);
+				});
 
 				// Resolve image using similar logic as confirmation page
 				const resolveImage = async (product) => {
@@ -327,11 +394,17 @@ export default function OrderPage() {
 					}, {});
 				}
 
-				// Build items with product info, image URLs, and variants
+				// Build items with product info, image URLs, variants, taxes, and uploaded files
 				const its = [];
+				let taxSumAcc = 0;
 				for (const it of oi) {
 					const prod = productsMap[it.product_id] || null;
 					const img = prod ? await resolveImage(prod) : "/logo-icon/logo.png";
+					const qty = Number(it.quantity || 1);
+					const taxPerUnit = Number(prod?.tax || 0);
+					const taxAmount = Number((taxPerUnit * qty).toFixed(2));
+					taxSumAcc += taxAmount;
+					const uploadedFiles = Array.isArray(uploadedFilesByProduct[it.product_id]) ? uploadedFilesByProduct[it.product_id] : [];
 					its.push({
 						order_item_id: it.order_item_id,
 						product_id: it.product_id,
@@ -341,6 +414,9 @@ export default function OrderPage() {
 						product: { name: prod?.name || "Product", image_url: img },
 						weight: Number(prod?.weight || 0),
 						variants: Array.isArray(variantsMap[it.order_item_id]) ? variantsMap[it.order_item_id] : [],
+						tax_per_unit: taxPerUnit,
+						tax_amount: taxAmount,
+						uploaded_files: uploadedFiles,
 					});
 				}
 						// Payment method label
@@ -373,8 +449,12 @@ export default function OrderPage() {
 						if (cancelled) return;
 						setOrder(ord);
 						setItems(its || []);
+						setTaxTotal(Number(taxSumAcc.toFixed(2)));
 			} catch (e) {
-				if (!cancelled) setError(e?.message || "Failed to load order");
+				if (!cancelled) {
+					setError(e?.message || "Failed to load order");
+					setTaxTotal(0);
+				}
 			} finally {
 				if (!cancelled) setLoading(false);
 			}
@@ -417,8 +497,7 @@ React.useEffect(() => {
 			return sum + line;
 		}, 0);
 		const totalWeightGrams = items.reduce((sum, it) => sum + (Number(it.weight || 0) * Number(it.quantity || 1)), 0);
-		const taxes = 0;
-		// Compute shipping cost from shipping method rates when available; otherwise fall back to total - subtotal
+		const taxes = Number(taxTotal || 0);
 		const shippingCost = (() => {
 			const base = Number(shipping?.base_rate || 0);
 			const perGram = Number(shipping?.rate_per_grams || 0);
@@ -426,10 +505,192 @@ React.useEffect(() => {
 				const cost = base + perGram * totalWeightGrams;
 				return Number(isFinite(cost) ? cost.toFixed(2) : 0);
 			}
-			const delta = Number(order?.total_price || 0) - Number(subtotal || 0);
+			const delta = Number(order?.total_price || 0) - Number(subtotal || 0) - taxes;
 			return Math.max(0, Number(isFinite(delta) ? delta.toFixed(2) : 0));
 		})();
 		const total = Number(order?.total_price ?? (subtotal + shippingCost + taxes));
+
+		const customerEmail = session?.user?.email || '';
+		const orderIdValue = order?.order_id;
+		const orderDateLabel = orderDate;
+		const estimatedDateLabel = formatDate(addBusinessDays(order?.created_at, 3));
+		const shippingDisplay = (() => {
+			if (!shipping) return 'Standard Delivery';
+			const base = shipping.name || 'Standard Delivery';
+			return shipping.description ? `${base} — ${shipping.description}` : base;
+		})();
+
+		const handleGenerateInvoice = React.useCallback(async () => {
+			if (!orderIdValue) return;
+			try {
+				setIsGeneratingInvoice(true);
+				const { jsPDF } = await import('jspdf');
+				const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+				const marginX = 48;
+				const topY = 60;
+				const bottomMargin = 60;
+				let cursorY = topY;
+				const pageHeight = doc.internal.pageSize.getHeight();
+				const ensureSpace = (amount = 16) => {
+					if (cursorY + amount > pageHeight - bottomMargin) {
+						doc.addPage();
+						cursorY = topY;
+					}
+				};
+				const advance = (amount = 16) => {
+					ensureSpace(amount);
+					cursorY += amount;
+				};
+				const write = (text, x = marginX) => {
+					doc.text(String(text ?? ''), x, cursorY);
+				};
+				const wrap = (value, width = 340) => doc.splitTextToSize(String(value ?? ''), width);
+				const formatCurrency = (value) => `PHP ${Number(value || 0).toFixed(2)}`;
+
+				doc.setFont('helvetica', 'bold');
+				doc.setFontSize(18);
+				write('E-Invoice');
+				doc.setFontSize(12);
+				doc.setFont('helvetica', 'normal');
+
+				advance(24);
+				write(`Order #: ${orderIdValue}`);
+				advance(16);
+				write(`Order Date: ${orderDateLabel || '—'}`);
+				advance(16);
+				write(`Estimated Delivery: ${estimatedDateLabel || '—'}`);
+
+				advance(32);
+				doc.setFont('helvetica', 'bold');
+				write('Customer Details');
+				doc.setFont('helvetica', 'normal');
+
+				advance(16);
+				const customerName = [address?.first_name, address?.last_name].filter(Boolean).join(' ') || '—';
+				write(`Name: ${customerName}`);
+				advance(16);
+				write(`Email: ${customerEmail || '—'}`);
+				advance(16);
+				const phoneDisplay = address?.phone_number ? formatDisplayPHMobile(address.phone_number) : '—';
+				write(`Phone: ${phoneDisplay}`);
+
+				advance(32);
+				doc.setFont('helvetica', 'bold');
+				write('Shipping Address');
+				doc.setFont('helvetica', 'normal');
+				const addressLines = [
+					address?.street_address,
+					[address?.barangay, address?.city].filter(Boolean).join(', '),
+					[address?.province, address?.postal_code].filter(Boolean).join(' '),
+				].filter((line) => line && line.trim());
+				if (addressLines.length === 0) {
+					advance(14);
+					write('—');
+				} else {
+					addressLines.flatMap((line) => wrap(line, 360)).forEach((line, idx) => {
+						advance(idx === 0 ? 14 : 12);
+						write(line);
+					});
+				}
+
+				advance(24);
+				doc.setFont('helvetica', 'bold');
+				write('Delivery');
+				doc.setFont('helvetica', 'normal');
+				advance(14);
+				write(shippingDisplay || 'Standard Delivery');
+
+				advance(18);
+				doc.setFont('helvetica', 'bold');
+				write('Payment');
+				doc.setFont('helvetica', 'normal');
+				advance(14);
+				write(paymentLabel || 'Paid');
+
+				advance(24);
+				doc.setFont('helvetica', 'bold');
+				write('Items');
+				doc.setFont('helvetica', 'normal');
+
+				advance(18);
+				doc.setFont('helvetica', 'bold');
+				write('Product');
+				doc.text('Qty', marginX + 360, cursorY);
+				doc.setFont('helvetica', 'normal');
+
+				items.forEach((item) => {
+					const qty = Number(item.quantity || 1);
+					const specificationLines = (() => {
+						if (!Array.isArray(item.variants) || item.variants.length === 0) return [];
+						const ORDER = [
+							'Design','Technique','Printing','Color','Size','Material','Strap','Type','Accessories (Hook Clasp)','Accessories Color','Trim Color','Base','Hole','Pieces','Cut Style','Size (Customize)','Acrylic Pieces Quantity'
+						];
+						const norm = (s) => String(s || '').trim();
+						const labelFor = (group, value) => {
+							const g = norm(group).toLowerCase();
+							const v = norm(value);
+							if (/accessor/i.test(g) && /(hook|clasp)/i.test(v)) return 'Accessories (Hook Clasp)';
+							return group || '—';
+						};
+						const indexFor = (label) => {
+							const i = ORDER.findIndex((x) => x.toLowerCase() === String(label || '').toLowerCase());
+							return i === -1 ? 999 : i;
+						};
+						const specs = item.variants.map((variant) => {
+							const label = labelFor(variant?.group, variant?.value);
+							const value = toColorNameIfHex(variant?.group, variant?.value) || variant?.value || '';
+							return { label, value, order: indexFor(label) };
+						}).sort((a,b) => (a.order - b.order) || a.label.localeCompare(b.label));
+						return specs.flatMap(s => wrap(`${s.label}: ${s.value}`, 260));
+					})();
+					const designLines = (() => {
+						const files = Array.isArray(item.uploaded_files) ? item.uploaded_files : [];
+						if (files.length === 0) return [];
+						const first = files[0];
+						const label = first?.file_name ? `Design: ${first.file_name}` : 'Design: Uploaded file';
+						const extra = files.length > 1 ? `(₱${files.length - 1} more)` : null;
+						const base = wrap(label, 260);
+						return extra ? [...base, ...wrap(extra, 260)] : base;
+					})();
+					const nameLines = wrap(item.product?.name || item.name || 'Product', 260);
+					const allLines = [...nameLines, ...specificationLines, ...designLines];
+					if (allLines.length === 0) allLines.push('—');
+					allLines.forEach((line, index) => {
+						advance(index === 0 ? 18 : 12);
+						write(line);
+						if (index === 0) {
+							doc.text(String(qty), marginX + 360, cursorY);
+						}
+					});
+				});
+
+				advance(24);
+				doc.setFont('helvetica', 'bold');
+				write('Summary');
+				doc.setFont('helvetica', 'normal');
+
+				const summaryRows = [
+					['Subtotal', formatCurrency(subtotal)],
+					['Shipping', formatCurrency(shippingCost)],
+					['Taxes', formatCurrency(taxes)],
+					['Total', formatCurrency(total)],
+				];
+
+				summaryRows.forEach(([label, amount], idx) => {
+					advance(idx === 0 ? 18 : 12);
+					if (idx === summaryRows.length - 1) doc.setFont('helvetica', 'bold');
+					write(label);
+					doc.text(amount, marginX + 260, cursorY);
+					if (idx === summaryRows.length - 1) doc.setFont('helvetica', 'normal');
+				});
+
+				doc.save(`invoice-${orderIdValue}.pdf`);
+			} catch (e) {
+				console.error('Failed to generate invoice PDF', e);
+			} finally {
+				setIsGeneratingInvoice(false);
+			}
+		}, [address, items, order?.created_at, orderDate, order, paymentLabel, shipping, shippingCost, subtotal, taxes, total, customerEmail, estimatedDateLabel, orderDateLabel, orderIdValue, shippingDisplay]);
 
 		const statusPill = () => {
 			const s = normalizeStage(order?.status);
@@ -459,13 +720,161 @@ React.useEffect(() => {
 
                
 					{/* Header line */}
-                     <div className="flex flex-row gap-5">
+				<div className="flex flex-row gap-5">
+					<div className="flex-1 flex flex-col gap-5">
+						<div className="flex items-start justify-between">
+							<div>
+								<div className="text-2xl font-bold text-[#171738] text-[36px] items-left  w-full">Order #{orderId || ""} {statusPill()}</div>
+								<div className="font-semibold text-sm mt-2 text-black">Order Date: {orderDate}</div>
+							</div>
+							<div>
+								<button
+									type="button"
+									onClick={async () => {
+										try {
+											if (!order?.order_id) return;
+											const s = (order?.status || '').toLowerCase();
+											// Additional safeguard in click handler in case UI enabled unexpectedly
+											if (s.includes('cancelled') || s.includes('order in production') || s.includes('in production') || s.includes('printing')) {
+												// no action; inform the user if they somehow clicked
+												alert('This order cannot be cancelled at its current stage.');
+												return;
+											}
+											// Prevent cancelling if already shipped/delivered
+											if (s.includes('shipped') || s.includes('deliver') || s.includes('delivered')) {
+												alert('This order cannot be cancelled because it has already been shipped or delivered.');
+												return;
+											}
 
-                        <div className=" flex flex-col gap-5">
-                            <div className="gap-1">
-                                <div className="text-2xl font-bold text-[#171738] text-[36px] items-left  w-full">Order #{orderId || ""} {statusPill()}</div>
-                                <div className="font-semibold text-sm mt-2 text-black">Order Date: {orderDate}</div>
-                            </div>
+											const ok = window.confirm('Are you sure you want to cancel this order? This action cannot be undone.');
+											if (!ok) return;
+											setIsCancelling(true);
+
+											// 1) update order status to cancelled
+											const { error: cancelErr } = await supabase
+												.from('orders')
+												.update({ status: 'cancelled' })
+												.eq('order_id', order.order_id);
+											if (cancelErr) throw cancelErr;
+
+											// 2) restore inventory quantities for the order items (product-level fallback)
+											try {
+												const { data: orderItems, error: oiErr } = await supabase
+													.from('order_items')
+													.select('order_item_id, product_id, quantity')
+													.eq('order_id', order.order_id);
+												if (!oiErr && Array.isArray(orderItems) && orderItems.length > 0) {
+													// aggregate by product_id
+													const qtyByProduct = orderItems.reduce((acc, it) => {
+														const pid = it.product_id;
+														if (!pid) return acc;
+														acc[pid] = (acc[pid] || 0) + Number(it.quantity || 0);
+														return acc;
+													}, {});
+													for (const [pid, qty] of Object.entries(qtyByProduct)) {
+														try {
+															const { data: invRow, error: invErr } = await supabase
+																.from('inventory')
+																.select('inventory_id, quantity')
+																.eq('product_id', pid)
+																.limit(1)
+																.maybeSingle();
+															if (invErr || !invRow || invRow.inventory_id == null) {
+																console.warn('No inventory row found to restore for product', pid, invErr);
+																continue;
+															}
+															const currentQty = Number(invRow.quantity || 0);
+															const newQty = Number(currentQty + Number(qty || 0));
+															const { error: updErr } = await supabase
+																.from('inventory')
+																.update({ quantity: newQty })
+																.eq('inventory_id', invRow.inventory_id);
+															if (updErr) console.warn('Failed to restore inventory for inventory_id', invRow.inventory_id, updErr);
+														} catch (e2) {
+															console.warn('Failed restoring inventory for product', pid, e2);
+														}
+													}
+												}
+											} catch (restErr) {
+												console.warn('Inventory restore step failed', restErr);
+											}
+
+											setOrder((prev) => ({ ...(prev || {}), status: 'cancelled' }));
+										} catch (e) {
+											console.error('Failed to cancel order', e);
+											setError(e?.message || 'Failed to cancel order');
+										} finally {
+											setIsCancelling(false);
+										}
+									}}
+									disabled={
+										!order ||
+										isCancelling ||
+										((order?.status || '') &&
+											['cancelled', 'order in production', 'in production', 'printing', 'shipped', 'delivered', 'deliver'].some((kw) =>
+												(order.status || '').toLowerCase().includes(kw)
+											))
+									}
+									aria-disabled={
+										!order ||
+										isCancelling ||
+										((order?.status || '') &&
+											['cancelled', 'order in production', 'in production', 'printing', 'shipped', 'delivered', 'deliver'].some((kw) =>
+												(order.status || '').toLowerCase().includes(kw)
+											))
+									}
+									style={{
+										pointerEvents: (
+											!order ||
+											isCancelling ||
+											((order?.status || '') &&
+												['cancelled', 'order in production', 'in production', 'printing', 'shipped', 'delivered', 'deliver'].some((kw) =>
+													(order.status || '').toLowerCase().includes(kw)
+												))
+										)
+											? 'none'
+											: undefined,
+										cursor: (
+											!order ||
+											isCancelling ||
+											((order?.status || '') &&
+												['cancelled', 'order in production', 'in production', 'printing', 'shipped', 'delivered', 'deliver'].some((kw) =>
+													(order.status || '').toLowerCase().includes(kw)
+												))
+										)
+											? 'default'
+											: undefined
+									}}
+									title={
+										(() => {
+											const st = (order?.status || '').toLowerCase();
+											if (!order) return 'No order selected';
+											if (isCancelling) return 'Cancelling…';
+											if (st.includes('cancelled')) return 'Order already cancelled';
+											if (st.includes('order in production') || st.includes('in production')) return 'Order in production — cancellation disabled';
+											if (st.includes('printing')) return 'Order is printing — cancellation disabled';
+											if (st.includes('shipped') || st.includes('deliver') || st.includes('delivered')) return 'Order already shipped/delivered — cancellation disabled';
+											return 'Cancel order';
+										})()
+									}
+									className={
+										(
+											!order ||
+											isCancelling ||
+											((order?.status || '') &&
+												['cancelled', 'order in production', 'in production', 'shipped', 'delivered', 'deliver'].some((kw) =>
+													(order.status || '').toLowerCase().includes(kw)
+												))
+										)
+											? 'rounded-md border border-red-400 bg-white px-3 py-1 text-sm font-semibold text-red-600 transition disabled:cursor-not-allowed disabled:opacity-60 pointer-events-none'
+											: 'rounded-md border border-red-400 bg-white px-3 py-1 text-sm font-semibold text-red-600 transition hover:bg-red-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-60'
+									}
+								>
+									{isCancelling ? 'Cancelling…' : 'Cancel Order'}
+								</button>
+							</div>
+						</div>
+					
                             
                             {/* Arrived/Estimate + tracker */}
                             <div className="mt-4 border border-[#939393] rounded-lg p-4 w-[805px]">
@@ -550,6 +959,31 @@ React.useEffect(() => {
 										}
 										return lines;
 									};
+									const designFiles = Array.isArray(it.uploaded_files) ? it.uploaded_files : [];
+									const designBlock = (() => {
+										if (designFiles.length === 0) return null;
+										const first = designFiles[0];
+										const extra = Math.max(0, designFiles.length - 1);
+										return (
+											<div className="mt-2 flex items-center gap-2">
+												<div className="flex items-center gap-2 border rounded px-2 py-1 bg-white">
+													<div className="w-10 h-10 overflow-hidden rounded bg-gray-100 flex items-center justify-center">
+														{first?.image_url ? (
+															<img src={first.image_url} alt={first.file_name || 'design'} className="w-full h-full object-cover" />
+														) : (
+															<img src="/logo-icon/image.svg" alt="file" className="w-4 h-4" />
+														)}
+													</div>
+													<div className="text-xs text-gray-600 truncate max-w-[140px]">{first?.file_name || 'uploaded design'}</div>
+												</div>
+												{extra > 0 && (
+													<div className="inline-flex items-center justify-center bg-transparent text-black text-[15px] font-semibold rounded-full w-6 h-6">
+														+{extra}
+													</div>
+												)}
+											</div>
+										);
+									})();
 
 									return (
 										<div key={it.order_item_id} className="grid grid-cols-12 gap-x-2 py-2">
@@ -558,6 +992,7 @@ React.useEffect(() => {
 												<div className="flex-1">
 													<div className="text-[16px] font-semibold text-[#171738]">{it.product?.name || 'Product'}</div>
 													<div className="text-xs text-black leading-5 ">
+														{designBlock}
 														{buildSpecs().map((line, i) => (<div key={i}>{line}</div>))} 
 													</div>
 												</div>
@@ -573,11 +1008,23 @@ React.useEffect(() => {
 						)}
 						{/* Totals */}
 						<div className="border-t border-[#939393] mt-2 pt-3">
-							<div className="ml-auto  w-full max-w-xs">
-								<div className="flex justify-between text-[#939393] text-[16px] font-semibold"><span>Subtotal</span><span className="text-black ">₱{subtotal.toFixed(2)}</span></div>
-								<div className="flex justify-between text-[#939393] text-[16px] font-semibold"><span>Shipping</span><span className="text-black">₱{shippingCost.toFixed(2)}</span></div>
-								<div className="flex justify-between text-[#939393] text-[16px] font-semibold"><span>Taxes</span><span className="text-black">₱{Number(0).toFixed(2)}</span></div>
-								<div className="flex justify-between font-semibold text-[16px] text-[#171738] border-t border-[#939393] mt-2 pt-2"><span>Total</span><span>₱{Number(total || 0).toFixed(2)}</span></div>
+							<div className="flex items-start justify-between w-full">
+								<div className="flex-shrink-0">
+									<button
+										type="button"
+										onClick={handleGenerateInvoice}
+										disabled={!orderId || isGeneratingInvoice}
+										className="rounded-md border border-[#171738] bg-white px-3 py-1 text-sm font-semibold text-[#171738] transition hover:bg-[#171738] hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+									>
+										{isGeneratingInvoice ? 'Generating…' : 'View e-Invoice'}
+									</button>
+								</div>
+								<div className="ml-auto w-full max-w-xs">
+									<div className="flex justify-between text-[#939393] text-[16px] font-semibold"><span>Subtotal</span><span className="text-black ">₱{subtotal.toFixed(2)}</span></div>
+									<div className="flex justify-between text-[#939393] text-[16px] font-semibold"><span>Shipping</span><span className="text-black">₱{shippingCost.toFixed(2)}</span></div>
+									<div className="flex justify-between text-[#939393] text-[16px] font-semibold"><span>Taxes</span><span className="text-black">₱{taxes.toFixed(2)}</span></div>
+									<div className="flex justify-between font-semibold text-[16px] text-[#171738] border-t border-[#939393] mt-2 pt-2"><span>Total</span><span>₱{Number(total || 0).toFixed(2)}</span></div>
+								</div>
 							</div>
 						</div>
 					</div>

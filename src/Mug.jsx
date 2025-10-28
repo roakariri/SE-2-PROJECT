@@ -3,14 +3,16 @@ import Header from "./components/visitor/Header";
 import MugInfo from "./components/Product-Pages/accessories-decorations/Mug-Info";
 import Navigation from "./components/registered/Navigation";
 import Footer from "./components/visitor/Footer";
+import ChatbotPage from "./components/ChatBot/Chatbot-page";
 
 function Mugs() {
   const { session } = UserAuth();
   return (
     <div className="font-dm-sans">
-      {session ? <Navigation /> : <Header />}
-      <MugInfo />
-      <Footer />
+  {session ? <Navigation /> : <Header />}
+  <MugInfo />
+  <ChatbotPage />
+  <Footer />
     </div>
   );
 }

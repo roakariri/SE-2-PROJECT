@@ -39,6 +39,7 @@ const ButtonPin = () => {
     const [uploadedFileMetas, setUploadedFileMetas] = useState([]); // DB rows
     const [uploadResetKey, setUploadResetKey] = useState(0);
     const [showUploadUI, setShowUploadUI] = useState(true);
+    const [showUploadError, setShowUploadError] = useState(false);
 
     const slug = location.pathname.split('/').filter(Boolean).pop();
     const hasLoggedViewRef = useRef(false);
@@ -190,7 +191,27 @@ const ButtonPin = () => {
                             price: Number(cv.price ?? pv.price ?? 0)
                         };
                     });
-                    if (Object.keys(vMap).length) setSelectedVariants(vMap);
+                    if (Object.keys(vMap).length) {
+                        setSelectedVariants(vMap);
+                    } else {
+                        // Fallback: try to hydrate from the cartRow provided via navigation state
+                        // This helps when cart_variants joined rows don't include nested product_variant_values
+                        const cartRow = location.state?.cartRow;
+                        const navVariants = Array.isArray(cartRow?.variants) ? cartRow.variants : null;
+                        if (navVariants && Array.isArray(variantGroups) && variantGroups.length) {
+                            const fallback = {};
+                            const normalize = (s) => String(s || '').toLowerCase().trim();
+                            for (const nv of navVariants) {
+                                const gName = normalize(nv.group);
+                                const vName = normalize(nv.value);
+                                const group = variantGroups.find(gg => normalize(gg.name) === gName || normalize(gg.name).includes(gName) || gName.includes(normalize(gg.name)));
+                                if (!group) continue;
+                                const match = (group.values || []).find(v => normalize(v.name) === vName || normalize(v.value) === vName || String(v.id) === String(nv.product_variant_value_id ?? nv.product_variant_value_id));
+                                if (match) fallback[String(group.id)] = match;
+                            }
+                            if (Object.keys(fallback).length) setSelectedVariants(fallback);
+                        }
+                    }
                 }
             } catch (e) { console.debug('[EditCart] restore mug cart failed', e); }
         };
@@ -294,6 +315,45 @@ const ButtonPin = () => {
             return updated;
         });
     }, [variantGroups]);
+
+    // Fast-path: hydrate from navigation state when editing from Cart. This attempts a
+    // tolerant match of nav-provided variants to the loaded variantGroups before
+    // hitting the DB restore path.
+    useEffect(() => {
+        try {
+            if (!variantGroups || !variantGroups.length) return;
+            const cartRow = location.state?.cartRow;
+            if (!cartRow || !location.state?.fromCart) return;
+            if (Object.keys(selectedVariants || {}).length) return;
+
+            const navVariants = Array.isArray(cartRow?.variants) ? cartRow.variants : null;
+            if (!navVariants) return;
+
+            const normalize = (s) => String(s || '').toLowerCase().trim();
+            const fallback = {};
+
+            for (const nv of navVariants) {
+                const gName = normalize(nv.group || nv.group_name || nv.groupName);
+                const vName = normalize(nv.value || nv.value_name || nv.valueName);
+                const group = variantGroups.find(gg => {
+                    const gn = normalize(gg.name || '');
+                    return gn === gName || gn.includes(gName) || gName.includes(gn);
+                });
+                if (!group) continue;
+                const match = (group.values || []).find(v => normalize(v.name || v.value || '') === vName || String(v.id) === String(nv.product_variant_value_id ?? nv.id ?? nv.variant_value_id));
+                if (match) fallback[String(group.id)] = match;
+            }
+
+            if (Object.keys(fallback).length) {
+                setSelectedVariants(fallback);
+                if (Number(cartRow.quantity) > 0) setQuantity(Number(cartRow.quantity));
+                setFromCart(true);
+                setEditingCartId(cartRow.cart_id || editingCartId);
+            }
+        } catch (e) {
+            console.debug('[tryHydrateFromNav][Mug] failed', e);
+        }
+    }, [variantGroups, location.state]);
 
     useEffect(() => {
         let isMounted = true;
@@ -642,6 +702,7 @@ const ButtonPin = () => {
     const [reviewsLoading, setReviewsLoading] = useState(false);
     const [reviewsAvailable, setReviewsAvailable] = useState(false);
     const [reviews, setReviews] = useState([]);
+    const [starFilterRating, setStarFilterRating] = useState(0);
     const [reviewAuthors, setReviewAuthors] = useState({});
     const [verifiedBuyerMap, setVerifiedBuyerMap] = useState({});
     const [isReviewFormOpen, setIsReviewFormOpen] = useState(false);
@@ -956,6 +1017,12 @@ const ButtonPin = () => {
             return;
         }
 
+        if (!uploadedFileMetas || uploadedFileMetas.length === 0) {
+            setShowUploadError(true);
+            setTimeout(() => setShowUploadError(false), 2000);
+            return;
+        }
+
         setIsAdding(true);
 
         const userId = session?.user?.id ?? await getCurrentUserId();
@@ -1177,7 +1244,7 @@ const ButtonPin = () => {
     };
 
     const toggleDetails = () => setDetailsOpen((s) => !s);
-    const incrementQuantity = () => setQuantity((q) => q + 1);
+    const incrementQuantity = () => setQuantity((q) => Math.min(q + 1, stockInfo?.quantity || Infinity));
     const decrementQuantity = () => setQuantity((q) => Math.max(1, q - 1));
 
     const selectVariant = (groupId, value) => {
@@ -1537,14 +1604,14 @@ const ButtonPin = () => {
                             {Object.values(selectedVariants).filter(v => v?.id).length > 0 ? (
                                 stockInfo ? (
                                     stockInfo.quantity === 0 ? (
-                                        <span className="text-red-600 font-semibold">Out of Stocks</span>
-                                    ) : stockInfo.quantity <= 5 ? (
-                                        <span className="text-yellow-600 font-semibold">Low on Stocks: {stockInfo.quantity}</span>
+                                        <span className="text-black font-semibold">Out of stock</span>
+                                    ) : stockInfo.quantity === 1 ? (
+                                        <span className="text-black font-semibold">Stock: {stockInfo.quantity}</span>
                                     ) : (
-                                        <span className="text-green-700 font-semibold">Stock: {stockInfo.quantity}</span>
+                                        <span className="text-black font-semibold">Stocks: {stockInfo.quantity}</span>
                                     )
                                 ) : (
-                                    <span className="text font-semibold">Checking stocks.</span>
+                                    <span className="text font-semibold">Checking stock.</span>
                                 )
                             ) : (
                                 <span className="text-gray-500">Select all variants to see stock.</span>
@@ -1639,16 +1706,16 @@ const ButtonPin = () => {
                         
 
                         <div className="mb-6">
-                            <div className="text-[16px] font-semibold text-gray-700 mb-2">UPLOAD DESIGN</div>
+                            <div className="text-[16px] font-semibold text-gray-700 mb-2">UPLOAD DESIGN{showUploadError && <span className="text-red-600 text-sm"> *Required</span>}</div>
                             <UploadDesign key={uploadResetKey} productId={productId} session={session} hidePreviews={!showUploadUI} isEditMode={fromCart && !!editingCartId} cartId={fromCart ? editingCartId : null} setUploadedFileMetas={setUploadedFileMetas} />
                         </div>
 
                         <div className="mb-6">
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">QUANTITY</div>
                             <div className="inline-flex items-center border border-black rounded">
-                                <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={decrementQuantity} aria-label="Decrease quantity" disabled={quantity <= 1}>-</button>
+                                <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={decrementQuantity} aria-label="Decrease quantity" disabled={quantity <= 1 || (stockInfo && stockInfo.quantity <= 0)}>-</button>
                                 <div className="px-4 text-black" aria-live="polite">{quantity}</div>
-                                <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={incrementQuantity} aria-label="Increase quantity">+</button>
+                                <button type="button" className="px-3 bg-white text-black focus:outline-none focus:ring-0" onClick={incrementQuantity} aria-label="Increase quantity" disabled={quantity >= (stockInfo?.quantity || Infinity) || (stockInfo && stockInfo.quantity <= 0)}>+</button>
                             </div>
                         </div>
 
@@ -1656,9 +1723,9 @@ const ButtonPin = () => {
                             <button
                                 type="button"
                                 onClick={handleAddToCart}
-                                disabled={isAdding}
+                                disabled={isAdding || (stockInfo && stockInfo.quantity <= 0)}
                                 aria-busy={isAdding}
-                                className={`bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0 ${isAdding ? 'opacity-60 pointer-events-none' : ''}`}
+                                className={`bg-[#ef7d66] text-black py-3 rounded w-full tablet:w-[314px] font-semibold focus:outline-none focus:ring-0 ${(isAdding || (stockInfo && stockInfo.quantity <= 0)) ? 'opacity-60 pointer-events-none' : ''}`}
                             >
                                 {cartSuccess ? cartSuccess : (isAdding ? (fromCart ? 'UPDATING...' : 'ADDING...') : (fromCart ? 'UPDATE CART' : 'ADD TO CART'))}
                             </button>
@@ -1752,6 +1819,36 @@ const ButtonPin = () => {
                     <div className="px-4 tablet:px-6">
                         <hr className="mt-2 border-t border-gray-300" />
                     </div>
+                    {/* Star Filter Section */}
+                    {!isReviewFormOpen && (
+                        <div className="px-4 tablet:px-6 pt-4">
+                            <div className="flex items-center gap-2">
+                                <div className="text-sm font-medium text-[#111233]">Filter by:</div>
+                                <div className="flex flex-wrap gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setStarFilterRating(0)}
+                                        className={`px-3 py-1 text-sm rounded border ${starFilterRating === 0 ? 'bg-gray-200 text-gray-700 font-semibold border-gray-400' : 'bg-white text-gray-700 border-gray-300'} focus:outline-none focus:ring-0`}
+                                    >
+                                        All
+                                    </button>
+                                    {[5, 4, 3, 2, 1].map((rating) => (
+                                        <button
+                                            key={rating}
+                                            type="button"
+                                            onClick={() => setStarFilterRating(rating)}
+                                            className={`px-3 py-1 text-sm rounded border flex items-center gap-1 ${starFilterRating === rating ? 'bg-gray-200 text-gray-700 font-semibold border-gray-400' : 'bg-white text-gray-700 border-gray-300'} focus:outline-none focus:ring-0`}
+                                        >
+                                            <svg className="h-4 w-4 text-yellow-400" viewBox="0 0 20 20" fill="currentColor" stroke="currentColor" strokeWidth="1.5" xmlns="http://www.w3.org/2000/svg">
+                                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.449a1 1 0 00-.364 1.118l1.287 3.957c.3 .921-.755 1.688-1.54 1.118L10 15.347l-3.488 2.679c-.784 .57-1.838-.197-1.54-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.525 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69L9.05 2.927z" />
+                                            </svg>
+                                            {rating}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    )}
                     {isReviewFormOpen && (
                         <div className="px-4 pb-4 tablet:px-6 tablet:pb-6 pt-4">
                             <div className="space-y-3">
@@ -1783,11 +1880,14 @@ const ButtonPin = () => {
                                 <div>
                                     <textarea
                                         value={reviewText}
-                                        onChange={(e) => setReviewText(e.target.value)}
+                                        onChange={(e) => setReviewText(e.target.value.slice(0, 300))}
                                         rows={4}
                                         placeholder="Share your experience with this product..."
                                         className="w-full border border-black rounded-md p-3 outline-none focus:ring-0 resize-y"
                                     />
+                                    <div className="text-right text-sm text-gray-500 mt-1">
+                                        {reviewText.length}/300
+                                    </div>
                                 </div>
 
                                 <div className="flex flex-col gap-2">
@@ -1857,6 +1957,33 @@ const ButtonPin = () => {
                             <div className="w-full mt-5">
                                 <hr className="mt-2 border-t border-gray-300" />
                             </div>
+                            <div className="pt-4">
+                                <div className="flex items-center gap-2">
+                                    <div className="text-sm font-medium text-[#111233]">Filter by:</div>
+                                    <div className="flex flex-wrap gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setStarFilterRating(0)}
+                                            className={`px-3 py-1 text-sm rounded border ${starFilterRating === 0 ? 'bg-gray-200 text-gray-700 font-semibold border-gray-400' : 'bg-white text-gray-700 border-gray-300'} focus:outline-none focus:ring-0`}
+                                        >
+                                            All
+                                        </button>
+                                        {[5, 4, 3, 2, 1].map((rating) => (
+                                            <button
+                                                key={rating}
+                                                type="button"
+                                                onClick={() => setStarFilterRating(rating)}
+                                                className={`px-3 py-1 text-sm rounded border flex items-center gap-1 ${starFilterRating === rating ? 'bg-gray-200 text-gray-700 font-semibold border-gray-400' : 'bg-white text-gray-700 border-gray-300'} focus:outline-none focus:ring-0`}
+                                            >
+                                                <svg className="h-4 w-4 text-yellow-400" viewBox="0 0 20 20" fill="currentColor" stroke="currentColor" strokeWidth="1.5" xmlns="http://www.w3.org/2000/svg">
+                                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.449a1 1 0 00-.364 1.118l1.287 3.957c.3 .921-.755 1.688-1.54 1.118L10 15.347l-3.488 2.679c-.784 .57-1.838-.197-1.54-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.525 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69L9.05 2.927z" />
+                                                </svg>
+                                                {rating}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     )}
                 </div>
@@ -1865,7 +1992,8 @@ const ButtonPin = () => {
                 <div className="max-w-[1200px] mx-auto w-full laptop:px-2 phone:p-2 tablet:p-2 mt-2">
                     <div className="border border-black mt-[-30px] rounded-md border-t-0 rounded-t-none p-4 tablet:p-6">
                         <div className="divide-y max-h-[60vh] overflow-y-auto pr-1">
-                            {reviews.map((rev) => {
+                            {(starFilterRating === 0 ? reviews : reviews.filter(rev => Number(rev.rating) === starFilterRating)).length > 0 ? (
+                                (starFilterRating === 0 ? reviews : reviews.filter(rev => Number(rev.rating) === starFilterRating)).map((rev) => {
                                 const name = reviewAuthors[rev.user_id] || (rev?.user_id ? `User-${String(rev.user_id).slice(0, 8)}` : 'User');
                                 const masked = maskName(name);
                                 const created = parseReviewDate(rev.created_at);
@@ -1894,7 +2022,7 @@ const ButtonPin = () => {
                                                     ))}
                                                 </div>
                                                 {rev.comment && (
-                                                    <p className="mt-5 ml-[-50px] font-dm-sans text-[14px] text-[#111233]">{rev.comment}</p>
+                                                    <p className="mt-5 ml-[-50px] font-dm-sans text-[14px] text-[#111233] break-words">{rev.comment}</p>
                                                 )}
                                                 {images.length > 0 && (
                                                     <div className="mt-3 ml-[-50px] flex flex-wrap gap-2">
@@ -1915,7 +2043,11 @@ const ButtonPin = () => {
                                         </div>
                                     </div>
                                 );
-                            })}
+                            })) : (
+                                <div className="py-8 text-center">
+                                    <p className="font-dm-sans text-gray-500">No helpful reviews.</p>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>

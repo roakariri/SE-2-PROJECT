@@ -54,11 +54,17 @@ const Signup = () => {
       setFirstNameError("First name cannot exceed 32 characters.");
       return;
     }
-  setFirstName(v);
-  // validate name rules (no digits, allowed punctuation limits)
-  const err = validateName(v, 'First');
-  if (err) setFirstNameError(err);
-  else if (firstNameError) setFirstNameError('');
+    // First name must be a single word (no spaces)
+    if (String(v).trim().includes(' ')) {
+      setFirstName(v);
+      setFirstNameError('Choose only one of your first names.');
+      return;
+    }
+    setFirstName(v);
+    // validate name rules (no digits, allowed punctuation limits)
+    const err = validateName(v, 'First');
+    if (err) setFirstNameError(err);
+    else if (firstNameError) setFirstNameError('');
   };
 
   const handleLastNameChange = (e) => {
@@ -67,6 +73,13 @@ const Signup = () => {
     if (v.length > 32) {
       setLastName(v.slice(0, 32));
       setLastNameError("Last name cannot exceed 32 characters.");
+      return;
+    }
+    // Last name may contain at most two words
+    const words = String(v).trim().split(/\s+/).filter(Boolean);
+    if (words.length > 2) {
+      setLastName(v);
+      setLastNameError('Last name may contain at most two words (e.g., "De La").');
       return;
     }
     setLastName(v);
@@ -162,10 +175,18 @@ const Signup = () => {
   // validate names with helper
   const firstErr = validateName(firstName, 'First');
   if (firstErr) { setFirstNameError(firstErr); return; }
+  // First name must be a single word
+  if (String(firstName || '').trim().includes(' ')) {
+    setFirstNameError('First name must be a single word (no spaces).');
+    return;
+  }
   const lastTrim = String(lastName || '').trim();
   if (lastTrim) {
     const lastErr = validateName(lastTrim, 'Last');
     if (lastErr) { setLastNameError(lastErr); return; }
+    // Last name max 2 words
+    const lnWords = lastTrim.split(/\s+/).filter(Boolean);
+    if (lnWords.length > 2) { setLastNameError('Last name may contain at most two words (e.g., "De La").'); return; }
   }
 
   // Validate email local-part length: min 6, max 30 characters before '@'
@@ -322,14 +343,14 @@ const Signup = () => {
                 {firstNameError && <p className="text-red-600 text-sm mt-1 font-dm-sans">{firstNameError}</p>}
               </div>
               <div className="flex flex-col w-1/2">
-                <p className="font-dm-sans">Last Name (optional)</p>
+                <p className="font-dm-sans">Last Name (Type N/A if none)</p>
                 <input
                   onChange={handleLastNameChange}
                   className="p-3 mt-2 text-black bg-white border border-gray-500 rounded font-dm-sans"
                   type="text"
                   name="lastName"
                   id="lastName"
-                  placeholder="Last Name (optional)"
+                  placeholder="Last Name"
                   value={lastName}
                 />
                 {lastNameError && <p className="text-red-600 text-sm mt-1 font-dm-sans">{lastNameError}</p>}

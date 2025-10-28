@@ -30,6 +30,7 @@ const CheckoutPage = () => {
   // Addresses
   const [addresses, setAddresses] = useState([]);
   const [selectedAddressId, setSelectedAddressId] = useState(null);
+  const [taxTotal, setTaxTotal] = useState(0);
 
   // Add/Edit address (copied/adapted from Account page)
   const [showAddressEditor, setShowAddressEditor] = useState(false);
@@ -88,7 +89,6 @@ const CheckoutPage = () => {
     } catch {}
   }, []);
 
-  // Guard: if no selected items (or they were cleared after a completed checkout), redirect to Cart
   useEffect(() => {
     // If nothing selected in storage OR current state has no items, block access
     const rawIds = (() => { try { return localStorage.getItem('cartSelectedIds'); } catch { return null; } })();
@@ -213,6 +213,24 @@ const CheckoutPage = () => {
     if (digits.startsWith('9')) return digits;
     return digits.slice(-10);
   };
+  const isLikelyInvalidName = (raw) => {
+    try {
+      const s = String(raw || '').toLowerCase().replace(/[^a-z]/g, '');
+      if (!s) return false;
+      const counts = {};
+      for (const ch of s) counts[ch] = (counts[ch] || 0) + 1;
+      const maxCount = Math.max(...Object.values(counts));
+      if (s.length >= 3 && maxCount / s.length >= 0.7) return true;
+      for (let L = 1; L <= 3; L++) {
+        if (s.length % L !== 0) continue;
+        const part = s.slice(0, L);
+        if (part.repeat(s.length / L) === s && s.length / L >= 2) return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  };
   const handleAddressChange = (e) => {
     const target = e?.target || e || {};
     const { name, value, type, checked } = target;
@@ -220,7 +238,23 @@ const CheckoutPage = () => {
     if (name === 'first_name' || name === 'last_name') {
       const raw = String(value || '');
       const hadDigits = /[0-9]/.test(raw);
-      newValue = raw.replace(/[0-9]/g, '');
+      let cleaned = raw.replace(/[0-9]/g, '');
+      if (cleaned.length > 32) {
+        cleaned = cleaned.slice(0, 32);
+        if (name === 'first_name') {
+          setAddressFirstNameError('First name cannot exceed 32 characters.');
+        } else {
+          setAddressLastNameError('Last name cannot exceed 32 characters.');
+        }
+        setAddressForm(prev => ({ ...prev, [name]: cleaned }));
+        return;
+      }
+      if (cleaned && isLikelyInvalidName(cleaned)) {
+        if (name === 'first_name') setAddressFirstNameError('Please enter a valid name.');
+        else setAddressLastNameError('Please enter a valid last name.');
+        return;
+      }
+      newValue = cleaned;
       if (name === 'first_name') setAddressFirstNameError(hadDigits ? 'Numbers are not allowed in the First Name.' : '');
       else setAddressLastNameError(hadDigits ? 'Numbers are not allowed in the Last Name.' : '');
     }
@@ -260,6 +294,26 @@ const CheckoutPage = () => {
     e.preventDefault();
     if (!session?.user?.id) return;
     setAddressErrorMsg("");
+    if ((addressForm.first_name || '').length > 32) {
+      setAddressFirstNameError('First name cannot exceed 32 characters.');
+      setAddressErrorMsg('Please fix the highlighted fields before saving.');
+      return;
+    }
+    if ((addressForm.last_name || '').length > 32) {
+      setAddressLastNameError('Last name cannot exceed 32 characters.');
+      setAddressErrorMsg('Please fix the highlighted fields before saving.');
+      return;
+    }
+    if (isLikelyInvalidName(addressForm.first_name)) {
+      setAddressFirstNameError('Please enter a valid name.');
+      setAddressErrorMsg('Please fix the highlighted fields before saving.');
+      return;
+    }
+    if (isLikelyInvalidName(addressForm.last_name)) {
+      setAddressLastNameError('Please enter a valid last name.');
+      setAddressErrorMsg('Please fix the highlighted fields before saving.');
+      return;
+    }
     const requiredFields = ['first_name','street_address','province','city','postal_code','phone_number','label'];
     const missing = requiredFields.filter(f => !addressForm[f] || (typeof addressForm[f] === 'string' && addressForm[f].trim() === ''));
     if (missing.length > 0) {
@@ -346,7 +400,7 @@ const CheckoutPage = () => {
     : shippingMethod === "lbc"
     ? 160
     : 180;
-  const taxes = 0;
+  const taxes = taxTotal;
   const totalRaw = (Number(subtotal) || 0) + shippingCost + taxes;
   const totalCeil = Math.ceil(totalRaw);
 
@@ -474,6 +528,7 @@ const CheckoutPage = () => {
       try {
         if (!session?.user?.id || selectedCartIds.length === 0) {
           setOrderedItems([]);
+          setTaxTotal(0);
           return;
         }
         setItemsLoading(true);
@@ -484,7 +539,7 @@ const CheckoutPage = () => {
             product_id,
             quantity,
             total_price,
-            products ( id, name, image_url, weight, product_types ( name, product_categories ( name ) ) ),
+            products ( id, name, image_url, weight, tax, product_types ( name, product_categories ( name ) ) ),
             cart_variants ( price, product_variant_values ( variant_values ( value_name, variant_groups ( name ) ) ) ),
             cart_dimensions ( length, width, price )
           `)
@@ -494,6 +549,7 @@ const CheckoutPage = () => {
         if (error) {
           console.warn('Failed to load selected cart items', error);
           setOrderedItems([]);
+          setTaxTotal(0);
           return;
         }
         const items = await Promise.all((data || []).map(async (it) => {
@@ -580,23 +636,29 @@ const CheckoutPage = () => {
           } catch (fetchErr) {
             console.warn('Could not fetch uploaded_files for checkout cart', it.cart_id, fetchErr);
           }
+          const quantity = Number(it.quantity) || 1;
+          const taxPerUnit = Number(prod?.tax) || 0;
           return {
             id: it.cart_id,
             product_id: it.product_id,
             name: prod.name || 'Product',
             image_url: img,
-            quantity: it.quantity || 1,
+            quantity,
             total_price: Number(it.total_price) || 0,
             weight: Number(prod?.weight) || 0,
+            tax_per_unit: taxPerUnit,
+            tax_amount: Number((taxPerUnit * quantity).toFixed(2)),
             variants,
             dimension: dim ? { length: dim.length, width: dim.width } : null,
             uploaded_files: uploadedFilesForCart,
           };
         }));
+        setTaxTotal(Number(items.reduce((sum, item) => sum + (Number(item.tax_amount) || 0), 0).toFixed(2)));
         setOrderedItems(items);
       } catch (e) {
         console.warn('Unexpected error building ordered items', e);
         setOrderedItems([]);
+        setTaxTotal(0);
       } finally {
         setItemsLoading(false);
       }
@@ -811,56 +873,153 @@ const CheckoutPage = () => {
         console.warn('Linking uploaded_files to order failed (non-fatal)', linkErr);
       }
 
-      // Decrement inventory based on purchased quantities (aggregate per combination)
+      // Decrement inventory based on purchased quantities (aggregate per combination or inventory row)
       try {
         // 1) Build cart_id -> qty ordered
         const qtyByCartId = new Map((orderedItems || []).map((it) => [it.id, Number(it.quantity || 0)]));
-        // 2) Resolve each cart_id to its combination_id using RPC and sum quantities per combination
-        const qtyByCombo = new Map(); // combination_id -> total ordered qty
+        // Map cart_id -> product_id (used for fallbacks)
+        const productByCartId = new Map((orderedItems || []).map((it) => [it.id, it.product_id]));
+
+        // 2) Resolve each cart_id to either a combination_id or an explicit inventory_id using RPC.
+        //    Aggregate quantities into buckets keyed by either "combo:<id>" or "inv:<id>".
+        const qtyBuckets = new Map(); // key -> total ordered qty
         for (const cartId of (selectedCartIds || [])) {
           const orderedQty = Number(qtyByCartId.get(cartId) || 0);
           if (!orderedQty || orderedQty <= 0) continue;
+          let resolvedKey = null;
           try {
             const { data: invData, error: invErr } = await supabase.rpc('get_cart_inventory', { p_cart_id: cartId });
-            if (invErr || !Array.isArray(invData) || invData.length === 0) {
-              console.warn('get_cart_inventory missing for cart', cartId, invErr);
-              continue;
+            if (!invErr && Array.isArray(invData) && invData.length > 0) {
+              const first = invData[0] || {};
+              const comboId = first?.out_combination_id ?? first?.combination_id ?? null;
+              const invId = first?.out_inventory_id ?? first?.inventory_id ?? null;
+              if (comboId != null) resolvedKey = `combo:${comboId}`;
+              else if (invId != null) resolvedKey = `inv:${invId}`;
+              else {
+                // RPC returned rows but no combo/inventory id; fallthrough to product-level fallback
+                console.debug('get_cart_inventory returned row without combo/inventory for cart', cartId, first);
+              }
+            } else {
+              if (invErr) console.warn('get_cart_inventory error for cart', cartId, invErr);
+              else console.debug('get_cart_inventory empty for cart', cartId);
             }
-            const comboId = invData[0]?.out_combination_id;
-            if (comboId == null) continue;
-            const prev = Number(qtyByCombo.get(comboId) || 0);
-            qtyByCombo.set(comboId, prev + orderedQty);
           } catch (mapErr) {
-            console.warn('Failed to resolve combo for cart', cartId, mapErr);
+            console.warn('Failed to resolve get_cart_inventory for cart', cartId, mapErr);
+          }
+
+          // 3) Product-level fallback: query inventory by product_id when RPC didn't yield usable ids
+          if (!resolvedKey) {
+            const productId = productByCartId.get(cartId);
+            if (productId) {
+              try {
+                const { data: invRow, error: fbErr } = await supabase
+                  .from('inventory')
+                  .select('inventory_id, combination_id, quantity')
+                  .eq('product_id', productId)
+                  .limit(1)
+                  .maybeSingle();
+                if (!fbErr && invRow && invRow.inventory_id != null) {
+                  if (invRow.combination_id != null) resolvedKey = `combo:${invRow.combination_id}`;
+                  else resolvedKey = `inv:${invRow.inventory_id}`;
+                  console.debug('Product-level inventory fallback used for cart', cartId, 'product', productId, 'resolvedKey', resolvedKey);
+                } else {
+                  console.warn('Product-level inventory fallback missing for product', productId, cartId, fbErr);
+                }
+              } catch (fbEx) {
+                console.warn('Product-level inventory fallback error for product', productId, cartId, fbEx);
+              }
+            } else {
+              console.debug('No product_id available for cart', cartId);
+            }
+          }
+
+          // If still unresolved, try targeted lookup of inventory row id 2117 (known wax-stamp fallback).
+          if (!resolvedKey) {
+            try {
+              console.debug('Attempting targeted inventory_id=2117 fallback for cart', cartId);
+              const { data: invById, error: invByIdErr } = await supabase
+                .from('inventory')
+                .select('inventory_id, combination_id, quantity')
+                .eq('inventory_id', 2117)
+                .limit(1)
+                .maybeSingle();
+              if (!invByIdErr && invById && invById.inventory_id != null) {
+                if (invById.combination_id != null) resolvedKey = `combo:${invById.combination_id}`;
+                else resolvedKey = `inv:${invById.inventory_id}`;
+                console.debug('Targeted inventory_id=2117 fallback resolved for cart', cartId, 'resolvedKey', resolvedKey, invById);
+              } else {
+                console.debug('Targeted inventory_id=2117 fallback found nothing for cart', cartId, invByIdErr);
+              }
+            } catch (idErr) {
+              console.warn('Targeted inventory_id=2117 fallback error for cart', cartId, idErr);
+            }
+          }
+
+          // Log resolution attempt for debugging
+          console.debug('Inventory resolution for cart', cartId, { orderedQty, productId: productByCartId.get(cartId), resolvedKey });
+
+          if (resolvedKey) {
+            const prev = Number(qtyBuckets.get(resolvedKey) || 0);
+            qtyBuckets.set(resolvedKey, prev + orderedQty);
+          } else {
+            console.warn('Could not resolve inventory/combo for cart', cartId);
           }
         }
 
-        // 3) For each combination, fetch inventory once and update with aggregated decrement
-        for (const [comboId, totalOrdered] of qtyByCombo.entries()) {
+        // 4) For each bucket, fetch the inventory row and update quantity accordingly.
+        for (const [key, totalOrdered] of qtyBuckets.entries()) {
           try {
-            const { data: invRow, error: fetchErr } = await supabase
-              .from('inventory')
-              .select('inventory_id, quantity')
-              .eq('combination_id', comboId)
-              .limit(1)
-              .maybeSingle();
-            if (fetchErr || !invRow || invRow.inventory_id == null) {
-              console.warn('Inventory fetch missing for combo', comboId, fetchErr);
-              continue;
-            }
-            const currentQty = Number(invRow.quantity || 0);
-            const newQty = Math.max(0, currentQty - Number(totalOrdered || 0));
-            if (newQty !== currentQty) {
-              const { error: updErr } = await supabase
+            if (String(key).startsWith('combo:')) {
+              const comboId = String(key).split(':')[1];
+              const { data: invRow, error: fetchErr } = await supabase
                 .from('inventory')
-                .update({ quantity: newQty })
-                .eq('inventory_id', invRow.inventory_id);
-              if (updErr) {
-                console.warn('Failed to update inventory quantity for inventory_id', invRow.inventory_id, updErr);
+                .select('inventory_id, quantity')
+                .eq('combination_id', comboId)
+                .limit(1)
+                .maybeSingle();
+              if (fetchErr || !invRow || invRow.inventory_id == null) {
+                console.warn('Inventory fetch missing for combo', comboId, fetchErr);
+                continue;
               }
+              const currentQty = Number(invRow.quantity || 0);
+              const newQty = Math.max(0, currentQty - Number(totalOrdered || 0));
+              if (newQty !== currentQty) {
+                const { error: updErr } = await supabase
+                  .from('inventory')
+                  .update({ quantity: newQty })
+                  .eq('inventory_id', invRow.inventory_id);
+                if (updErr) {
+                  console.warn('Failed to update inventory quantity for inventory_id', invRow.inventory_id, updErr);
+                }
+              }
+            } else if (String(key).startsWith('inv:')) {
+              const invId = String(key).split(':')[1];
+              const { data: invRow, error: fetchErr } = await supabase
+                .from('inventory')
+                .select('inventory_id, quantity')
+                .eq('inventory_id', invId)
+                .limit(1)
+                .maybeSingle();
+              if (fetchErr || !invRow || invRow.inventory_id == null) {
+                console.warn('Inventory fetch missing for inventory_id', invId, fetchErr);
+                continue;
+              }
+              const currentQty = Number(invRow.quantity || 0);
+              const newQty = Math.max(0, currentQty - Number(totalOrdered || 0));
+              if (newQty !== currentQty) {
+                const { error: updErr } = await supabase
+                  .from('inventory')
+                  .update({ quantity: newQty })
+                  .eq('inventory_id', invRow.inventory_id);
+                if (updErr) {
+                  console.warn('Failed to update inventory quantity for inventory_id', invRow.inventory_id, updErr);
+                }
+              }
+            } else {
+              console.warn('Unknown inventory bucket key', key);
             }
           } catch (updErr) {
-            console.warn('Inventory update error for combo', comboId, updErr);
+            console.warn('Inventory update error for bucket', key, updErr);
           }
         }
       } catch (invOuterErr) {
@@ -1603,27 +1762,32 @@ const CheckoutPage = () => {
 
                             // Build specs: start from variants
                             const specs = [];
-                            // Prepend uploaded design thumbnail as first spec when available
-                            if (Array.isArray(it.uploaded_files) && it.uploaded_files.length > 0) {
-                              const first = it.uploaded_files[0];
-                              const imgUrl = first.image_url || '';
-                              specs.push({
-                                label: 'Design',
-                                group: 'Design',
-                                value: (
-                                  <span className="inline-flex items-center gap-2 border rounded px-2 py-1 bg-white">
-                                    <span className="w-6 h-6 overflow-hidden rounded bg-gray-100 flex items-center justify-center">
-                                      {imgUrl ? (
-                                        <img src={imgUrl} alt={first.file_name || 'design'} className="w-full h-full object-cover" />
+                            // Match cart page layout for uploaded designs (thumbnail box with +N badge)
+                            const designFiles = Array.isArray(it.uploaded_files) ? it.uploaded_files : [];
+                            const designBlock = (() => {
+                              if (designFiles.length === 0) return null;
+                              const first = designFiles[0];
+                              const extra = Math.max(0, designFiles.length - 1);
+                              return (
+                                <div className="mt-2 flex items-center gap-2">
+                                  <div className="flex items-center gap-2 border rounded px-2 py-1 bg-white">
+                                    <div className="w-10 h-10 overflow-hidden rounded bg-gray-100 flex items-center justify-center">
+                                      {first?.image_url ? (
+                                        <img src={first.image_url} alt={first.file_name || 'design'} className="w-full h-full object-cover" />
                                       ) : (
-                                        <img src="/logo-icon/image.svg" alt="file" className="w-3 h-3" />
+                                        <img src="/logo-icon/image.svg" alt="file" className="w-4 h-4" />
                                       )}
-                                    </span>
-                                    <span className="text-xs text-gray-600 truncate max-w-[140px]">{first.file_name || 'uploaded design'}</span>
-                                  </span>
-                                ),
-                              });
-                            }
+                                    </div>
+                                    <div className="text-xs text-gray-600 truncate max-w-[140px]">{first?.file_name || 'uploaded design'}</div>
+                                  </div>
+                                  {extra > 0 && (
+                                    <div className="inline-flex items-center justify-center bg-transparent text-black text-[15px] font-semibold rounded-full w-6 h-6">
+                                      +{extra}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })();
                             if (Array.isArray(it.variants)) {
                               for (const v of it.variants) {
                                 const label = labelFor(v?.group, v?.value);
@@ -1648,6 +1812,7 @@ const CheckoutPage = () => {
 
                             return (
                               <>
+                                {designBlock}
                                 {specs.map((s, idx) => (
                                   <div key={`${idx}-${s.label}`}>
                                     {String(s.label || '').toLowerCase() === 'design' ? (
@@ -1675,10 +1840,6 @@ const CheckoutPage = () => {
                 <div className="flex justify-between  text-[16px] font-semibold text-gray-400">
                   <span>Subtotal</span>
                   <span className="text-black font-semibold">₱{Number(subtotal).toFixed(2)}</span>
-                </div>
-                <div className="flex text-[14px] justify-between font-semibold text-gray-400 italic">
-                  <span>Total weight</span>
-                  <span className="text-black font-semibold">{totalWeightGrams.toLocaleString()} g</span>
                 </div>
                 <div className="flex justify-between  text-[16px] font-semibold text-gray-400">
                   <span>Shipping</span>

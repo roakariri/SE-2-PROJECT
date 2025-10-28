@@ -28,6 +28,19 @@ const Login = () => {
   const [error, setError] = useState(null);
   const [session, setSession] = useState(null);
   const navigate = useNavigate();
+  
+  // helper to update last_activity for an admin by email
+  const updateLastActivity = async (adminEmail) => {
+    if (!adminEmail) return;
+    try {
+      await supabase
+        .from('admin_accounts')
+        .update({ last_activity: new Date().toISOString() })
+        .eq('email', adminEmail);
+    } catch (err) {
+      console.error('Failed to update last_activity for', adminEmail, err);
+    }
+  };
   // Removed loading state
 
   useEffect(() => {
@@ -38,6 +51,9 @@ const Login = () => {
 
       if (data.session) {
         const provider = data.session.user?.app_metadata?.provider;
+        const userEmail = data.session.user?.email;
+        // update last_activity for admin if this session belongs to an admin
+        updateLastActivity(userEmail);
 
         if (provider === "google") {
           console.log("Logged in with Google");
@@ -57,6 +73,9 @@ const Login = () => {
       setSession(session);
       if (session) {
         const provider = session.user?.app_metadata?.provider;
+        const userEmail = session.user?.email;
+        // update last_activity for admin if this session belongs to an admin
+        updateLastActivity(userEmail);
         if (provider === "google") {
           console.log("Logged in with Google");
           navigate("/Homepage");
@@ -119,6 +138,8 @@ const Login = () => {
 
       // Successful login
       localStorage.setItem('adminLoggedIn', 'true');
+  // update last_activity timestamp for this admin
+  await updateLastActivity(email);
       navigate("/Admin");
     } catch (error) {
       console.error('Login error:', error);

@@ -177,6 +177,21 @@ const SignagesPostersCatalog = () => {
     
       const applySort = (sortValue) => {
         setSortOption(sortValue);
+
+        // Restore default ordering when relevance is selected by
+        // rebuilding filteredProducts from the canonical `products` list
+        // applying active filters (product type + price).
+        if (sortValue === 'relevance') {
+          let temp = [...products];
+          if (!selectAll && productTypeFilter.length > 0) {
+            temp = temp.filter(product => productTypeFilter.includes(product.product_types?.id));
+          }
+          if (priceRange.min) temp = temp.filter(product => product.starting_price >= parseFloat(priceRange.min));
+          if (priceRange.max) temp = temp.filter(product => product.starting_price <= parseFloat(priceRange.max));
+          setFilteredProducts(temp);
+          return;
+        }
+
         let sorted = [...filteredProducts];
 
         if (sortValue === "lowToHigh") {
@@ -433,7 +448,7 @@ const SignagesPostersCatalog = () => {
                       <img
                         src={isSortOpen ? '/logo-icon/arrow-up.svg' : '/logo-icon/arrow-down.svg'}
                         alt=""
-                        className="ml-[30px] w-4 h-4"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4"
                         onError={(e) => {
                           try { e.currentTarget.replaceWith(document.createTextNode(isSortOpen ? '▲' : '▼')); } catch {}
                         }}
@@ -445,18 +460,14 @@ const SignagesPostersCatalog = () => {
                           <li>
                             <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('relevance'); setIsSortOpen(false); }}>Sort by Relevance</button>
                           </li>
-                          <li>
-                            <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('newest'); setIsSortOpen(false); }}>Newest First</button>
-                          </li>
+                          
                           <li>
                             <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('lowToHigh'); setIsSortOpen(false); }}>Price: Low to High</button>
                           </li>
                           <li>
                             <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('highToLow'); setIsSortOpen(false); }}>Price: High to Low</button>
                           </li>
-                          <li>
-                            <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('bestSelling'); setIsSortOpen(false); }}>Best Selling</button>
-                          </li>
+                         
                           <li>
                             <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('nameAZ'); setIsSortOpen(false); }}>Name: A to Z</button>
                           </li>

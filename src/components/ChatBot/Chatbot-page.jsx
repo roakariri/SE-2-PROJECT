@@ -237,7 +237,7 @@ const ChatbotPage = () => {
                 />
                 <button
                   onClick={handleSend}
-                  className="absolute right-2 top-1/2 transform -translate-y-1/2 px-3 py-1 rounded-sm text-[12px] bg-[#2B4269] text-white hover:bg-[#1b2c46] transition-colors"
+                  className="absolute right-2 top-1/2 transform -translate-y-1/2 px-3 py-1 rounded-md text-[12px]  bg-[#939393] text-white hover:bg-[#1b2c46] transition-colors"
                 >
                   Send
                 </button>

@@ -415,62 +415,58 @@ const AccessoriesCatalog = () => {
             {/* Products Grid */}
             <div className="flex-1">
               <div className="flex flex-col tablet:flex-row laptop:flex-row justify-between items-center mb-4 gap-4 tablet:gap-0">
-                <p className="font-semibold">{filteredProducts.length} Products</p>
-                <div className="relative" ref={sortRef}>
-                  <button
-                    type="button"
-                    className="border border-gray-800 w-[215px] bg-white text-black font-dm-sans rounded-md px-3 py-2 inline-flex items-center gap-2"
-                    onClick={() => setIsSortOpen(v => !v)}
-                    aria-haspopup="listbox"
-                    aria-expanded={isSortOpen}
-                  >
-                    {({
-                      relevance: 'Sort by Relevance',
-                      newest: 'Newest First',
-                      lowToHigh: 'Price: Low to High',
-                      highToLow: 'Price: High to Low',
-                      bestSelling: 'Best Selling',
-                      nameAZ: 'Name: A to Z',
-                      nameZA: 'Name: Z to A'
-                    })[sortOption] || 'Sort by Relevance'}
-                    <img
-                      src={isSortOpen ? '/logo-icon/arrow-up.svg' : '/logo-icon/arrow-down.svg'}
-                      alt=""
-                      className="ml-[30px] w-4 h-4"
-                      onError={(e) => {
-                        try { e.currentTarget.replaceWith(document.createTextNode(isSortOpen ? '▲' : '▼')); } catch {}
-                      }}
-                    />
-                  </button>
-                  {isSortOpen && (
-                    <div className="absolute right-0 mt-2 w-[215px] border border-gray-800 bg-white rounded-md shadow z-20">
-                      <ul className="py-1 text-black" role="listbox">
-                        <li>
-                          <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('relevance'); setIsSortOpen(false); }}>Sort by Relevance</button>
-                        </li>
-                        <li>
-                          <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('newest'); setIsSortOpen(false); }}>Newest First</button>
-                        </li>
-                        <li>
-                          <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('lowToHigh'); setIsSortOpen(false); }}>Price: Low to High</button>
-                        </li>
-                        <li>
-                          <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('highToLow'); setIsSortOpen(false); }}>Price: High to Low</button>
-                        </li>
-                        <li>
-                          <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('bestSelling'); setIsSortOpen(false); }}>Best Selling</button>
-                        </li>
-                        <li>
-                          <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('nameAZ'); setIsSortOpen(false); }}>Name: A to Z</button>
-                        </li>
-                        <li>
-                          <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('nameZA'); setIsSortOpen(false); }}>Name: Z to A</button>
-                        </li>
-                      </ul>
-                    </div>
-                  )}
-                </div>
+              <p className="font-semibold">{filteredProducts.length} Products</p>
+              <div className="relative" ref={sortRef}>
+                <button
+                  type="button"
+                  className="relative border border-gray-800 w-[215px] bg-white text-black font-dm-sans rounded-md px-3 py-2 inline-flex items-center gap-2"
+                  onClick={() => setIsSortOpen(v => !v)}
+                  aria-haspopup="listbox"
+                  aria-expanded={isSortOpen}
+                >
+                  {({
+                    relevance: 'Sort by Relevance',
+                    newest: 'Newest First',
+                    lowToHigh: 'Price: Low to High',
+                    highToLow: 'Price: High to Low',
+                    bestSelling: 'Best Selling',
+                    nameAZ: 'Name: A to Z',
+                    nameZA: 'Name: Z to A'
+                  })[sortOption] || 'Sort by Relevance'}
+                  <img
+                    src={isSortOpen ? '/logo-icon/arrow-up.svg' : '/logo-icon/arrow-down.svg'}
+                    alt=""
+                    className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4"
+                    onError={(e) => {
+                      // Fallback: simple unicode if icon missing
+                      try { e.currentTarget.replaceWith(document.createTextNode(isSortOpen ? '▲' : '▼')); } catch {}
+                    }}
+                  />
+                </button>
+                {isSortOpen && (
+                  <div className="absolute right-0 mt-2 w-[215px] border border-gray-800 bg-white rounded-md shadow z-20">
+                    <ul className="py-1 text-black" role="listbox">
+                      <li>
+                        <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('relevance'); setIsSortOpen(false); }}>Sort by Relevance</button>
+                      </li>                      
+                      <li>
+                        <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('lowToHigh'); setIsSortOpen(false); }}>Price: Low to High</button>
+                      </li>
+                      <li>
+                        <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('highToLow'); setIsSortOpen(false); }}>Price: High to Low</button>
+                      </li>
+                   
+                      <li>
+                        <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('nameAZ'); setIsSortOpen(false); }}>Name: A to Z </button>
+                      </li>
+                      <li>
+                        <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('nameZA'); setIsSortOpen(false); }}>Name: Z to A</button>
+                      </li>
+                    </ul>
+                  </div>
+                )}
               </div>
+            </div>
 
               <div className="grid grid-cols-1 phone:grid-cols-1 tablet:grid-cols-2 laptop:grid-cols-3 semi-bigscreen:grid-cols-4 biggest:grid-cols-5 gap-6 mb-10 mt-10">
                 {filteredProducts.map((product) => {

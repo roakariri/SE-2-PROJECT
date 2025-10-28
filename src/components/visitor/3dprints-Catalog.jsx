@@ -158,29 +158,40 @@ const ThreeDPrintsCatalog = () => {
            setSortOption("relevance"); 
          };
        
-         const applySort = (sortValue) => {
-           setSortOption(sortValue);
-           let sorted = [...filteredProducts];
+        const applySort = (sortValue) => {
+          setSortOption(sortValue);
+          if (sortValue === 'relevance') {
+            let temp = [...products];
+            if (!selectAll && productTypeFilter.length > 0) {
+              temp = temp.filter(product => productTypeFilter.includes(product.product_types?.id));
+            }
+            if (priceRange.min) temp = temp.filter(product => product.starting_price >= parseFloat(priceRange.min));
+            if (priceRange.max) temp = temp.filter(product => product.starting_price <= parseFloat(priceRange.max));
+            setFilteredProducts(temp);
+            return;
+          }
 
-           if (sortValue === "lowToHigh") {
-             sorted.sort((a, b) => a.starting_price - b.starting_price);
-           } else if (sortValue === "highToLow") {
-             sorted.sort((a, b) => b.starting_price - a.starting_price);
-           } else if (sortValue === "newest") {
-             const dateOf = (p) => new Date(p.created_at || p.createdAt || 0).getTime();
-             const idFallback = (p) => String(p.id || '').toString();
-             sorted.sort((a, b) => (dateOf(b) - dateOf(a)) || idFallback(b).localeCompare(idFallback(a)));
-           } else if (sortValue === "bestSelling") {
-             const sold = (p) => Number(p.sold_count ?? p.sales ?? p.total_sold ?? 0);
-             sorted.sort((a, b) => sold(b) - sold(a));
-           } else if (sortValue === "nameAZ") {
-             sorted.sort((a, b) => a.name?.toLowerCase().localeCompare(b.name?.toLowerCase()));
-           } else if (sortValue === "nameZA") {
-             sorted.sort((a, b) => b.name?.toLowerCase().localeCompare(a.name?.toLowerCase()));
-           }
+          let sorted = [...filteredProducts];
 
-           setFilteredProducts(sorted);
-         };
+          if (sortValue === "lowToHigh") {
+            sorted.sort((a, b) => a.starting_price - b.starting_price);
+          } else if (sortValue === "highToLow") {
+            sorted.sort((a, b) => b.starting_price - a.starting_price);
+          } else if (sortValue === "newest") {
+            const dateOf = (p) => new Date(p.created_at || p.createdAt || 0).getTime();
+            const idFallback = (p) => String(p.id || '').toString();
+            sorted.sort((a, b) => (dateOf(b) - dateOf(a)) || idFallback(b).localeCompare(idFallback(a)));
+          } else if (sortValue === "bestSelling") {
+            const sold = (p) => Number(p.sold_count ?? p.sales ?? p.total_sold ?? 0);
+            sorted.sort((a, b) => sold(b) - sold(a));
+          } else if (sortValue === "nameAZ") {
+            sorted.sort((a, b) => a.name?.toLowerCase().localeCompare(b.name?.toLowerCase()));
+          } else if (sortValue === "nameZA") {
+            sorted.sort((a, b) => b.name?.toLowerCase().localeCompare(a.name?.toLowerCase()));
+          }
+
+          setFilteredProducts(sorted);
+        };
 
          const handleSortChange = (e) => {
            const sortValue = e.target.value;
@@ -418,7 +429,7 @@ const ThreeDPrintsCatalog = () => {
                          <img
                            src={isSortOpen ? '/logo-icon/arrow-up.svg' : '/logo-icon/arrow-down.svg'}
                            alt=""
-                           className="ml-[30px] w-4 h-4"
+                           className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4"
                            onError={(e) => {
                              try { e.currentTarget.replaceWith(document.createTextNode(isSortOpen ? '▲' : '▼')); } catch {}
                            }}
@@ -430,18 +441,14 @@ const ThreeDPrintsCatalog = () => {
                              <li>
                                <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('relevance'); setIsSortOpen(false); }}>Sort by Relevance</button>
                              </li>
-                             <li>
-                               <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('newest'); setIsSortOpen(false); }}>Newest First</button>
-                             </li>
+                             
                              <li>
                                <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('lowToHigh'); setIsSortOpen(false); }}>Price: Low to High</button>
                              </li>
                              <li>
                                <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('highToLow'); setIsSortOpen(false); }}>Price: High to Low</button>
                              </li>
-                             <li>
-                               <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('bestSelling'); setIsSortOpen(false); }}>Best Selling</button>
-                             </li>
+                             
                              <li>
                                <button type="button" className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { applySort('nameAZ'); setIsSortOpen(false); }}>Name: A to Z</button>
                              </li>
