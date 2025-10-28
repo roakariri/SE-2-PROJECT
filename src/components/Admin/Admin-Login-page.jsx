@@ -214,7 +214,11 @@ const Login = () => {
                   {showPassword ? EyeOffIcon : EyeIcon}
                 </button>
               </div>
-         
+              <div className="pt-2 text-right ">
+                <p>
+                  <a href="" className="text-blue-600 underline text-sm font-dm-sans">Forgot your Password?</a>
+                </p>
+              </div>
             </div>
             
             <button type="submit" className="w-full text-white rounded rounded-xl font-dm-sans font-semibold bg-[#2B4269] mt-4 ] font-dm-sans">

@@ -155,70 +155,6 @@ const Modal = ({ open, onClose, children, width }) => {
                 <div className={`mt-16 mb-8 ${width || 'w-[680px]'} max-w-[95vw] bg-white rounded-md shadow-lg border`}>
                     {children}
                 </div>
-
-            {/* Dashboard Order Modal (reuse layout similar to OrdersList modal) */}
-            <Modal open={showDashboardOrderModal && !!dashboardViewOrderDetails} onClose={() => { setShowDashboardOrderModal(false); setDashboardViewOrderDetails(null); }} width={"w-[400px]"}>
-                <div className="p-4 max-w-[400px]">
-                    {dashboardViewLoading ? (
-                        <div className="text-sm text-gray-500">Loading order…</div>
-                    ) : (!dashboardViewOrderDetails) ? (
-                        <div className="text-sm text-gray-500">No order details available.</div>
-                    ) : (
-                        <>
-                        <div className="text-xl font-bold text-[#12263F] mb-2">{`Order #${dashboardViewOrderDetails?.order_id ?? dashboardViewOrderDetails?.id ?? ''}`}</div>
-                        <div className="text-sm text-gray-700 mb-2">{dashboardViewOrderDetails?.customer_name || dashboardViewOrderDetails?.customer_email || '—'}</div>
-
-                        <div className="mt-4 border-t pt-3">
-                            <h4 className="text-sm font-semibold mb-3">Item(s) Ordered</h4>
-                            <div className="space-y-4">
-                                {Array.isArray(dashboardViewOrderDetails?.items) && dashboardViewOrderDetails.items.length > 0 ? (
-                                    dashboardViewOrderDetails.items.map((it, idx) => (
-                                        <div key={idx} className="flex items-start gap-4">
-                                            <img src={it.product?.image_url || it.image_url || '/logo-icon/profile-icon.svg'} alt="" className="w-12 h-12 rounded border bg-white p-1 object-cover" />
-                                            <div className="flex-1">
-                                                <div className="font-semibold text-sm text-gray-800">{(it.product && it.product.name) || it.name || it.product_name}</div>
-                                                <div className="mt-2">
-                                                    {Array.isArray(it.uploaded_files) && it.uploaded_files.length > 0 ? (
-                                                        <div className="flex items-center gap-3">
-                                                            <div className="flex-1">
-                                                                <div className="flex items-center gap-3 border rounded-md bg-white px-3 py-2">
-                                                                    <div className="w-10 h-10 overflow-hidden rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
-                                                                        {it.uploaded_files[0]?.image_url ? (
-                                                                            <img src={it.uploaded_files[0].image_url} alt={it.uploaded_files[0].file_name || 'design'} className="w-full h-full object-cover" />
-                                                                        ) : (
-                                                                            <img src="/logo-icon/image.svg" alt="file" className="w-4 h-4" />
-                                                                        )}
-                                                                    </div>
-                                                                    <div className="text-sm text-gray-700 truncate">{it.uploaded_files[0]?.file_name || 'uploaded design'}</div>
-                                                                </div>
-                                                            </div>
-                                                            {it.uploaded_files.length > 1 && (
-                                                                <div className="inline-flex items-center justify-center bg-gray-100 text-black text-[13px] font-semibold rounded-full w-7 h-7">+{it.uploaded_files.length - 1}</div>
-                                                            )}
-                                                        </div>
-                                                    ) : null}
-                                                    <div className="text-xs text-gray-600 mt-2">
-                                                        {(it.variants || []).map((v,i) => (<div key={i}>{(v.group || v.variant_group_name)}: {(v.value || v.variant_value_name)}</div>))}
-                                                    </div>
-                                                </div>
-                                                <div className="text-xs text-gray-600 mt-2">Qty: {it.quantity ?? 1}</div>
-                                                <div className="text-sm text-gray-900 mt-1">{peso(it.total_price ?? it.total ?? 0)}</div>
-                                            </div>
-                                        </div>
-                                    ))
-                                ) : (
-                                    <div className="text-sm text-gray-500">No item details available.</div>
-                                )}
-                            </div>
-                        </div>
-
-                        <div className="mt-4 flex items-center justify-end">
-                            <button className="px-4 py-2 border rounded-md text-sm" onClick={() => { setShowDashboardOrderModal(false); setDashboardViewOrderDetails(null); }}>CLOSE</button>
-                        </div>
-                        </>
-                    )}
-                </div>
-            </Modal>
             </div>
         </div>
     );
@@ -4002,18 +3938,14 @@ const AdminContents = () => {
     const [ordersSearch, setOrdersSearch] = useState('');
     const [usersSearch, setUsersSearch] = useState('');
     const [showAddProduct, setShowAddProduct] = useState(false);
-    // Dashboard: recent orders preview
-    const [recentOrders, setRecentOrders] = useState([]);
-    const [recentLoading, setRecentLoading] = useState(false);
-    const [dashboardViewOrderDetails, setDashboardViewOrderDetails] = useState(null);
-    const [dashboardViewLoading, setDashboardViewLoading] = useState(false);
-    const [showDashboardOrderModal, setShowDashboardOrderModal] = useState(false);
-    // Dashboard KPIs
-    const [totalUsers, setTotalUsers] = useState(0);
-    const [totalSales, setTotalSales] = useState(0);
-    const [totalOrders, setTotalOrders] = useState(0);
-    const [ordersByStatus, setOrdersByStatus] = useState({});
-    const [salesByDay, setSalesByDay] = useState([]); // [{label: '2023-10-01', value: 123}, ...]
+    // Dashboard stats
+    const [db_totalUsers, setDbTotalUsers] = useState(0);
+    const [db_totalOrders, setDbTotalOrders] = useState(0);
+    const [db_totalSales, setDbTotalSales] = useState(0);
+    const [db_totalPending, setDbTotalPending] = useState(0);
+    const [db_recentOrders, setDbRecentOrders] = useState([]);
+    const [db_recentCustomers, setDbRecentCustomers] = useState([]);
+    const [db_lowStock, setDbLowStock] = useState([]);
 
     // Create product and link variants in Supabase
     const createProductInSupabase = async (payload) => {
@@ -4144,119 +4076,87 @@ const AdminContents = () => {
         window.addEventListener('admin-nav-select', handler);
         const addHandler = () => setShowAddProduct(true);
         window.addEventListener('admin-products-add', addHandler);
-        // load recent orders for dashboard preview and basic KPIs/charts
-        let cancelled = false;
-        (async () => {
-            try {
-                setRecentLoading(true);
-                const { data: recs } = await supabase.from('orders').select('*').order('created_at', { ascending: false }).limit(5);
-                if (!cancelled && Array.isArray(recs)) setRecentOrders(recs.slice(0,3));
-
-                // KPIs: total users (fast count), total sales & orders (aggregate client-side for now), orders by status, sales by day
-                try {
-                    const usersRes = await supabase.from('users').select('id', { count: 'exact', head: true });
-                    const usersCount = usersRes?.count || 0;
-                    if (!cancelled) setTotalUsers(usersCount);
-                } catch (e) { /* ignore */ }
-
-                try {
-                    // fetch recent orders (up to 1000) to compute aggregates client-side
-                    const { data: allOrders } = await supabase.from('orders').select('order_id,id,total_price,status,created_at').order('created_at', { ascending: false }).limit(1000);
-                    if (Array.isArray(allOrders) && !cancelled) {
-                        // total sales
-                        const total = allOrders.reduce((s, o) => s + (Number(o.total_price) || 0), 0);
-                        setTotalSales(total);
-                        // total orders => use latest order_id when available otherwise length
-                        const latestOrderId = allOrders.length > 0 ? (allOrders[0].order_id ?? allOrders[0].id) : 0;
-                        setTotalOrders(latestOrderId || allOrders.length);
-                        // orders by status
-                        const byStatus = {};
-                        for (const o of allOrders) {
-                            const st = o.status || 'unknown';
-                            byStatus[st] = (byStatus[st] || 0) + 1;
-                        }
-                        setOrdersByStatus(byStatus);
-                        // sales by day (last 7 days)
-                        const map = {};
-                        for (const o of allOrders) {
-                            const d = o.created_at ? new Date(o.created_at).toISOString().slice(0,10) : null;
-                            if (!d) continue;
-                            map[d] = (map[d] || 0) + (Number(o.total_price) || 0);
-                        }
-                        // build last 7 days sorted asc
-                        const days = [];
-                        for (let i = 6; i >= 0; i--) {
-                            const dt = new Date();
-                            dt.setDate(dt.getDate() - i);
-                            const label = dt.toISOString().slice(0,10);
-                            days.push({ label, value: Math.round((map[label] || 0) * 100) / 100 });
-                        }
-                        setSalesByDay(days);
-                    }
-                } catch (e) { console.debug('dashboard aggregates error', e); }
-            } catch (e) { /* ignore */ } finally { if (!cancelled) setRecentLoading(false); }
-        })();
         return () => {
             window.removeEventListener('admin-nav-select', handler);
             window.removeEventListener('admin-products-add', addHandler);
-            cancelled = true;
         };
     }, []);
 
+    // Dashboard data loader
+    useEffect(() => {
+        let mounted = true;
+        const loadDashboard = async () => {
+            try {
+                // total users (profiles or customers)
+                try {
+                    const { data: usersRows } = await supabase.from('profiles').select('user_id').neq('user_id', null).limit(1);
+                    if (Array.isArray(usersRows)) {
+                        // count via rpc to avoid scanning large tables if available
+                        const { count } = await (async () => {
+                            try {
+                                const { count: c } = await supabase.from('profiles').select('user_id', { count: 'exact', head: true });
+                                return { count: c };
+                            } catch { return { count: null }; }
+                        })();
+                        if (mounted && count != null) setDbTotalUsers(Number(count));
+                    }
+                } catch (e) {
+                    // fallback to customers table
+                    try {
+                        const { count } = await supabase.from('customers').select('id', { count: 'exact', head: true });
+                        if (mounted && count != null) setDbTotalUsers(Number(count));
+                    } catch (ee) { /* ignore */ }
+                }
+
+                // total orders and total sales and pending
+                try {
+                    const { count: ordersCount } = await supabase.from('orders').select('order_id', { count: 'exact', head: true });
+                    if (mounted && ordersCount != null) setDbTotalOrders(Number(ordersCount));
+                    // sum total_price
+                    const { data: sumRows } = await supabase.rpc('sum_orders_total_price');
+                    if (mounted && sumRows && typeof sumRows === 'number') setDbTotalSales(Number(sumRows));
+                } catch (e) {
+                    // fallback: fetch limited aggregate
+                    try {
+                        const { data: ords } = await supabase.from('orders').select('total_price').limit(1000);
+                        if (Array.isArray(ords)) {
+                            const sum = ords.reduce((s, r) => s + Number(r.total_price || 0), 0);
+                            if (mounted) setDbTotalSales(sum);
+                        }
+                    } catch (ee) {}
+                }
+                try {
+                    const { count: pendingCount } = await supabase.from('orders').select('order_id', { count: 'exact', head: true }).or('status.eq.Pending,status.eq.pending,status.eq.In Progress,status.eq.in_progress');
+                    if (mounted && pendingCount != null) setDbTotalPending(Number(pendingCount));
+                } catch (e) { /* ignore */ }
+
+                // recent orders
+                try {
+                    const { data: recent } = await supabase.from('orders').select('order_id, created_at, total_price, customer_name, user_id').order('created_at', { ascending: false }).limit(2);
+                    if (mounted && Array.isArray(recent)) setDbRecentOrders(recent);
+                } catch (e) { /* ignore */ }
+
+                // recent customers (profiles)
+                try {
+                    const { data: recentUsers } = await supabase.from('profiles').select('user_id, email, first_name, last_name').order('created_at', { ascending: false }).limit(2);
+                    if (mounted && Array.isArray(recentUsers)) setDbRecentCustomers(recentUsers);
+                } catch (e) { /* ignore */ }
+
+                // low stock notifications (inventory rows with low_stock_limit)
+                try {
+                    const { data: low } = await supabase.from('inventory').select('inventory_id, quantity, low_stock_limit, combination_id, status').lte('quantity', 'low_stock_limit').order('inventory_id', { ascending: false }).limit(5);
+                    if (mounted && Array.isArray(low)) setDbLowStock(low);
+                } catch (e) { /* ignore */ }
+
+            } catch (e) {
+                console.error('Failed to load dashboard', e);
+            }
+        };
+        if (selected === 'Dashboard') loadDashboard();
+        return () => { mounted = false; };
+    }, [selected]);
+
     const containerClass = 'bg-white border border-black';
-
-    // Small inline chart helpers (kept minimal & dependency-free)
-    const MiniPieChart = ({ data = {}, size = 120 }) => {
-        const items = Object.entries(data || {}).map(([k,v], i) => ({ key:k, value: v || 0, color: ['#3B82F6','#6366F1','#F97316','#10B981','#EF4444'][i % 5] }));
-        const total = items.reduce((s,it) => s + (it.value || 0), 0) || 1;
-        let angle = 0;
-        const cx = size/2, cy = size/2, r = (size/2) - 2;
-        const arcs = items.map((it) => {
-            const start = angle;
-            const portion = (it.value / total) * Math.PI * 2;
-            const end = start + portion;
-            angle = end;
-            const large = portion > Math.PI ? 1 : 0;
-            const x1 = cx + r * Math.cos(start - Math.PI/2);
-            const y1 = cy + r * Math.sin(start - Math.PI/2);
-            const x2 = cx + r * Math.cos(end - Math.PI/2);
-            const y2 = cy + r * Math.sin(end - Math.PI/2);
-            const d = `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z`;
-            return { d, color: it.color, label: it.key, value: it.value };
-        });
-        return (
-            <div className="flex items-center gap-3">
-                <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-                    {arcs.map((a, i) => (<path key={i} d={a.d} fill={a.color} stroke="#fff" strokeWidth="0.5" />))}
-                </svg>
-                <div className="text-sm">
-                    {items.slice(0,4).map((it, i) => (
-                        <div key={i} className="flex items-center gap-2"><span style={{background: it.color}} className="w-3 h-3 inline-block"/> <span className="text-xs">{it.key} ({it.value})</span></div>
-                    ))}
-                </div>
-            </div>
-        );
-    };
-
-    const MiniBarChart = ({ data = [], width = 200, height = 80 }) => {
-        const max = Math.max(...(data.map(d => d.value || 0)), 1);
-        return (
-            <svg width={width} height={height} className="block">
-                {data.map((d, i) => {
-                    const barW = (width / data.length) - 6;
-                    const x = i * (width / data.length) + 4;
-                    const h = Math.round(((d.value || 0) / max) * (height - 20));
-                    const y = height - h - 10;
-                    return (
-                        <g key={i}>
-                            <rect x={x} y={y} width={barW} height={h} rx="3" fill="#60A5FA" />
-                            <text x={x + barW/2} y={height - 2} fontSize="9" textAnchor="middle" fill="#374151">{d.label.slice(5)}</text>
-                        </g>
-                    );
-                })}
-            </svg>
-        );
-    };
 
     return (
         <>
@@ -4341,106 +4241,110 @@ const AdminContents = () => {
             </div>
 
             <div>
-                <div style={{ display: selected === 'Dashboard' ? 'block' : 'none' }} className="bg-[#F8FAFC] px-2 py-4">
-                    <div className="grid grid-cols-4 gap-4 mb-4">
-                        {/* KPI Cards */}
-                        <div className="bg-white rounded-lg border border-gray-200 p-5 flex flex-col gap-2 shadow-sm">
-                            <div className="flex items-center gap-2 text-gray-500 text-sm font-semibold"><span className="material-icons">groups</span> Total Users</div>
-                            <div className="flex items-end gap-2"><span className="text-3xl font-bold text-[#25324B]">{totalUsers ?? 0}</span><span className="text-green-600 text-sm font-bold">+10%</span></div>
+                <div style={{ display: selected === 'Dashboard' ? 'block' : 'none' }} >
+                 
+                    <div className="p-4">
+                        {/* Top metrics */}
+                        <div className="grid grid-cols-4 gap-4 mb-6">
+                            <div className="border rounded p-4 bg-white">
+                                <div className="text-sm text-gray-500">Total Users</div>
+                                <div className="text-2xl font-bold">{db_totalUsers ?? 0}</div>
+                                <div className="text-sm text-green-600 mt-1">+10%</div>
+                            </div>
+                            <div className="border rounded p-4 bg-white">
+                                <div className="text-sm text-gray-500">Total Orders</div>
+                                <div className="text-2xl font-bold">{db_totalOrders ?? 0}</div>
+                                <div className="text-sm text-green-600 mt-1">+8%</div>
+                            </div>
+                            <div className="border rounded p-4 bg-white">
+                                <div className="text-sm text-gray-500">Total Sales</div>
+                                <div className="text-2xl font-bold">₱{Number(db_totalSales || 0).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</div>
+                                <div className="text-sm text-green-600 mt-1">+55%</div>
+                            </div>
+                            <div className="border rounded p-4 bg-white">
+                                <div className="text-sm text-gray-500">Total Pending</div>
+                                <div className="text-2xl font-bold">{db_totalPending ?? 0}</div>
+                                <div className="text-sm text-green-600 mt-1">+12%</div>
+                            </div>
                         </div>
-                        <div className="bg-white rounded-lg border border-gray-200 p-5 flex flex-col gap-2 shadow-sm">
-                            <div className="flex items-center gap-2 text-gray-500 text-sm font-semibold"><span className="material-icons">assignment</span> Total Orders</div>
-                            <div className="flex items-end gap-2"><span className="text-3xl font-bold text-[#25324B]">{totalOrders ?? 0}</span><span className="text-green-600 text-sm font-bold">+8%</span></div>
+
+                        {/* Charts and status */}
+                        <div className="grid grid-cols-3 gap-4 mb-6">
+                            <div className="col-span-2 border rounded p-4 bg-white">
+                                <div className="font-semibold mb-2">Orders By Status</div>
+                                <div className="w-full h-48 flex items-center justify-center text-gray-400">[Pie chart placeholder]</div>
+                            </div>
+                            <div className="border rounded p-4 bg-white">
+                                <div className="font-semibold mb-2">Stock Status</div>
+                                <div className="w-full h-48 flex items-center justify-center text-gray-400">[Bar chart placeholder]</div>
+                            </div>
                         </div>
-                        <div className="bg-white rounded-lg border border-gray-200 p-5 flex flex-col gap-2 shadow-sm">
-                            <div className="flex items-center gap-2 text-gray-500 text-sm font-semibold"><span className="material-icons">payments</span> Total Sales</div>
-                            <div className="flex items-end gap-2"><span className="text-3xl font-bold text-[#25324B]">{typeof totalSales === 'number' ? (totalSales === 0 ? '₱0' : '₱' + (Number(totalSales) || 0).toLocaleString()) : '₱0'}</span><span className="text-green-600 text-sm font-bold">+55%</span></div>
-                        </div>
-                        <div className="bg-white rounded-lg border border-gray-200 p-5 flex flex-col gap-2 shadow-sm">
-                            <div className="flex items-center gap-2 text-gray-500 text-sm font-semibold"><span className="material-icons">pending_actions</span> Total Pending</div>
-                            <div className="flex items-end gap-2"><span className="text-3xl font-bold text-[#25324B]">187</span><span className="text-green-600 text-sm font-bold">+12%</span></div>
-                        </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4 mb-4">
-                        <div className="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
-                            <div className="font-bold text-[#25324B] text-lg mb-2">Orders By Status</div>
-                            <div className="flex gap-6 items-center">
-                                <MiniPieChart data={ordersByStatus} size={180} />
-                                <div className="flex flex-col gap-2 text-sm">
-                                    <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-[#6EE7B7] inline-block"/> Delivered - 60%</div>
-                                    <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-[#FDE68A] inline-block"/> In Progress - 30%</div>
-                                    <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-[#FCA5A5] inline-block"/> Cancelled - 10%</div>
+
+                        {/* Bottom panels: Recent Orders, New Customers, Stock Notifications */}
+                        <div className="grid grid-cols-3 gap-4">
+                            <div className="border rounded p-4 bg-white">
+                                <div className="font-semibold mb-3">Recent Orders</div>
+                                <div className="text-sm">
+                                    {db_recentOrders && db_recentOrders.length > 0 ? (
+                                        db_recentOrders.map((o) => (
+                                            <div key={o.order_id} className="mb-2 border-b pb-2">
+                                                <div className="text-xs text-gray-500">Order ID</div>
+                                                <div className="text-sm">Order #{o.order_id}</div>
+                                                <div className="text-xs text-gray-400">{(o.created_at ? new Date(o.created_at).toISOString().slice(0,10) : '')} • ₱{Number(o.total_price||0).toFixed(2)}</div>
+                                            </div>
+                                        ))
+                                    ) : (
+                                        <div className="text-sm text-gray-500">No recent orders</div>
+                                    )}
+                                </div>
+                                <div className="mt-3 text-center">
+                                    <button className="px-4 py-2 border rounded text-sm text-gray-600">View All Orders</button>
                                 </div>
                             </div>
-                        </div>
-                        <div className="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
-                            <div className="font-bold text-[#25324B] text-lg mb-2">Stock Status</div>
-                            <div className="flex gap-6 items-center">
-                                <MiniBarChart data={salesByDay} width={220} height={100} />
-                                <div className="flex flex-col gap-2 text-sm">
-                                    <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-[#6EE7B7] inline-block"/> Active - 28</div>
-                                    <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-[#FDE68A] inline-block"/> Low Stock - 1</div>
-                                    <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-[#FCA5A5] inline-block"/> Out of Stock - 1</div>
+
+                            <div className="border rounded p-4 bg-white">
+                                <div className="font-semibold mb-3">New Customers</div>
+                                <div className="text-sm">
+                                    {db_recentCustomers && db_recentCustomers.length > 0 ? (
+                                        db_recentCustomers.map((u) => (
+                                            <div key={u.user_id} className="mb-2 border-b pb-2 flex items-center gap-3">
+                                                <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">👤</div>
+                                                <div>
+                                                    <div className="text-sm font-semibold">{[u.first_name, u.last_name].filter(Boolean).join(' ') || u.user_id}</div>
+                                                    <div className="text-xs text-gray-500">{u.email || ''}</div>
+                                                </div>
+                                            </div>
+                                        ))
+                                    ) : (
+                                        <div className="text-sm text-gray-500">No recent customers</div>
+                                    )}
+                                </div>
+                                <div className="mt-3 text-center">
+                                    <button className="px-4 py-2 border rounded text-sm text-gray-600">View All Users</button>
                                 </div>
                             </div>
-                        </div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-4">
-                        <div className="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
-                            <div className="font-bold text-[#25324B] text-lg mb-2">Recent Orders</div>
-                            <table className="w-full text-sm mb-2">
-                                <thead>
-                                    <tr className="text-left text-gray-600">
-                                        <th className="pb-2">Order ID</th>
-                                        <th className="pb-2">Customer</th>
-                                        <th className="pb-2">Date Ordered</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {recentOrders.map((r) => (
-                                        <tr key={r.id} className="border-t">
-                                            <td className="py-2">Order #{r.order_id ?? r.id}</td>
-                                            <td className="py-2">{r.customer_name || r.customer_email || r.customer || '—'}</td>
-                                            <td className="py-2">{(r.created_at || r.date_ordered) ? new Date(r.created_at || r.date_ordered).toISOString().slice(0,10) : '—'}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                            <button className="w-full bg-gray-100 text-gray-500 py-2 rounded font-semibold text-sm">View All Orders</button>
-                        </div>
-                        <div className="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
-                            <div className="font-bold text-[#25324B] text-lg mb-2">New Customers</div>
-                            <table className="w-full text-sm mb-2">
-                                <thead>
-                                    <tr className="text-left text-gray-600">
-                                        <th className="pb-2">Full Name</th>
-                                        <th className="pb-2">Email Address</th>
-                                        <th className="pb-2">Date Joined</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {/* Example static rows, replace with real data if available */}
-                                    <tr className="border-t">
-                                        <td className="py-2 flex items-center gap-2"><span className="material-icons text-gray-400">person</span> Maria Santos</td>
-                                        <td className="py-2">maria.santos@gmail.com</td>
-                                        <td className="py-2">2025-08-01</td>
-                                    </tr>
-                                    <tr className="border-t">
-                                        <td className="py-2 flex items-center gap-2"><span className="material-icons text-gray-400">person</span> John Doe</td>
-                                        <td className="py-2">john.doe@gmail.com</td>
-                                        <td className="py-2">2025-08-01</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                            <button className="w-full bg-gray-100 text-gray-500 py-2 rounded font-semibold text-sm">View All Users</button>
-                        </div>
-                        <div className="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
-                            <div className="font-bold text-[#25324B] text-lg mb-2">Stock Notifications</div>
-                            <div className="flex flex-col gap-2 mb-2">
-                                <div className="flex items-center gap-2"><span className="bg-[#FDE68A] text-yellow-800 px-2 py-1 rounded text-xs font-bold">Low Stock</span> Custom Cap <span className="text-gray-500 text-xs">5 left</span></div>
-                                <div className="flex items-center gap-2"><span className="bg-[#FCA5A5] text-red-800 px-2 py-1 rounded text-xs font-bold">Out of Stock</span> Custom Rounded T-shirt <span className="text-gray-500 text-xs">0 left</span></div>
+
+                            <div className="border rounded p-4 bg-white">
+                                <div className="font-semibold mb-3">Stock Notifications</div>
+                                <div className="text-sm space-y-3">
+                                    {db_lowStock && db_lowStock.length > 0 ? (
+                                        db_lowStock.map((s) => (
+                                            <div key={s.inventory_id} className="flex items-center justify-between">
+                                                <div>
+                                                    <div className="text-sm font-semibold">Inventory #{s.inventory_id}</div>
+                                                    <div className="text-xs text-gray-500">Qty: {s.quantity}</div>
+                                                </div>
+                                                <div className="text-xs text-red-500">{s.quantity <= (s.low_stock_limit || 0) ? 'Low Stock' : ''}</div>
+                                            </div>
+                                        ))
+                                    ) : (
+                                        <div className="text-sm text-gray-500">No notifications</div>
+                                    )}
+                                </div>
+                                <div className="mt-3 text-center">
+                                    <button className="px-4 py-2 border rounded text-sm text-gray-600">View All Stocks</button>
+                                </div>
                             </div>
-                            <button className="w-full bg-gray-100 text-gray-500 py-2 rounded font-semibold text-sm">View All Stocks</button>
                         </div>
                     </div>
                 </div>
