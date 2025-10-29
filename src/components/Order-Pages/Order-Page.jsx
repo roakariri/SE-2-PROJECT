@@ -820,8 +820,8 @@ export default function OrderPage() {
 											}
 											className={
 												(!order || isCancelling || ((order?.status || '') && ['cancelled', 'in production', 'printing', 'shipped', 'delivered', 'deliver'].some(kw => (order.status || '').toLowerCase().includes(kw))))
-													? 'rounded-md border border-red-400 bg-white px-3 py-1 text-sm font-semibold text-red-600 transition disabled:cursor-not-allowed disabled:opacity-60 pointer-events-none'
-													: 'rounded-md border border-red-400 bg-white px-3 py-1 text-sm bg-[#964545] font-semibold text-white transition h hover:text-white'
+													? 'rounded-md border border-red-400  px-3 py-1 text-sm font-semibold bg-[#964545] text-red-600 transition disabled:cursor-not-allowed disabled:opacity-60 pointer-events-none'
+													: 'rounded-md border border-red-400  px-3 py-1 text-sm bg-[#964545] font-semibold text-white transition h hover:text-white'
 											} 
 										>
 											{isCancelling ? 'Cancelling…' : 'Cancel Order'}
@@ -849,7 +849,7 @@ export default function OrderPage() {
 										<button onClick={confirmCancelOrder} disabled={isCancelling} className="bg-[#9E3E3E] hover:bg-[#873434] text-white px-4 py-2 rounded-md font-semibold">
 											{isCancelling ? 'Cancelling…' : 'Confirm Cancellation'}
 										</button>
-										<button onClick={() => setShowCancelModal(false)} className="px-4 py-2 border rounded-md text-sm">Go Back</button>
+										<button onClick={() => setShowCancelModal(false)} className="px-4 py-2 border border-gray-300 rounded-md text-sm">Go Back</button>
 									</div>
 								</div>
 							</div>
