@@ -380,8 +380,8 @@ const RTshirt = () => {
             // first thumbnail: use rounded_t-shirt as primary
             results.push('/apparel-images/rounded_t-shirt.png');
 
-            // desired variant thumbnails (colors)
-            const desired = ['rounded_t-shirt-white', 'rounded_t-shirt-blue', 'rounded_t-shirt-red'];
+            // desired variant thumbnails (colors) — removed the red variant per request
+            const desired = ['rounded_t-shirt-white', 'rounded_t-shirt-blue'];
             for (const name of desired) {
                 if (results.length >= 4) break;
                 const url = await tryGetPublic('apparel-images', name);
@@ -399,10 +399,17 @@ const RTshirt = () => {
                     const url = await tryGetPublic('apparel-images', cand);
                     if (url) results.push(url);
                 }
+                // If still short, try a site-specific size image for rounded t-shirts
+                if (results.length < 4) {
+                    try {
+                        const sizeUrl = await tryGetPublic('apparel-images', 'rounded_t-shirt-size');
+                        if (sizeUrl && !results.includes(sizeUrl)) results.push(sizeUrl);
+                    } catch (e) { /* ignore */ }
+                }
             }
 
-            // last-resort local fallbacks
-            const fallbacks = ['/apparel-images/rounded_t-shirt.png', '/apparel-images/rounded_t-shirt-blue.png', '/apparel-images/rounded_t-shirt-red.png', '/apparel-images/rounded_t-shirt-white.png', '/logo-icon/logo.png'];
+            // last-resort local fallbacks (red variant removed)
+            const fallbacks = ['/apparel-images/rounded_t-shirt.png', '/apparel-images/rounded_t-shirt-blue.png', '/apparel-images/rounded_t-shirt-white.png', '/logo-icon/logo.png'];
             for (const f of fallbacks) {
                 if (results.length >= 4) break;
                 try {
@@ -423,6 +430,21 @@ const RTshirt = () => {
 
             let padded = ordered.slice(0, 4);
             while (padded.length < 4) padded.push(undefined);
+
+            // Debug: log built thumbnails for troubleshooting
+            try { console.debug('[RTshirt] built thumbnails:', padded); } catch (e) { /* noop */ }
+
+            // Ensure a static local fallback for the fourth thumbnail so the
+            // UI always has a size image available even if storage access fails
+            try {
+                if ((!padded[3] || padded[3] === undefined) && padded.indexOf('/apparel-images/rounded_t-shirt-size.png') === -1) {
+                    // check that the static file exists (HEAD request)
+                    try {
+                        const head = await fetch('/apparel-images/rounded_t-shirt-size.png', { method: 'HEAD' });
+                        if (head.ok) padded[3] = '/apparel-images/rounded_t-shirt-size.png';
+                    } catch (e) { /* ignore */ }
+                }
+            } catch (e) { /* noop */ }
 
             setThumbnails(padded);
         };
@@ -1217,6 +1239,12 @@ const RTshirt = () => {
                                                         src={src}
                                                         alt={`Thumbnail ${i + 1}`}
                                                         className={`h-full w-full object-cover transition-transform duration-200 ease-in-out transform ${isActive ? 'scale-110' : 'hover:scale-110'}`}
+                                                        onError={(e) => {
+                                                            try {
+                                                                e.currentTarget.onerror = null;
+                                                                e.currentTarget.src = '/apparel-images/rounded_t-shirt-size.png';
+                                                            } catch (err) { /* noop */ }
+                                                        }}
                                                     />
                                                 </button>
                                             );

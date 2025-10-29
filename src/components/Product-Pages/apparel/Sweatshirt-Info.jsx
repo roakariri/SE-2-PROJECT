@@ -424,6 +424,14 @@ const Sweatshirt = () => {
                     const url = await tryGetPublic('apparel-images', cand);
                     if (url) results.push(url);
                 }
+                // If still short, try a site-specific fourth image used for sizing
+                // (requested: 'sweatshirt-size.png' in the apparel-images bucket).
+                if (results.length < 4) {
+                    try {
+                        const sizeUrl = await tryGetPublic('apparel-images', 'sweatshirt-size');
+                        if (sizeUrl && !results.includes(sizeUrl)) results.push(sizeUrl);
+                    } catch (e) { /* ignore */ }
+                }
             }
 
             const fallbacks = ['/apparel-images/sweatshirt.png', '/apparel-images/sweatshirt-gray.png', '/apparel-images/sweatshirt-blue.png', '/logo-icon/logo.png'];
@@ -444,6 +452,8 @@ const Sweatshirt = () => {
             }
             let padded = ordered.slice(0, 4);
             while (padded.length < 4) padded.push(undefined);
+            // Debug: log the final thumbnails array so we can inspect missing entries
+            try { console.debug('[Sweatshirt] built thumbnails:', padded); } catch (e) { /* noop */ }
             setThumbnails(padded);
         };
 
@@ -1036,7 +1046,10 @@ const Sweatshirt = () => {
                                                 </button>
                                             );
                                         } else {
-                                            cells.push(<div key={`placeholder-${i}`} className="h-20 w-full border rounded p-2 bg-[#f7f7f7]" aria-hidden />);
+                                            // render a placeholder with the same dimensions as the thumbnail
+                                            cells.push(
+                                                <div key={`placeholder-${i}`} className="border rounded p-1 bg-[#f7f7f7] flex items-center justify-center" aria-hidden style={{ width: 120, height: 135 }} />
+                                            );
                                         }
                                     }
                                     return cells;

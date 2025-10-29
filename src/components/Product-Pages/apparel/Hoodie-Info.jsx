@@ -434,6 +434,14 @@ const Hoodie = () => {
                 }
             }
 
+            // If still short, try a site-specific size image for hoodies
+            if (results.length < 4) {
+                try {
+                    const sizeUrl = await tryGetPublic('apparel-images', 'hoodie-size');
+                    if (sizeUrl && !results.includes(sizeUrl)) results.push(sizeUrl);
+                } catch (e) { /* ignore */ }
+            }
+
             const fallbacks = ['/apparel-images/hoodie.png', '/logo-icon/logo.png'];
             for (const f of fallbacks) {
                 if (results.length >= 4) break;
@@ -452,6 +460,19 @@ const Hoodie = () => {
             }
             let padded = ordered.slice(0, 4);
             while (padded.length < 4) padded.push(undefined);
+
+            try { console.debug('[Hoodie] built thumbnails:', padded); } catch (e) { /* noop */ }
+
+            // Static local fallback for fourth thumbnail
+            try {
+                if ((!padded[3] || padded[3] === undefined) && padded.indexOf('/apparel-images/hoodie-size.png') === -1) {
+                    try {
+                        const head = await fetch('/apparel-images/hoodie-size.png', { method: 'HEAD' });
+                        if (head.ok) padded[3] = '/apparel-images/hoodie-size.png';
+                    } catch (e) { /* ignore */ }
+                }
+            } catch (e) { /* noop */ }
+
             setThumbnails(padded);
         };
 
