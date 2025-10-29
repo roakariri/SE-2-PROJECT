@@ -1,12 +1,20 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
+import { supabase } from '../../supabaseClient';
 
 const AdminNavigation = () => {
     const [isCollapsed, setIsCollapsed] = useState(false);
     const navigate = useNavigate();
 
     const handleLogout = () => {
-        localStorage.removeItem('adminLoggedIn');
+        // clear admin-related localStorage keys
+        try {
+            localStorage.removeItem('adminLoggedIn');
+            localStorage.removeItem('adminEmail');
+            localStorage.removeItem('admin_logged_in_email');
+            localStorage.removeItem('adminUser');
+        } catch (e) { /* noop */ }
         navigate('/admin-login');
     };
 
@@ -21,6 +29,114 @@ const AdminNavigation = () => {
 
     const [selected, setSelected] = useState('Dashboard');
     const [searchQuery, setSearchQuery] = useState('');
+    const [adminEmail, setAdminEmail] = useState(() => {
+        try {
+            const maybe = localStorage.getItem('adminEmail') || localStorage.getItem('admin_logged_in_email') || localStorage.getItem('adminEmailAddress') || localStorage.getItem('adminUser');
+            if (!maybe) return '';
+            try {
+                const parsed = JSON.parse(maybe);
+                return parsed?.email ? String(parsed.email) : String(maybe);
+            } catch {
+                return String(maybe);
+            }
+        } catch (e) { return ''; }
+    });
+
+    useEffect(() => {
+        const handler = (e) => {
+            const sec = e?.detail?.section;
+            if (sec) setSelected(sec);
+        };
+        window.addEventListener('admin-nav-select', handler);
+        return () => window.removeEventListener('admin-nav-select', handler);
+    }, []);
+
+    // Listen for an in-page admin-login event so the nav updates immediately
+    // when the login component performs a successful login in the same tab.
+    useEffect(() => {
+        const onAdminLogin = (e) => {
+            try {
+                const email = e?.detail?.email;
+                if (email) setAdminEmail(String(email));
+            } catch (err) { /* noop */ }
+        };
+        window.addEventListener('admin-login', onAdminLogin);
+        return () => window.removeEventListener('admin-login', onAdminLogin);
+    }, []);
+
+    // listen for storage events so cross-tab/local updates update the UI
+    useEffect(() => {
+        const onStorage = (e) => {
+            if (!e.key) return;
+            if (['adminEmail', 'admin_logged_in_email', 'adminUser', 'adminEmailAddress'].includes(e.key)) {
+                try {
+                    const maybe = localStorage.getItem('adminEmail') || localStorage.getItem('admin_logged_in_email') || localStorage.getItem('adminEmailAddress') || localStorage.getItem('adminUser');
+                    if (!maybe) {
+                        setAdminEmail('');
+                        return;
+                    }
+                    try {
+                        const parsed = JSON.parse(maybe);
+                        setAdminEmail(parsed?.email ? String(parsed.email) : String(maybe));
+                    } catch {
+                        setAdminEmail(String(maybe));
+                    }
+                } catch (err) { /* noop */ }
+            }
+        };
+        window.addEventListener('storage', onStorage);
+        return () => window.removeEventListener('storage', onStorage);
+    }, []);
+
+    // Try to read an admin email from localStorage for display in the footer
+    useEffect(() => {
+        try {
+            const maybe = localStorage.getItem('adminEmail') || localStorage.getItem('admin_logged_in_email') || localStorage.getItem('adminEmailAddress') || localStorage.getItem('adminUser');
+            if (maybe) {
+                // If stored as JSON, try parse
+                try {
+                    const parsed = JSON.parse(maybe);
+                    if (parsed && parsed.email) setAdminEmail(String(parsed.email));
+                    else setAdminEmail(String(parsed || ''));
+                } catch {
+                    setAdminEmail(String(maybe));
+                }
+            }
+        } catch (e) { /* ignore */ }
+    }, []);
+
+    // If no email was found in localStorage, attempt to read it from the
+    // Supabase auth session (fallback). Also subscribe to auth state changes
+    // so the footer updates when the session changes.
+    useEffect(() => {
+        if (adminEmail) return; // already have an email from localStorage
+        let mounted = true;
+
+        const trySession = async () => {
+            try {
+                const { data } = await supabase.auth.getSession();
+                const sessionEmail = data?.session?.user?.email;
+                if (mounted && sessionEmail) setAdminEmail(String(sessionEmail));
+            } catch (err) {
+                // ignore session read errors
+            }
+        };
+
+        trySession();
+
+        const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+            const sessionEmail = session?.user?.email;
+            if (sessionEmail) setAdminEmail(String(sessionEmail));
+            else setAdminEmail('');
+        });
+
+        return () => {
+            mounted = false;
+            try {
+                if (listener && listener.subscription) listener.subscription.unsubscribe();
+            } catch (e) { /* noop */ }
+        };
+    }, [adminEmail]);
 
     return (
     <div className={`fixed left-0 top-0 h-full bg-[#2B4269] shadow-lg transition-all duration-300 p-2 z-50 flex flex-col ${isCollapsed ? 'w-16' : 'w-[263px]'}`}>
@@ -89,7 +205,10 @@ const AdminNavigation = () => {
             {/* Footer */}
             <div className="mt-auto p-3">
                 {!isCollapsed ? (
-                    <div className="flex items-center space-x-3">
+                    <div className="flex flex-col items-start space-y-2">
+                        {adminEmail ? (
+                            <div className="text-sm text-white truncate max-w-[200px]">{adminEmail}</div>
+                        ) : null}
                         <button
                             onClick={handleLogout}
                             className="flex items-center space-x-2 text-white bg-transparent"

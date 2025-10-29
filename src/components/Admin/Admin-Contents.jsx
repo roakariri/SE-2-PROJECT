@@ -472,6 +472,157 @@ const resolveImageKeyAsync = async (img) => {
         let bucketsToTry = ['apparel-images', 'accessoriesdecorations-images', 'accessories-images', '3d-prints-images', 'product-images', 'images', 'public'];
         // Heuristic: keep apparel-first order if possible (guarded by try so undefined vars don't throw)
         try {
+            // Shared normalizer: convert raw inventory rows (with nested product_variant_combinations)
+            // into the UI-friendly mapped shape used by the Stocks table.
+            const resolveInventoryRows = async (rawRows) => {
+                const data = Array.isArray(rawRows) ? rawRows : [];
+                // Collect all product_variant_value ids referenced in combinations so we can resolve names
+                const allVariantIds = new Set();
+                data.forEach(inv => {
+                    const combo = Array.isArray(inv.product_variant_combinations) ? inv.product_variant_combinations[0] : inv.product_variant_combinations;
+                    const variantsArr = Array.isArray(combo?.variants) ? combo.variants : (combo?.variants != null ? [combo.variants] : []);
+                    variantsArr.forEach(v => { if (v != null) allVariantIds.add(v); });
+                });
+
+                let pvvMap = {};
+                const productLookupCache = {};
+                if (allVariantIds.size > 0) {
+                    try {
+                        const ids = Array.from(allVariantIds);
+                        const { data: pvvData, error: pvvErr } = await supabase
+                            .from('product_variant_values')
+                            .select('product_variant_value_id, variant_value_id, price, product_id, variant_values(value_name, variant_group_id, variant_groups(variant_group_id, name))')
+                            .in('product_variant_value_id', ids);
+                        if (!pvvErr && Array.isArray(pvvData) && pvvData.length > 0) {
+                            pvvData.forEach(pvv => {
+                                const id = pvv.product_variant_value_id ?? pvv.id;
+                                const vv = pvv.variant_values;
+                                const valueName = vv?.value_name || '';
+                                const groupName = vv?.variant_groups?.name || (vv?.variant_group_id != null ? String(vv.variant_group_id) : '');
+                                pvvMap[String(id)] = { valueName, groupName, price: Number(pvv.price || 0), variant_value_id: pvv.variant_value_id };
+                                if (pvv.product_id != null) {
+                                    productLookupCache[String(pvv.product_id)] = productLookupCache[String(pvv.product_id)] || {};
+                                    productLookupCache[String(pvv.product_id)][String(id)] = pvvMap[String(id)];
+                                    if (pvv.variant_value_id != null) productLookupCache[String(pvv.product_id)][String(pvv.variant_value_id)] = pvvMap[String(id)];
+                                }
+                            });
+                        }
+                        // also try by variant_value_id
+                        const { data: byVv, error: byVvErr } = await supabase
+                            .from('product_variant_values')
+                            .select('product_variant_value_id, variant_value_id, price, product_id, variant_values(value_name, variant_group_id, variant_groups(variant_group_id, name))')
+                            .in('variant_value_id', Array.from(allVariantIds));
+                        if (!byVvErr && Array.isArray(byVv) && byVv.length > 0) {
+                            byVv.forEach(pvv => {
+                                const id = pvv.product_variant_value_id ?? pvv.id;
+                                const vv = pvv.variant_values;
+                                const valueName = vv?.value_name || '';
+                                const groupName = vv?.variant_groups?.name || (vv?.variant_group_id != null ? String(vv.variant_group_id) : '');
+                                pvvMap[String(id)] = { valueName, groupName, price: Number(pvv.price || 0), variant_value_id: pvv.variant_value_id };
+                                if (pvv.product_id != null) {
+                                    productLookupCache[String(pvv.product_id)] = productLookupCache[String(pvv.product_id)] || {};
+                                    productLookupCache[String(pvv.product_id)][String(id)] = pvvMap[String(id)];
+                                    if (pvv.variant_value_id != null) productLookupCache[String(pvv.product_id)][String(pvv.variant_value_id)] = pvvMap[String(id)];
+                                }
+                                if (pvv.variant_value_id != null) pvvMap[String(pvv.variant_value_id)] = pvvMap[String(id)];
+                            });
+                        }
+                        // fallback to variant_values if still empty
+                        if (Object.keys(pvvMap).length === 0) {
+                            const { data: vvData, error: vvErr } = await supabase
+                                .from('variant_values')
+                                .select('variant_value_id, value_name, variant_group_id, variant_groups(variant_group_id, name)')
+                                .in('variant_value_id', Array.from(allVariantIds));
+                            if (!vvErr && Array.isArray(vvData)) {
+                                vvData.forEach(vv => {
+                                    const id = vv.variant_value_id ?? vv.id;
+                                    const groupName = vv?.variant_groups?.name || (vv?.variant_group_id != null ? String(vv.variant_group_id) : '');
+                                    pvvMap[String(id)] = { valueName: vv.value_name || '', groupName, price: 0, variant_value_id: id };
+                                });
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('resolveInventoryRows: variant lookup failed', e);
+                    }
+                }
+
+                const mapped = [];
+                for (const inv of data) {
+                    const combo = Array.isArray(inv.product_variant_combinations) ? inv.product_variant_combinations[0] : inv.product_variant_combinations;
+                    const prod = combo?.products || combo?.product || (Array.isArray(combo?.products) ? combo.products[0] : null) || null;
+                    const product = Array.isArray(prod) ? prod[0] : prod;
+                    const productName = product?.name || '';
+                    const productTypes = Array.isArray(product?.product_types) ? product.product_types[0] : product?.product_types || null;
+                    const category = productTypes?.product_categories?.name || productTypes?.name || '';
+                    const category_id = productTypes?.category_id || productTypes?.product_categories?.id || null;
+                    const price = product?.starting_price ?? product?.price ?? null;
+                    const rawImageUrl = product?.image_url ?? null;
+                    const rawImage = rawImageUrl || product?.image || null;
+                    let resolvedFromImageUrl = null;
+                    try { resolvedFromImageUrl = rawImageUrl ? await resolveImageKeyAsync(rawImageUrl) : null; } catch (e) { resolvedFromImageUrl = rawImageUrl || null; }
+                    let image = null;
+                    try { image = rawImage ? await resolveImageKeyAsync(rawImage) : null; } catch (e) { image = rawImage || null; }
+                    const buildPublicUrlFromKey = (key) => {
+                        if (!key) return null;
+                        try {
+                            const s = String(key).trim().replace(/^\//, '');
+                            if (s.startsWith('http://') || s.startsWith('https://')) return s;
+                            const parts = s.split('/');
+                            if (parts.length < 2) return null;
+                            const bucket = parts.shift();
+                            const path = parts.join('/');
+                            const base = SUPABASE_URL.replace(/\/$/, '');
+                            if (!base) return `/${bucket}/${path}`;
+                            return `${base}/storage/v1/object/public/${bucket}/${path}`;
+                        } catch (e) { return null; }
+                    };
+                    if ((!resolvedFromImageUrl || !(String(resolvedFromImageUrl).startsWith('http://') || String(resolvedFromImageUrl).startsWith('https://'))) && rawImageUrl) {
+                        const candidate = buildPublicUrlFromKey(rawImageUrl); if (candidate) resolvedFromImageUrl = candidate;
+                    }
+                    if ((!image || !(String(image).startsWith('http://') || String(image).startsWith('https://'))) && rawImage) {
+                        const candidate = buildPublicUrlFromKey(rawImage); if (candidate) image = candidate;
+                    }
+
+                    const variantsArr = Array.isArray(combo?.variants) ? combo.variants : (combo?.variants != null ? [combo.variants] : []);
+                    let variantPriceTotal = 0;
+                    const productKey = String(product?.id ?? 'global');
+                    const variantParts = variantsArr.map(vId => {
+                        const key = String(vId);
+                        const scoped = (productLookupCache[productKey] && productLookupCache[productKey][key]) || null;
+                        const global = pvvMap[key] || null;
+                        const m = scoped || global || null;
+                        let display = m?.valueName || String(vId);
+                        const group = (m?.groupName || '').toLowerCase();
+                        if (group.includes('color') || group.includes('colour') || group.includes('strap')) {
+                            const normalized = normalizeHexCode(display);
+                            display = colorNames[normalized] || colorNames[display] || display;
+                        }
+                        const priceForVariant = Number(scoped?.price ?? global?.price ?? 0);
+                        variantPriceTotal += priceForVariant;
+                        return display;
+                    }).filter(Boolean);
+                    const variantList = variantParts.length
+                        ? variantParts
+                        : (Array.isArray(combo?.variants)
+                            ? combo.variants.map(v => String(v))
+                            : (combo?.variants != null ? [String(combo.variants)] : []));
+                    const variantDesc = variantList.length ? variantList.join(', ') : '';
+                    const basePrice = Number(price ?? 0);
+                    const totalPrice = basePrice + variantPriceTotal;
+                    mapped.push({
+                        inventory_id: inv.inventory_id,
+                        combination_id: inv.combination_id,
+                        quantity: inv.quantity,
+                        low_stock_limit: inv.low_stock_limit,
+                        status: inv.status,
+                        updated_at: inv.updated_at,
+                        product: { id: product?.id, name: productName, category, category_id, price: totalPrice, image, image_url: resolvedFromImageUrl, image_key: rawImageUrl, basePrice },
+                        variantDesc,
+                        variantList,
+                    });
+                }
+                return mapped;
+            };
             const look = String((productName || productTypes?.name || category || '')).toLowerCase();
             const apparelKeywords = ['apparel','shirt','t-shirt','tshirt','hoodie','sweatshirt','cap','hat','tote','bag','rtshirt','rounded_t-shirt'];
             const isApparel = apparelKeywords.some(k => look.includes(k)) || String(category || '').toLowerCase().includes('apparel');
@@ -1607,11 +1758,11 @@ const OrdersList = ({ externalSearch = '' }) => {
                 <div className="h-[700px] overflow-y-auto">
                     <table className="w-full table-fixed rounded-md">
                     <colgroup>
-                        <col style={{ width: '16%' }} />
+                        <col style={{ width: '10%' }} />
                         <col style={{ width: '22%' }} />
-                        <col style={{ width: '18%' }} />
-                        <col style={{ width: '18%' }} />
-                        <col style={{ width: '16%' }} />
+                        <col style={{ width: '14%' }} />
+                        <col style={{ width: '15%' }} />
+                        <col style={{ width: '13%' }} />
                         <col style={{ width: '12%' }} />
                      
                     </colgroup>
@@ -1955,12 +2106,11 @@ const ProductsList = ({ externalSearch = '' }) => {
     const [statusDraft, setStatusDraft] = useState([]);
     const statusMenuRef = useRef(null);
 
-    // Small helper for status badge — same scheme as Stocks tab
+    // Small helper for status badge — Products tab shows only Active / Inactive
     const statusBadge = (s) => {
         const base = 'inline-flex items-center px-2 py-1 rounded text-sm';
-        if (s === 'Out of Stock') return <span className={`${base} bg-red-100 text-red-700`}>Out of Stock</span>;
-        if (s === 'Low Stock') return <span className={`${base} bg-yellow-100 text-yellow-800`}>Low Stock</span>;
-        return <span className={`${base} bg-green-100 text-green-800`}>Active</span>;
+        if (s === 'Active') return <span className={`${base} bg-green-100 text-green-800`}>Active</span>;
+        return <span className={`${base} bg-gray-100 text-gray-700`}>Inactive</span>;
     };
 
     useEffect(() => {
@@ -1978,7 +2128,7 @@ const ProductsList = ({ externalSearch = '' }) => {
                     const end = (page + 1) * pageSize - 1;
                     const { data, error } = await supabase
                         .from('products')
-                        .select('id, name, starting_price, image_url, product_types(id, name, category_id, product_categories(id, name))')
+                        .select('id, name, starting_price, image_url, status, product_types(id, name, category_id, product_categories(id, name))')
                         .order('id', { ascending: false })
                         .range(start, end);
                     if (error) throw error;
@@ -2064,10 +2214,20 @@ const ProductsList = ({ externalSearch = '' }) => {
                     const productId = p?.id;
                     const agg = productAgg[String(productId)] || { total: 0, lowStock: false };
                     const stock = agg.total || 0;
-                    // Derive status like Stocks tab
+                    // Prefer the product's own `status` column (Active/Inactive). If missing, derive from inventory levels.
                     let status = 'Active';
-                    if (stock <= 0) status = 'Out of Stock';
-                    else if (agg.lowStock) status = 'Low Stock';
+                    if (p && p.status != null) {
+                        // Normalize stored status to either 'Active' or 'Inactive'
+                        try {
+                            const s = String(p.status).trim().toLowerCase();
+                            status = (s === 'active' || s === '1' || s === 'true') ? 'Active' : 'Inactive';
+                        } catch (e) { status = 'Inactive'; }
+                    } else {
+                        // derive from inventory if there is no explicit product.status
+                        if (stock <= 0) status = 'Inactive';
+                        else if (agg.lowStock) status = 'Inactive';
+                        else status = 'Active';
+                    }
                     return {
                         id: productId,
                         name: p?.name || '',
@@ -2181,12 +2341,12 @@ const ProductsList = ({ externalSearch = '' }) => {
                 <div className="h-[700px] overflow-y-auto">
                     <table className="w-full table-fixed rounded-md">
                         <colgroup>
+                            <col style={{ width: '35%' }} />
                             <col style={{ width: '20%' }} />
-                            <col style={{ width: '10%' }} />
-                            <col style={{ width: '10%' }} />
-                            <col style={{ width: '10%' }} />
-                            <col style={{ width: '10%' }} />
-                            <col style={{ width: '10%' }} />
+                            <col style={{ width: '15%' }} />
+                            <col style={{ width: '15%' }} />
+                            <col style={{ width: '15%' }} />
+                            <col style={{ width: '0%' }} />
                         </colgroup>
                         <thead className="sticky  top-0 bg-[#DFE7F4]">
                         <tr className="text-left h-[41px] p-5 text-[16px] text-gray-600">
@@ -2373,7 +2533,7 @@ const ProductsList = ({ externalSearch = '' }) => {
                                 <td className="px-8 py-3 align-center text-gray-800">{p.total_stock ?? 0}</td>
                                 <td className="px-4 py-3 align-center">{statusBadge(p.status)}</td>
                                 <td className="px-4 py-3 align-center">
-                                    <button className="px-3 py-1 rounded-md w-[109px] border border-[#939393] text-sm text-gray-700 hover:bg-gray-50">View</button>
+                                    <div />
                                 </td>
                             </tr>
                         ))}
@@ -2922,7 +3082,7 @@ const UsersList = ({ externalSearch = '' }) => {
     );
 };
 
-const StocksList = ({ externalSearch = '' }) => {
+const StocksList = ({ externalSearch = '', initialStatusFilters = [] }) => {
     const [rows, setRows] = useState([]);
     const [loading, setLoading] = useState(false);
     const [editingInventory, setEditingInventory] = useState(null);
@@ -2940,6 +3100,15 @@ const StocksList = ({ externalSearch = '' }) => {
     const [statusFilters, setStatusFilters] = useState([]); // ['Active','Low Stock','Out of Stock']
     const [statusDraft, setStatusDraft] = useState([]);
     const statusMenuRef = useRef(null);
+
+    // If parent provided initial status filters (e.g. via Dashboard -> View All Stocks), apply them on mount
+    useEffect(() => {
+        if (Array.isArray(initialStatusFilters) && initialStatusFilters.length > 0) {
+            setStatusFilters(initialStatusFilters);
+            setStatusDraft(initialStatusFilters);
+        }
+        // Only run on initial mount or when the provided filters change
+    }, [initialStatusFilters]);
     // Variant filter states
     const [showVariantDropdown, setShowVariantDropdown] = useState(false);
     const [variantFilters, setVariantFilters] = useState([]); // applied filters
@@ -3770,7 +3939,7 @@ const StocksList = ({ externalSearch = '' }) => {
 
                             <td className="px-8 py-3 align-middle text-gray-800">
                                 {editingInventory && (editingInventory.inventory_id === r.inventory_id || editingInventory.combination_id === r.combination_id) ? (
-                                    <div className="flex items-center border rounded-md overflow-hidden w-fit">
+                                    <div className="flex items-center border rounded-md overflow-hidden ml-[-50px] w-fit">
                                         <button className="px-2" onClick={() => setEditQuantity(q => {
                                             const cur = Number(q) || 0;
                                             return Math.max(0, cur - 1);
@@ -3812,7 +3981,7 @@ const StocksList = ({ externalSearch = '' }) => {
 
                             <td className="px-4 py-3 align-middle">
                                 {editingInventory && (editingInventory.inventory_id === r.inventory_id || editingInventory.combination_id === r.combination_id) ? (
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center ml-[-30px] gap-2">
                                         <button
                                             className="bg-green-600 text-white px-3 py-1 rounded text-sm"
                                             disabled={editLoading}
@@ -3934,6 +4103,7 @@ const StocksList = ({ externalSearch = '' }) => {
 const AdminContents = () => {
     const [selected, setSelected] = useState('Dashboard');
     const [stocksSearch, setStocksSearch] = useState('');
+    const [stocksInitialFilters, setStocksInitialFilters] = useState([]);
     const [productsSearch, setProductsSearch] = useState('');
     const [ordersSearch, setOrdersSearch] = useState('');
     const [usersSearch, setUsersSearch] = useState('');
@@ -3946,6 +4116,10 @@ const AdminContents = () => {
     const [db_recentOrders, setDbRecentOrders] = useState([]);
     const [db_recentCustomers, setDbRecentCustomers] = useState([]);
     const [db_lowStock, setDbLowStock] = useState([]);
+    // Orders by status (delivered, in_progress, cancelled) + percentages
+    const [db_ordersStatus, setDbOrdersStatus] = useState({ delivered: 0, in_progress: 0, cancelled: 0, total: 0, percent: { delivered: 0, in_progress: 0, cancelled: 0 } });
+    // Inventory status (Out of Stock, Low on Stocks, in_stock) + percentages
+    const [db_inventoryStatus, setDbInventoryStatus] = useState({ out_of_stock: 0, low_on_stocks: 0, in_stock: 0, total: 0, percent: { out_of_stock: 0, low_on_stocks: 0, in_stock: 0 } });
 
     // Create product and link variants in Supabase
     const createProductInSupabase = async (payload) => {
@@ -4068,6 +4242,194 @@ const AdminContents = () => {
         return productId;
     };
 
+    // Fetch the latest Out of Stock inventory alerts (small focused helper for Dashboard notifications)
+    const fetchOutOfStockAlerts = async (mountedFlag = true) => {
+        try {
+            // Primary: try a joined query to get product + variant info in one go
+            const { data: stockAlerts } = await supabase
+                .from('inventory')
+                .select(`
+                    inventory_id,
+                    quantity,
+                    low_stock_limit,
+                    status,
+                    updated_at,
+                    product_variant_combinations!inner (
+                        combination_id,
+                        variants,
+                        product_id,
+                        products!inner (
+                            id,
+                            name
+                        ),
+                        variant_values!inner (
+                            value_name,
+                            variant_groups!inner (
+                                name
+                            )
+                        )
+                    )
+                `)
+                .in('status', ['Out of Stock', 'Low on Stocks'])
+                .order('updated_at', { ascending: false })
+                .limit(2);
+
+                if (mountedFlag && Array.isArray(stockAlerts) && stockAlerts.length > 0) {
+                    console.debug('fetchOutOfStockAlerts - joined raw', stockAlerts);
+                    // Prefer the shared Stocks normalizer for deterministic variant resolution
+                    try {
+                        const mapped = await resolveInventoryRows(stockAlerts);
+                        const alerts = mapped.map(m => ({
+                            inventory_id: m.inventory_id,
+                            quantity: m.quantity,
+                            low_stock_limit: m.low_stock_limit,
+                            status: m.status,
+                            updated_at: m.updated_at,
+                            productName: m.product?.name || `Inventory #${m.inventory_id}`,
+                            variantList: m.variantList || [],
+                            variantDesc: m.variantDesc || '',
+                            variant: m.variant || {},
+                        }));
+                        setDbLowStock(alerts.slice(0, 2));
+                        return;
+                    } catch (e) {
+                        console.warn('fetchOutOfStockAlerts - resolveInventoryRows failed on joined rows, will re-fetch inventory rows and retry', e);
+                    }
+
+                    // If normalizer failed on the joined rows, try re-fetching full inventory rows (with nested combos) and run the same resolver.
+                    try {
+                        const invIds = (stockAlerts || []).map(i => i.inventory_id).filter(Boolean);
+                        if (invIds.length > 0) {
+                            const { data: invRows } = await supabase
+                                .from('inventory')
+                                .select('*, product_variant_combinations(combination_id, variants, product_id, variant_values(value_name, variant_groups(name)), products(id, name))')
+                                .in('inventory_id', invIds);
+                            if (Array.isArray(invRows) && invRows.length > 0) {
+                                console.debug('fetchOutOfStockAlerts - re-fetched inventory rows for resolver', invRows);
+                                try {
+                                    const mapped2 = await resolveInventoryRows(invRows);
+                                    const alerts2 = mapped2.map(m => ({
+                                        inventory_id: m.inventory_id,
+                                        quantity: m.quantity,
+                                        low_stock_limit: m.low_stock_limit,
+                                        status: m.status,
+                                        updated_at: m.updated_at,
+                                        productName: m.product?.name || `Inventory #${m.inventory_id}`,
+                                        variantList: m.variantList || [],
+                                        variantDesc: m.variantDesc || '',
+                                        variant: m.variant || {},
+                                    }));
+                                    setDbLowStock(alerts2.slice(0, 2));
+                                    return;
+                                } catch (e2) {
+                                    console.warn('fetchOutOfStockAlerts - resolveInventoryRows failed on re-fetched inventory rows', e2);
+                                }
+                            }
+                        }
+                    } catch (e) { console.warn('fetchOutOfStockAlerts - failed to re-fetch inventory rows', e); }
+                    // fallthrough to simpler fallback below
+                }
+
+            // Fallback: joined query returned nothing — try a simpler inventory query then resolve combinations/products separately
+            const { data: simple } = await supabase
+                .from('inventory')
+                .select('inventory_id, quantity, low_stock_limit, status, updated_at, combination_id, product_variant_combinations(combination_id, product_id)')
+                .in('status', ['Out of Stock', 'Low on Stocks'])
+                .order('updated_at', { ascending: false })
+                .limit(2);
+
+            if (!mountedFlag) return;
+            if (!Array.isArray(simple) || simple.length === 0) {
+                setDbLowStock([]);
+                return;
+            }
+
+            // Batch-resolve combination details where available
+                const comboIds = simple.map(r => r.combination_id).filter(Boolean);
+                // also try to collect product_ids directly from the nested product_variant_combinations (if present)
+                const productIds = simple.map(r => {
+                    const pvc = r.product_variant_combinations;
+                    if (!pvc) return null;
+                    if (Array.isArray(pvc) && pvc[0]) return pvc[0].product_id || null;
+                    return pvc.product_id || null;
+                }).filter(Boolean);
+                let productMap = {};
+                if (productIds.length > 0) {
+                    try {
+                        const { data: products } = await supabase
+                            .from('products')
+                            .select('id, name')
+                            .in('id', productIds);
+                        if (Array.isArray(products)) {
+                            productMap = products.reduce((acc, p) => { acc[String(p.id)] = p.name; return acc; }, {});
+                        }
+                    } catch (e) {
+                        console.warn('Failed to fetch products for fallback', e);
+                    }
+                }
+            let combosMap = {};
+            if (comboIds.length > 0) {
+                try {
+                    const { data: combos } = await supabase
+                        .from('product_variant_combinations')
+                        .select('combination_id, products(id, name), variant_values(value_name, variant_groups(name))')
+                        .in('combination_id', comboIds);
+                            if (Array.isArray(combos)) {
+                                combosMap = combos.reduce((acc, c) => {
+                                    acc[String(c.combination_id)] = c;
+                                    return acc;
+                                }, {});
+                            }
+                } catch (e) {
+                    console.warn('Failed to resolve combinations for out-of-stock fallback', e);
+                }
+            }
+
+                    console.debug('fetchOutOfStockAlerts - fallback simple raw', simple);
+
+                    const formatted = simple.map(item => {
+                const combo = combosMap[String(item.combination_id)] || null;
+                const variantArr = combo?.variant_values || [];
+                const variantMap = (variantArr || []).reduce((acc, v) => {
+                    const groupName = v?.variant_groups?.name || '';
+                    const valueName = v?.value_name || '';
+                    if (groupName) acc[groupName] = valueName;
+                    return acc;
+                }, {});
+                const variantList = (variantArr || []).map(v => v?.value_name || '').filter(Boolean);
+                const variantDesc = variantList.join(', ');
+                let productName = combo?.products?.name || '';
+                // try productMap from the earlier product fetch (fallback)
+                if (!productName) {
+                    const pvc = item.product_variant_combinations;
+                    let pid = null;
+                    if (pvc) {
+                        if (Array.isArray(pvc) && pvc[0]) pid = pvc[0].product_id || null;
+                        else pid = pvc.product_id || null;
+                    }
+                    if (pid && productMap[String(pid)]) productName = productMap[String(pid)];
+                }
+                return {
+                    inventory_id: item.inventory_id,
+                    quantity: item.quantity,
+                    low_stock_limit: item.low_stock_limit,
+                    status: item.status,
+                    updated_at: item.updated_at,
+                    productName: productName || `Inventory #${item.inventory_id}`,
+                    variant: variantMap,
+                    variantList,
+                    variantDesc,
+                };
+            });
+            console.debug('fetchOutOfStockAlerts - formatted (fallback)', formatted);
+            setDbLowStock(formatted);
+            return;
+        } catch (e) {
+            console.warn('Failed to fetch Out of Stock alerts:', e);
+            if (mountedFlag) setDbLowStock([]);
+        }
+    };
+
     useEffect(() => {
         const handler = (e) => {
             const sec = e?.detail?.section;
@@ -4083,70 +4445,207 @@ const AdminContents = () => {
     }, []);
 
     // Dashboard data loader
-    useEffect(() => {
+        useEffect(() => {
         let mounted = true;
         const loadDashboard = async () => {
             try {
-                // total users (profiles or customers)
+                // total users (from user_info)
                 try {
-                    const { data: usersRows } = await supabase.from('profiles').select('user_id').neq('user_id', null).limit(1);
-                    if (Array.isArray(usersRows)) {
-                        // count via rpc to avoid scanning large tables if available
-                        const { count } = await (async () => {
-                            try {
-                                const { count: c } = await supabase.from('profiles').select('user_id', { count: 'exact', head: true });
-                                return { count: c };
-                            } catch { return { count: null }; }
-                        })();
-                        if (mounted && count != null) setDbTotalUsers(Number(count));
+                    const res = await supabase
+                        .from('user_info')
+                        .select('*', { count: 'exact', head: true });
+                    if (!res.error && mounted) {
+                        setDbTotalUsers(Number(res.count || 0));
+                    } else if (mounted) {
+                        setDbTotalUsers(0);
                     }
                 } catch (e) {
-                    // fallback to customers table
-                    try {
-                        const { count } = await supabase.from('customers').select('id', { count: 'exact', head: true });
-                        if (mounted && count != null) setDbTotalUsers(Number(count));
-                    } catch (ee) { /* ignore */ }
+                    console.warn('Failed to count users from user_info:', e);
+                    if (mounted) setDbTotalUsers(0);
                 }
 
-                // total orders and total sales and pending
+                // total orders (count)
                 try {
-                    const { count: ordersCount } = await supabase.from('orders').select('order_id', { count: 'exact', head: true });
-                    if (mounted && ordersCount != null) setDbTotalOrders(Number(ordersCount));
-                    // sum total_price
-                    const { data: sumRows } = await supabase.rpc('sum_orders_total_price');
-                    if (mounted && sumRows && typeof sumRows === 'number') setDbTotalSales(Number(sumRows));
+                    const ordersCountRes = await supabase
+                        .from('orders')
+                        .select('order_id', { count: 'exact', head: true });
+                    if (!ordersCountRes.error && mounted) {
+                        setDbTotalOrders(Number(ordersCountRes.count || 0));
+                    } else if (mounted) {
+                        setDbTotalOrders(0);
+                    }
                 } catch (e) {
-                    // fallback: fetch limited aggregate
-                    try {
-                        const { data: ords } = await supabase.from('orders').select('total_price').limit(1000);
-                        if (Array.isArray(ords)) {
-                            const sum = ords.reduce((s, r) => s + Number(r.total_price || 0), 0);
-                            if (mounted) setDbTotalSales(sum);
-                        }
-                    } catch (ee) {}
+                    console.warn('Failed to count orders:', e);
+                    if (mounted) setDbTotalOrders(0);
                 }
+
+                // total sales: sum of orders.total_price (paginated to avoid loading everything)
                 try {
-                    const { count: pendingCount } = await supabase.from('orders').select('order_id', { count: 'exact', head: true }).or('status.eq.Pending,status.eq.pending,status.eq.In Progress,status.eq.in_progress');
-                    if (mounted && pendingCount != null) setDbTotalPending(Number(pendingCount));
-                } catch (e) { /* ignore */ }
+                    let totalSales = 0;
+                    const pageSize = 1000;
+                    let page = 0;
+                    while (true) {
+                        const start = page * pageSize;
+                        const end = (page + 1) * pageSize - 1;
+                        const { data: chunk, error: chunkErr } = await supabase
+                            .from('orders')
+                            .select('total_price')
+                            .range(start, end);
+                        if (chunkErr) {
+                            console.warn('orders chunk fetch error', chunkErr);
+                            break;
+                        }
+                        if (!chunk || chunk.length === 0) break;
+                        totalSales += chunk.reduce((s, r) => s + Number(r?.total_price || 0), 0);
+                        if (chunk.length < pageSize) break;
+                        page += 1;
+                    }
+                    if (mounted) setDbTotalSales(Number(totalSales || 0));
+                } catch (e) {
+                    console.warn('Failed to compute total sales:', e);
+                    if (mounted) setDbTotalSales(0);
+                }
+
+                // total pending count (treating 'order_placed' as pending)
+                try {
+                    // If you prefer multiple statuses as "pending", change the array below to include them
+                    const pendingStatuses = ['order_placed'];
+                    const { count: pendingCountRes, error: pendingErr } = await supabase
+                        .from('orders')
+                        .select('order_id', { count: 'exact', head: true })
+                        .in('status', pendingStatuses);
+                    if (!pendingErr && mounted) {
+                        setDbTotalPending(Number(pendingCountRes || 0));
+                    } else if (mounted) {
+                        setDbTotalPending(0);
+                    }
+                } catch (e) {
+                    console.warn('Failed to count pending orders:', e);
+                    if (mounted) setDbTotalPending(0);
+                }
 
                 // recent orders
                 try {
-                    const { data: recent } = await supabase.from('orders').select('order_id, created_at, total_price, customer_name, user_id').order('created_at', { ascending: false }).limit(2);
+                    const { data: recent } = await supabase.from('orders').select('order_id, created_at, total_price, user_id').order('created_at', { ascending: false }).limit(3);
                     if (mounted && Array.isArray(recent)) setDbRecentOrders(recent);
                 } catch (e) { /* ignore */ }
 
-                // recent customers (profiles)
+                // recent customers - fetch from user_info (same mapping as UsersList) and limit to 2; fallback to profiles
                 try {
-                    const { data: recentUsers } = await supabase.from('profiles').select('user_id, email, first_name, last_name').order('created_at', { ascending: false }).limit(2);
-                    if (mounted && Array.isArray(recentUsers)) setDbRecentCustomers(recentUsers);
-                } catch (e) { /* ignore */ }
+                    const { data: usersRes, error: usersErr } = await supabase
+                        .from('user_info')
+                        .select('*')
+                        .order('created_at', { ascending: false })
+                        .limit(2);
 
-                // low stock notifications (inventory rows with low_stock_limit)
+                    let mapped = [];
+                    if (!usersErr && Array.isArray(usersRes) && usersRes.length > 0) {
+                        mapped = usersRes.map(u => {
+                            const full = u.full_name || u.display_name || `${u.first_name || ''} ${u.last_name || ''}`.trim() || (u.email ? u.email.split('@')[0] : 'User');
+                            const email = u.email || u.email_address || u.contact_email || '';
+                            const joined = (u.created_at || u.date_joined || u.joined_at) ? (new Date(u.created_at || u.date_joined || u.joined_at)).toISOString().slice(0,10) : '';
+                            return { id: u.id || u.user_id || u.uid || u.email, full, email, joined };
+                        });
+                    } else {
+                        // fallback to profiles
+                        try {
+                            const { data: pf, error: pfErr } = await supabase
+                                .from('profiles')
+                                .select('*')
+                                .order('created_at', { ascending: false })
+                                .limit(2);
+                            if (!pfErr && Array.isArray(pf) && pf.length > 0) {
+                                mapped = pf.map(u => {
+                                    const full = u.full_name || u.display_name || `${u.first_name || ''} ${u.last_name || ''}`.trim() || (u.email ? u.email.split('@')[0] : 'User');
+                                    const email = u.email || u.email_address || u.contact_email || '';
+                                    const joined = (u.created_at || u.date_joined || u.joined_at) ? (new Date(u.created_at || u.date_joined || u.joined_at)).toISOString().slice(0,10) : '';
+                                    return { id: u.id || u.user_id || u.uid || u.email, full, email, joined };
+                                });
+                            } else {
+                                mapped = [];
+                            }
+                        } catch (pfErr) {
+                            mapped = [];
+                        }
+                    }
+
+                    if (mounted) setDbRecentCustomers(mapped);
+                } catch (e) {
+                    console.warn('Failed to fetch recent customers (user_info/profiles)', e);
+                    if (mounted) setDbRecentCustomers([]);
+                }
+
+                // Stock notifications (Out of Stock only) — use focused helper
+                await fetchOutOfStockAlerts(mounted);
+
+                // Orders by status: delivered, cancelled, in_progress (all other statuses)
                 try {
-                    const { data: low } = await supabase.from('inventory').select('inventory_id, quantity, low_stock_limit, combination_id, status').lte('quantity', 'low_stock_limit').order('inventory_id', { ascending: false }).limit(5);
-                    if (mounted && Array.isArray(low)) setDbLowStock(low);
-                } catch (e) { /* ignore */ }
+                    // Get delivered orders
+                    const deliveredRes = await supabase
+                        .from('orders')
+                        .select('order_id', { count: 'exact', head: true })
+                        .eq('status', 'delivered');
+                    
+                    // Get cancelled orders
+                    const cancelledRes = await supabase
+                        .from('orders')
+                        .select('order_id', { count: 'exact', head: true })
+                        .eq('status', 'cancelled');
+                    
+                    // Get in-progress orders (all statuses except delivered and cancelled)
+                    const inProgressRes = await supabase
+                        .from('orders')
+                        .select('order_id', { count: 'exact', head: true })
+                        .in('status', ['order_placed', 'printing', 'quality_check', 'packed', 'ready_for_shipment', 'shipped']);
+                    
+                    const deliveredCount = !deliveredRes.error ? Number(deliveredRes.count || 0) : 0;
+                    const cancelledCount = !cancelledRes.error ? Number(cancelledRes.count || 0) : 0;
+                    const inProgressCount = !inProgressRes.error ? Number(inProgressRes.count || 0) : 0;
+                    const total = deliveredCount + cancelledCount + inProgressCount;
+                    
+                    const percent = {
+                        delivered: total ? (deliveredCount / total) * 100 : 0,
+                        in_progress: total ? (inProgressCount / total) * 100 : 0,
+                        cancelled: total ? (cancelledCount / total) * 100 : 0,
+                    };
+                    
+                    if (mounted) setDbOrdersStatus({ 
+                        delivered: deliveredCount, 
+                        in_progress: inProgressCount, 
+                        cancelled: cancelledCount, 
+                        total, 
+                        percent 
+                    });
+                } catch (e) {
+                    console.warn('Failed to compute orders by status:', e);
+                    if (mounted) setDbOrdersStatus({ 
+                        delivered: 0, 
+                        in_progress: 0, 
+                        cancelled: 0, 
+                        total: 0, 
+                        percent: { delivered: 0, in_progress: 0, cancelled: 0 } 
+                    });
+                }
+
+                // Inventory status counts: Out of Stock, Low on Stocks, in_stock
+                try {
+                    const outRes = await supabase.from('inventory').select('inventory_id', { count: 'exact', head: true }).eq('status', 'Out of Stock');
+                    const lowRes = await supabase.from('inventory').select('inventory_id', { count: 'exact', head: true }).eq('status', 'Low on Stocks');
+                    const inRes = await supabase.from('inventory').select('inventory_id', { count: 'exact', head: true }).eq('status', 'in_stock');
+                    const outCount = !outRes.error ? Number(outRes.count || 0) : 0;
+                    const lowCount = !lowRes.error ? Number(lowRes.count || 0) : 0;
+                    const inCount = !inRes.error ? Number(inRes.count || 0) : 0;
+                    const invTotal = outCount + lowCount + inCount;
+                    const invPercent = {
+                        out_of_stock: invTotal ? (outCount / invTotal) * 100 : 0,
+                        low_on_stocks: invTotal ? (lowCount / invTotal) * 100 : 0,
+                        in_stock: invTotal ? (inCount / invTotal) * 100 : 0,
+                    };
+                    if (mounted) setDbInventoryStatus({ out_of_stock: outCount, low_on_stocks: lowCount, in_stock: inCount, total: invTotal, percent: invPercent });
+                } catch (e) {
+                    console.warn('Failed to compute inventory status percentages', e);
+                    if (mounted) setDbInventoryStatus({ out_of_stock: 0, low_on_stocks: 0, in_stock: 0, total: 0, percent: { out_of_stock: 0, low_on_stocks: 0, in_stock: 0 } });
+                }
 
             } catch (e) {
                 console.error('Failed to load dashboard', e);
@@ -4162,8 +4661,9 @@ const AdminContents = () => {
         <>
         <div className="flex-1 ml-[263px] p-8 bg-gray-50 min-h-screen">
             <div className="mb-6">
-                <div className="flex items-center justify-between gap-3 ">
+                <div className="flex items-center justify-between gap-3 p-4 ">
                     <p className="text-[32px] font-bold font-dm-sans text-gray-900">{selected}</p>
+                    {selected === 'Dashboard' && null}
                     {selected === 'Stocks' && (
                         <div className="flex flex-col  gap-2 w-full max-w-md  items-end">
                             <div className="relative w-[241px] ">
@@ -4241,100 +4741,305 @@ const AdminContents = () => {
             </div>
 
             <div>
-                <div style={{ display: selected === 'Dashboard' ? 'block' : 'none' }} >
+                <div style={{ display: selected === 'Dashboard' ? 'block' : 'none' }}>
                  
                     <div className="p-4">
                         {/* Top metrics */}
                         <div className="grid grid-cols-4 gap-4 mb-6">
-                            <div className="border rounded p-4 bg-white">
+                            <div className="border border-[#939393] rounded p-4 bg-white">
                                 <div className="text-sm text-gray-500">Total Users</div>
                                 <div className="text-2xl font-bold">{db_totalUsers ?? 0}</div>
-                                <div className="text-sm text-green-600 mt-1">+10%</div>
                             </div>
-                            <div className="border rounded p-4 bg-white">
+                            <div className="border border-[#939393] border-[#939393] rounded p-4 bg-white">
                                 <div className="text-sm text-gray-500">Total Orders</div>
                                 <div className="text-2xl font-bold">{db_totalOrders ?? 0}</div>
-                                <div className="text-sm text-green-600 mt-1">+8%</div>
                             </div>
-                            <div className="border rounded p-4 bg-white">
+                            <div className="border border-[#939393] rounded p-4 bg-white">
                                 <div className="text-sm text-gray-500">Total Sales</div>
                                 <div className="text-2xl font-bold">₱{Number(db_totalSales || 0).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</div>
-                                <div className="text-sm text-green-600 mt-1">+55%</div>
                             </div>
-                            <div className="border rounded p-4 bg-white">
+                            <div className="border border-[#939393] rounded p-4 bg-white">
                                 <div className="text-sm text-gray-500">Total Pending</div>
                                 <div className="text-2xl font-bold">{db_totalPending ?? 0}</div>
-                                <div className="text-sm text-green-600 mt-1">+12%</div>
                             </div>
                         </div>
 
                         {/* Charts and status */}
-                        <div className="grid grid-cols-3 gap-4 mb-6">
-                            <div className="col-span-2 border rounded p-4 bg-white">
-                                <div className="font-semibold mb-2">Orders By Status</div>
-                                <div className="w-full h-48 flex items-center justify-center text-gray-400">[Pie chart placeholder]</div>
+                        <div className="grid grid-cols-2 gap-4 mb-6">
+                            <div className="border border-[#939393] rounded p-4 bg-white">
+                                <div className="text-[25px] font-extrabold mb-4">Orders By Status</div>
+                                <div className="w-full flex items-center justify-between">
+                                    {(() => {
+                                        const s = db_ordersStatus;
+                                        const total = s.total || 0;
+                                        const d = s.delivered || 0;
+                                        const ip = s.in_progress || 0;
+                                        const c = s.cancelled || 0;
+                                        const pD = s.percent?.delivered || 0;
+                                        const pIP = s.percent?.in_progress || 0;
+                                        const pC = s.percent?.cancelled || 0;
+
+                                        // Calculate starting points for each segment
+                                        const startInProgress = pD;
+                                        const startCancelled = pD + pIP;
+                                        
+                                        // Create conic-gradient string
+                                        const conicGradient = `conic-gradient(
+                                            #81F88C 0% ${pD}%,
+                                            #DCE776 ${pD}% ${startCancelled}%,
+                                            #FA8080 ${startCancelled}% 100%
+                                        )`;
+
+                                        return (
+                                            <div className="flex items-center justify-between w-full">
+                                                <div className="flex flex-col justify-center">
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <span className="w-4 h-3 border border-gray-200 rounded" style={{ background: '#81F88C' }} />
+                                                        <div>
+                                                            <div className="text-base font-medium">Delivered - {pD ? pD.toFixed(1) : '0.0'}%</div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <span className="w-4 h-3 border border-gray-200 rounded" style={{ background: '#DCE776' }} />
+                                                        <div>
+                                                            <div className="text-base font-medium">In Progress - {pIP ? pIP.toFixed(1) : '0.0'}%</div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="w-4 h-3 border border-gray-200 rounded" style={{ background: '#FA8080' }} />
+                                                        <div>
+                                                            <div className="text-base font-medium">Cancelled - {pC ? pC.toFixed(1) : '0.0'}%</div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="relative w-[160px] h-[160px] flex-shrink-0">
+                                                    <div 
+                                                        className="w-full h-full rounded-full transition-all duration-500"
+                                                        style={{ background: conicGradient }}
+                                                    />
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
+                                </div>
                             </div>
-                            <div className="border rounded p-4 bg-white">
-                                <div className="font-semibold mb-2">Stock Status</div>
-                                <div className="w-full h-48 flex items-center justify-center text-gray-400">[Bar chart placeholder]</div>
+                            <div className="border border-[#939393] rounded p-4 bg-white">
+                                <div className="text-[25px] font-extrabold mb-4">Stock Status</div>
+                                <div className="w-full h-48 flex flex-row-reverse items-center justify-between">
+                                    {(() => {
+                                        const s = db_inventoryStatus;
+                                        const out = s.out_of_stock || 0;
+                                        const low = s.low_on_stocks || 0;
+                                        const inst = s.in_stock || 0;
+                                        const pOut = s.percent?.out_of_stock || 0;
+                                        const pLow = s.percent?.low_on_stocks || 0;
+                                        const pInst = s.percent?.in_stock || 0;
+                                        const maxHeight = 120;
+                                        const maxPercent = Math.max(pOut, pLow, pInst, 1);
+                                        const hOut = Math.max(6, (pOut / maxPercent) * maxHeight);
+                                        const hLow = Math.max(6, (pLow / maxPercent) * maxHeight);
+                                        const hInst = Math.max(6, (pInst / maxPercent) * maxHeight);
+                                        
+                                        return (
+                                            <>
+                                                <div className="flex items-end gap-4 h-[160px]">
+                                                    <div className="flex flex-col items-center justify-end mx-2">
+                                                        <div className="w-12 transition-all duration-500 rounded-t" 
+                                                            style={{ height: `${hOut}px`, background: '#FA8080' }} />
+                                                        <div className="text-xs mt-2 text-center">Out</div>
+                                                    </div>
+                                                    <div className="flex flex-col items-center justify-end mx-2">
+                                                        <div className="w-12 transition-all duration-500 rounded-t" 
+                                                            style={{ height: `${hLow}px`, background: '#DCE776' }} />
+                                                        <div className="text-xs mt-2 text-center">Low</div>
+                                                    </div>
+                                                    <div className="flex flex-col items-center justify-end mx-2">
+                                                        <div className="w-12 transition-all duration-500 rounded-t" 
+                                                            style={{ height: `${hInst}px`, background: '#81F88C' }} />
+                                                        <div className="text-xs mt-2 text-center">In Stock</div>
+                                                    </div>
+                                                </div>
+                                                <div className="flex flex-col justify-center">
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <span className="w-4 h-3 border border-gray-200 rounded" style={{ background: '#FA8080' }} />
+                                                        <div>
+                                                            <div className="text-base font-medium">Out of Stock - {pOut ? pOut.toFixed(1) : '0.0'}%</div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <span className="w-4 h-3 border border-gray-200 rounded" style={{ background: '#DCE776' }} />
+                                                        <div>
+                                                            <div className="text-base font-medium">Low on Stock - {pLow ? pLow.toFixed(1) : '0.0'}%</div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="w-4 h-3 border border-gray-200 rounded" style={{ background: '#81F88C' }} />
+                                                        <div>
+                                                            <div className="text-base font-medium">In Stock - {pInst ? pInst.toFixed(1) : '0.0'}%</div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </>
+                                        );
+                                    })()}
+                                </div>
                             </div>
                         </div>
 
                         {/* Bottom panels: Recent Orders, New Customers, Stock Notifications */}
                         <div className="grid grid-cols-3 gap-4">
-                            <div className="border rounded p-4 bg-white">
-                                <div className="font-semibold mb-3">Recent Orders</div>
-                                <div className="text-sm">
+                            <div className="border border-[#939393] rounded p-4 bg-white flex flex-col">
+                                <div className="font-semibold text-[25px] font-extrabold mb-3">Recent Orders</div>
+                                <div className="text-sm flex-1">
                                     {db_recentOrders && db_recentOrders.length > 0 ? (
-                                        db_recentOrders.map((o) => (
-                                            <div key={o.order_id} className="mb-2 border-b pb-2">
-                                                <div className="text-xs text-gray-500">Order ID</div>
-                                                <div className="text-sm">Order #{o.order_id}</div>
-                                                <div className="text-xs text-gray-400">{(o.created_at ? new Date(o.created_at).toISOString().slice(0,10) : '')} • ₱{Number(o.total_price||0).toFixed(2)}</div>
+                                        <div className = "border rounded-md overflow-hidden">
+                                            {/* Table header (no column lines) */}
+                                            <div className="bg-[#DFE7F4] flex items-center font-bold text-m text-[#171738] mb-2 p-2">
+                                                <div className="w-1/3">Order ID</div>
+                                                <div className="w-1/3 ">Total Price</div>
+                                                <div className="w-1/3 text-right">Date Ordered</div>
                                             </div>
-                                        ))
+
+                                            {/* Rows */}
+                                            {(() => {
+                                                const rows = Array.isArray(db_recentOrders) ? db_recentOrders.slice(0, 3) : [];
+                                                const padded = [...rows];
+                                                while (padded.length < 3) padded.push(null);
+                                                return padded.map((o, idx) => (
+                                                    <div key={o ? `order-${o.order_id}` : `recent-placeholder-${idx}`} className="flex items-start text-black py-2 border-b p-2">
+                                                        <div className="w-1/3 text-sm">{o ? `#${o.order_id}` : '\u00A0'}</div>
+                                                        <div className="w-1/3 text-sm ml-5">{o ? `₱${Number(o.total_price||0).toFixed(2)}` : '\u00A0'}</div>
+                                                        <div className="w-1/3 text-sm text-right">{o ? (o.created_at ? new Date(o.created_at).toISOString().slice(0,10) : '') : '\u00A0'}</div>
+                                                    </div>
+                                                ));
+                                            })()}
+                                        </div>
                                     ) : (
                                         <div className="text-sm text-gray-500">No recent orders</div>
                                     )}
                                 </div>
                                 <div className="mt-3 text-center">
-                                    <button className="px-4 py-2 border rounded text-sm text-gray-600">View All Orders</button>
+                                    <button
+                                        className="px-4 py-2 border w-[313px] bg-[#ECECEC] text-[#939393] rounded text-sm text-gray-600"
+                                        onClick={() => {
+                                            setSelected('Orders');
+                                            try { window.dispatchEvent(new CustomEvent('admin-nav-select', { detail: { section: 'Orders' } })); } catch (e) {}
+                                        }}
+                                    >
+                                        View All Orders
+                                    </button>
                                 </div>
                             </div>
 
-                            <div className="border rounded p-4 bg-white">
-                                <div className="font-semibold mb-3">New Customers</div>
-                                <div className="text-sm">
+                            <div className="border border-[#939393] rounded p-4 bg-white flex flex-col">
+                                <div className="font-semibol border-[#939393]d text-[25px] font-extrabold mb-3">New Customers</div>
+                                <div className="text-sm flex-1">
                                     {db_recentCustomers && db_recentCustomers.length > 0 ? (
-                                        db_recentCustomers.map((u) => (
-                                            <div key={u.user_id} className="mb-2 border-b pb-2 flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">👤</div>
-                                                <div>
-                                                    <div className="text-sm font-semibold">{[u.first_name, u.last_name].filter(Boolean).join(' ') || u.user_id}</div>
-                                                    <div className="text-xs text-gray-500">{u.email || ''}</div>
-                                                </div>
+                                        <div className="border rounded-md overflow-hidden">
+                                            <div className="bg-[#DFE7F4] flex items-center font-bold text-m text-[#171738] mb-2 p-2">
+                                                <div className="w-1/3">Full Name</div>
+                                                <div className="w-1/3">Email Address</div>
+                                                <div className="w-1/3 text-right">Date Joined</div>
                                             </div>
-                                        ))
+
+                                            {db_recentCustomers.map((u) => (
+                                                <div key={u.id || u.email} className="flex items-center text-black py-3 border-t px-2">
+                                                    <div className="w-1/3 flex items-center gap-3">
+                                                        <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">👤</div>
+                                                        <div className="text-sm font-semibold">{u.full || u.id || ''}</div>
+                                                    </div>
+                                                    <div className="w-1/3 ml-5 text-sm text-gray-700">
+                                                        {u.email ? (
+                                                            <>
+                                                                <div className="truncate">{String(u.email).split('@')[0]}</div>
+                                                                <div className="text-xs text-gray-500">@{String(u.email).split('@')[1] || ''}</div>
+                                                            </>
+                                                        ) : ''}
+                                                    </div>
+                                                    <div className="w-1/3 text-sm text-gray-700 text-right">{u.joined || ''}</div>
+                                                </div>
+                                            ))}
+                                        </div>
                                     ) : (
                                         <div className="text-sm text-gray-500">No recent customers</div>
                                     )}
                                 </div>
                                 <div className="mt-3 text-center">
-                                    <button className="px-4 py-2 border rounded text-sm text-gray-600">View All Users</button>
+                                    <button
+                                        className="px-4 py-2 border border w-[313px] bg-[#ECECEC] text-[#939393] rounded text-sm text-gray-600"
+                                        onClick={() => {
+                                            setSelected('Users');
+                                            try { window.dispatchEvent(new CustomEvent('admin-nav-select', { detail: { section: 'Users' } })); } catch (e) {}
+                                        }}
+                                    >
+                                        View All Users
+                                    </button>
                                 </div>
                             </div>
 
-                            <div className="border rounded p-4 bg-white">
-                                <div className="font-semibold mb-3">Stock Notifications</div>
-                                <div className="text-sm space-y-3">
+                            <div className="border border-[#939393] rounded p-4 bg-white flex flex-col">
+                                <div className="flex items-center justify-between mb-3">
+                                    <div className="font-semibold text-[25px] font-extrabold">Stock Notifications</div>
+                                </div>
+                                <div className="text-sm space-y-3 flex-1">
+                                    {/* debug output removed */}
                                     {db_lowStock && db_lowStock.length > 0 ? (
-                                        db_lowStock.map((s) => (
-                                            <div key={s.inventory_id} className="flex items-center justify-between">
-                                                <div>
-                                                    <div className="text-sm font-semibold">Inventory #{s.inventory_id}</div>
-                                                    <div className="text-xs text-gray-500">Qty: {s.quantity}</div>
+                                        db_lowStock.map((s, idx) => (
+                                            <div key={s.inventory_id}>
+                                                <div className="flex items-start justify-between gap-4 py-2">
+                                                    <div className="flex items-start gap-3">
+                                                        {/* Status pill on the left */}
+                                                        <div className={
+                                                            (s.status && /Out/i.test(s.status)) ? 'inline-flex items-center whitespace-nowrap bg-red-100 text-red-700 px-3 py-1 rounded-full text-sm' :
+                                                            (s.status && /Low/i.test(s.status)) ? 'inline-flex items-center whitespace-nowrap bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-sm' :
+                                                            'inline-flex items-center whitespace-nowrap bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm'
+                                                        }>
+                                                            {s.status || (s.quantity <= (s.low_stock_limit || 0) ? 'Low Stock' : 'In Stock')}
+                                                        </div>
+
+                                                        <div className="min-w-0">
+                                                            <div className="text-sm font-semibold text-gray-900">{s.productName || `Inventory #${s.inventory_id}`}</div>
+                                                            {/* Variant description: prefer normalized variantList (rendered line-by-line), then variantDesc (split into lines if comma-separated), then variant map fallback */}
+                                                            {((s.variantDesc && String(s.variantDesc).trim()) || (Array.isArray(s.variantList) && s.variantList.length) || (s.variant && Object.keys(s.variant).length > 0)) && (
+                                                                <div className="text-xs text-gray-600 mt-1 max-w-[360px] leading-tight">
+                                                                    {Array.isArray(s.variantList) && s.variantList.length ? (
+                                                                        <div className="flex flex-col gap-0.5">
+                                                                            {s.variantList.map((v, i) => (
+                                                                                <span key={i} className="block">{v}</span>
+                                                                            ))}
+                                                                        </div>
+                                                                    ) : (s.variantDesc && String(s.variantDesc).trim()) ? (
+                                                                        // If variantDesc contains commas, split into multiple lines to match Stocks view
+                                                                        String(s.variantDesc).includes(',') ? (
+                                                                            <div className="flex flex-col gap-0.5">
+                                                                                {String(s.variantDesc).split(',').map((part, i) => (
+                                                                                    <span key={i} className="block">{part.trim()}</span>
+                                                                                ))}
+                                                                            </div>
+                                                                        ) : (
+                                                                            <span>{s.variantDesc}</span>
+                                                                        )
+                                                                    ) : (
+                                                                        <div className="flex flex-col gap-0.5">
+                                                                            {Object.entries(s.variant || {}).map(([k, v], i) => (
+                                                                                <span key={i} className="block">{v}</span>
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="text-lg font-semibold text-gray-800 ml-4 whitespace-nowrap text-right">
+                                                        {(() => {
+                                                            const qty = Number(s.quantity ?? 0);
+                                                            const limit = s.low_stock_limit ?? null;
+                                                            return `${qty} left`;
+                                                        })()}
+                                                    </div>
                                                 </div>
-                                                <div className="text-xs text-red-500">{s.quantity <= (s.low_stock_limit || 0) ? 'Low Stock' : ''}</div>
+                                                {idx < db_lowStock.length - 1 && <div className="border-t my-3" />}
                                             </div>
                                         ))
                                     ) : (
@@ -4342,7 +5047,16 @@ const AdminContents = () => {
                                     )}
                                 </div>
                                 <div className="mt-3 text-center">
-                                    <button className="px-4 py-2 border rounded text-sm text-gray-600">View All Stocks</button>
+                                    <button
+                                        className="px-4 py-2 border border w-[313px] bg-[#ECECEC] text-[#939393] rounded text-sm text-gray-600"
+                                            onClick={() => {
+                                            // Open Stocks tab and apply Out of Stock filter only
+                                            setStocksInitialFilters(['Out of Stock']);
+                                            setSelected('Stocks');
+                                        }}
+                                    >
+                                        View All Stocks
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -4350,7 +5064,7 @@ const AdminContents = () => {
                 </div>
 
                 <div style={{ display: selected === 'Stocks' ? 'block' : 'none' }} className={`${containerClass} mt-1`}>
-                    <StocksList externalSearch={stocksSearch} />
+                    <StocksList externalSearch={stocksSearch} initialStatusFilters={stocksInitialFilters} />
                 </div>
 
                 <div style={{ display: selected === 'Products' ? 'block' : 'none' }} className={`${containerClass} mt-6`}>

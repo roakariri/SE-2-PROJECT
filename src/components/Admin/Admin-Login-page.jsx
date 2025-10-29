@@ -19,10 +19,7 @@ const Login = () => {
   );
   const [showPassword, setShowPassword] = useState(false);
   
-  const handleForgotPasswordPage = (e) => {
-    e.preventDefault();
-    navigate("/forgot-password");
-  };
+  
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState(null);
@@ -55,17 +52,26 @@ const Login = () => {
         // update last_activity for admin if this session belongs to an admin
         updateLastActivity(userEmail);
 
-        if (provider === "google") {
-          console.log("Logged in with Google");
-          navigate("/Homepage");
-        } else if (provider === "email") {
-          console.log("Logged in with email/password");
-          navigate("/Homepage");
-        } else {
-          console.warn("Unknown provider:", provider);
+        // If there's already a session, assume user shouldn't see the login
+        // page — redirect into the admin area. Use replace so the login page
+        // doesn't remain in history (prevents Back returning to login).
+        try {
+          navigate('/Admin', { replace: true });
+        } catch (err) {
+          console.warn('Navigation to /Admin failed', err);
         }
       }
     };
+
+    // If a previous admin login flag exists in localStorage, redirect
+    // immediately to the admin area (replace history to block Back).
+    try {
+      const already = localStorage.getItem('adminLoggedIn');
+      if (already === 'true') {
+        navigate('/Admin', { replace: true });
+        return;
+      }
+    } catch (err) { /* ignore */ }
 
     getSession();
 
@@ -76,14 +82,10 @@ const Login = () => {
         const userEmail = session.user?.email;
         // update last_activity for admin if this session belongs to an admin
         updateLastActivity(userEmail);
-        if (provider === "google") {
-          console.log("Logged in with Google");
-          navigate("/Homepage");
-        } else if (provider === "email") {
-          console.log("Logged in with email/password");
-          navigate("/Homepage");
-        } else {
-          console.warn("Unknown provider:", provider);
+        try {
+          navigate('/Admin', { replace: true });
+        } catch (err) {
+          console.warn('Navigation to /Admin failed', err);
         }
       }
     }).data.subscription;
@@ -137,10 +139,26 @@ const Login = () => {
       }
 
       // Successful login
+      // mark admin as logged in and persist email information so the
+      // navigation/footer can display it
       localStorage.setItem('adminLoggedIn', 'true');
+      try {
+        localStorage.setItem('adminEmail', String(email));
+        localStorage.setItem('admin_logged_in_email', String(email));
+        // also store a JSON object under adminUser for compatibility
+        localStorage.setItem('adminUser', JSON.stringify({ email: String(email) }));
+      } catch (err) {
+        // ignore storage errors (e.g. quota), nav will simply not show email
+        console.warn('Could not persist admin email to localStorage', err);
+      }
+        // notify any mounted admin UI in the same tab that an admin just logged in
+        try {
+          window.dispatchEvent(new CustomEvent('admin-login', { detail: { email: String(email) } }));
+        } catch (err) { /* noop */ }
   // update last_activity timestamp for this admin
   await updateLastActivity(email);
-      navigate("/Admin");
+  // navigate to admin and replace history so Back won't return to login
+  navigate("/Admin", { replace: true });
     } catch (error) {
       console.error('Login error:', error);
       setError('An error occurred during login');
@@ -214,11 +232,7 @@ const Login = () => {
                   {showPassword ? EyeOffIcon : EyeIcon}
                 </button>
               </div>
-              <div className="pt-2 text-right ">
-                <p>
-                  <a href="" className="text-blue-600 underline text-sm font-dm-sans">Forgot your Password?</a>
-                </p>
-              </div>
+              
             </div>
             
             <button type="submit" className="w-full text-white rounded rounded-xl font-dm-sans font-semibold bg-[#2B4269] mt-4 ] font-dm-sans">
