@@ -229,62 +229,129 @@ const ProductBox = () => {
         setSelectedVariants(initial);
     }, [variantGroups]);
 
-    // Fetch stock info based on selected variants (Cap logic)
+    // Fetch stock info based on selected variants.
+    // Strategy:
+    // 1) If an exact combination matches the selected variant ids -> read that inventory row
+    // 2) Otherwise, find combinations whose variant set is a subset of the selected set and aggregate their inventory
+    // 3) If nothing matches, report quantity 0
     useEffect(() => {
+        let mounted = true;
         const fetchStockInfo = async () => {
-            if (!productId || !variantGroups.length) {
-                setStockInfo(null);
-                return;
-            }
-            const variantIds = Object.values(selectedVariants)
-                .map(v => v?.id)
-                .filter(Boolean);
-
-            // Proceed when at least one relevant variant is selected (do not require all groups)
-            if (variantIds.length === 0) {
-                setStockInfo(null);
+            if (!productId || !variantGroups) {
+                if (mounted) setStockInfo(null);
                 return;
             }
 
-            // Coerce to numbers for reliable comparison
-            const sortedVariantIds = [...variantIds].map(n => Number(n)).sort((a, b) => a - b);
+            const selectedVariantIds = Object.values(selectedVariants || {}).map(v => Number(v?.id)).filter(Boolean);
+            if (selectedVariantIds.length === 0) {
+                // nothing selected yet
+                if (mounted) setStockInfo(null);
+                return;
+            }
+
+            // normalize selected set
+            const selectedSet = new Set(selectedVariantIds.map(n => Number(n)));
 
             const { data: combinations, error: combError } = await supabase
                 .from('product_variant_combinations')
                 .select('combination_id, variants')
                 .eq('product_id', productId);
 
-            if (combError) {
-                setStockInfo(null);
+            if (combError || !Array.isArray(combinations)) {
+                console.debug('[Product-Box][Stock] combinations query failed or returned non-array', { combError, combinations });
+                if (mounted) setStockInfo({ quantity: 0, low_stock_limit: 0 });
                 return;
             }
 
-            // Find all candidate combinations that are a subset of the selected variant IDs
-            const selectedSet = new Set(sortedVariantIds);
-            const candidates = (combinations || []).filter(row => Array.isArray(row.variants) && row.variants.length > 0 && row.variants.every(v => selectedSet.has(Number(v))));
+            // Normalize combination.variant shapes and coerce to numbers.
+            const normalized = combinations.map(row => {
+                let variants = row.variants;
+                try {
+                    if (typeof variants === 'string') {
+                        // attempt to parse JSON strings like "[1,2]" or "[\"1\",\"2\"]"
+                        try { variants = JSON.parse(variants); } catch { /* leave as-is */ }
+                    }
+                    if (!Array.isArray(variants) && variants && typeof variants === 'object') {
+                        // maybe array-like object; try to extract ids
+                        const vals = Object.values(variants);
+                        if (Array.isArray(vals)) variants = vals;
+                    }
+                    if (Array.isArray(variants)) {
+                        variants = variants.map(v => {
+                            if (v == null) return null;
+                            if (typeof v === 'object') return Number(v.id ?? v.product_variant_value_id ?? v.variant_value_id ?? v.value ?? null);
+                            return Number(v);
+                        }).filter(Boolean);
+                    } else {
+                        variants = [];
+                    }
+                } catch (e) {
+                    console.warn('[Product-Box][Stock] failed to normalize variants for row', { row, err: e });
+                    variants = [];
+                }
+                return { ...row, variants };
+            });
 
+            // Try exact match first (same length and same members)
+            const sortedSelected = Array.from(selectedSet).sort((a, b) => a - b);
+            let exactMatch = null;
+            for (const row of normalized) {
+                if (!Array.isArray(row.variants)) continue;
+                const vars = [...row.variants].sort((a, b) => a - b);
+                if (vars.length === sortedSelected.length && vars.every((v, i) => v === sortedSelected[i])) {
+                    exactMatch = row;
+                    break;
+                }
+            }
+
+            if (exactMatch) {
+                console.debug('[Product-Box][Stock] exact combination match found', { exactMatch });
+                const { data: invRow, error: invErr } = await supabase
+                    .from('inventory')
+                    .select('quantity, low_stock_limit')
+                    .eq('combination_id', exactMatch.combination_id)
+                    .single();
+                if (mounted) {
+                    if (invErr || !invRow) {
+                        console.debug('[Product-Box][Stock] exact match inventory missing or error', { invErr, invRow });
+                        setStockInfo({ quantity: 0, low_stock_limit: 0 });
+                    } else {
+                        setStockInfo(invRow);
+                    }
+                }
+                return;
+            }
+
+            // Fallback: subset matching — include combinations whose variants are all present in the selected set
+            const candidates = normalized.filter(row => Array.isArray(row.variants) && row.variants.length > 0 && row.variants.every(v => selectedSet.has(Number(v))));
             if (!candidates || candidates.length === 0) {
-                setStockInfo({ quantity: 0, low_stock_limit: 0 });
+                console.debug('[Product-Box][Stock] no candidates found for subset matching', { selectedVariantIds, normalizedLength: normalized.length });
+                if (mounted) setStockInfo({ quantity: 0, low_stock_limit: 0 });
                 return;
             }
 
             const combinationIds = candidates.map(c => c.combination_id);
             const { data: inventoryRows, error: invError } = await supabase
                 .from('inventory')
-                .select('quantity, low_stock_limit, status, combination_id')
+                .select('quantity, low_stock_limit, combination_id')
                 .in('combination_id', combinationIds);
 
             if (invError || !inventoryRows || inventoryRows.length === 0) {
-                setStockInfo({ quantity: 0, low_stock_limit: 0 });
+                if (mounted) setStockInfo({ quantity: 0, low_stock_limit: 0 });
                 return;
             }
 
-            const totalQty = (inventoryRows || []).reduce((sum, r) => sum + (Number(r.quantity) || 0), 0);
-            const lowLimit = (inventoryRows && inventoryRows[0] && typeof inventoryRows[0].low_stock_limit === 'number') ? inventoryRows[0].low_stock_limit : 0;
-            setStockInfo({ quantity: totalQty, low_stock_limit: lowLimit });
+            const totalQty = inventoryRows.reduce((sum, r) => sum + (Number(r.quantity) || 0), 0);
+            const lowLimit = inventoryRows.reduce((min, r) => {
+                const v = typeof r.low_stock_limit === 'number' ? r.low_stock_limit : min;
+                return typeof v === 'number' ? Math.min(min, v) : min;
+            }, (inventoryRows[0] && typeof inventoryRows[0].low_stock_limit === 'number') ? inventoryRows[0].low_stock_limit : 0);
+
+            if (mounted) setStockInfo({ quantity: totalQty, low_stock_limit: lowLimit });
         };
 
         fetchStockInfo();
+        return () => { mounted = false; };
     }, [productId, selectedVariants, variantGroups]);
 
     // Clamp quantity when stock changes
@@ -1280,21 +1347,13 @@ const ProductBox = () => {
                         </div>
                         {/* Stock status (moved just under shipping note) */}
                         <div className="mb-2">
-                            {Object.values(selectedVariants).filter(v => v?.id).length > 0 ? (
-                                stockInfo ? (
-                                    stockInfo.quantity === 0 ? (
-                                        <span className="text-black font-semibold">Out of Stock</span>
-                                    ) : stockInfo.quantity <= 5 ? (
-                                        <span className="text-black font-semibold">{stockInfo.quantity === 1 ? 'Stock:' : 'Stocks:'} {stockInfo.quantity}</span>
-                                    ) : (
-                                        <span className="text-black font-semibold">{stockInfo.quantity === 1 ? 'Stock:' : 'Stocks:'} {stockInfo.quantity}</span>
-                                    )
-                                ) : (
-                                    <span className="text-black font-semibold">Out of stock</span>
-                                )
-                            ) : (
-                                <span className="text-gray-500">Select all variants to see stock.</span>
-                            )}
+                            {(() => {
+                                const selCount = Object.values(selectedVariants).filter(v => v?.id).length;
+                                if (selCount === 0) return <span className="text-gray-500">Select variants to see stock.</span>;
+                                if (stockInfo === null) return <span className="text-black font-semibold">Checking stock.</span>;
+                                if (!stockInfo || stockInfo.quantity === 0) return <span className="text-black font-semibold">Out of Stock</span>;
+                                return <span className="text-black font-semibold">{stockInfo.quantity === 1 ? 'Stock:' : 'Stocks:'} {stockInfo.quantity}</span>;
+                            })()}
                         </div>
                         <hr className="mb-6" />
 

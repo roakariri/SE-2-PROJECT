@@ -512,180 +512,245 @@ const OrderConfirmationPage = () => {
 	const handleGenerateInvoice = useCallback(async () => {
 		if (!orderIdValue) return;
 		try {
-			setIsGeneratingInvoice(true);
-			const { jsPDF } = await import('jspdf');
-			const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-			const marginX = 48;
-			const topY = 60;
-			const bottomMargin = 60;
-			let cursorY = topY;
-			const pageHeight = doc.internal.pageSize.getHeight();
-			const ensureSpace = (amount = 16) => {
-				if (cursorY + amount > pageHeight - bottomMargin) {
-					doc.addPage();
-					cursorY = topY;
-				}
-			};
-			const advance = (amount = 16) => {
-				ensureSpace(amount);
-				cursorY += amount;
-			};
-			const write = (text, x = marginX) => {
-				doc.text(String(text ?? ''), x, cursorY);
-			};
-			const wrap = (value, width = 340) => doc.splitTextToSize(String(value ?? ''), width);
-			// Use ASCII-friendly currency label to avoid missing-glyph issues in jsPDF built-in fonts.
-			// Many built-in PDF fonts (helvetica/times/courier) don't include the peso sign (₱)
-			// and jsPDF may render a replacement character (like ±). Use "PHP" to ensure
-			// the currency label is visible. If you prefer the actual ₱ glyph, we can embed
-			// a Unicode-capable TTF and register it with jsPDF instead.
-			const formatCurrency = (value) => `PHP ${Number(value || 0).toFixed(2)}`;
+	 		setIsGeneratingInvoice(true);
+	 		const { jsPDF } = await import('jspdf');
+	 		const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+	 		const marginX = 48;
+	 		const topY = 48;
+	 		const bottomMargin = 60;
+	 		let cursorY = topY;
+	 		const pageWidth = doc.internal.pageSize.getWidth();
+	 		const pageHeight = doc.internal.pageSize.getHeight();
 
-			doc.setFont('helvetica', 'bold');
-			doc.setFontSize(18);
-			write('E-Invoice');
-			doc.setFontSize(12);
-			doc.setFont('helvetica', 'normal');
+	 		const ensureSpace = (amount = 18) => {
+	 			if (cursorY + amount > pageHeight - bottomMargin) {
+	 				doc.addPage();
+	 				cursorY = topY;
+	 			}
+	 		};
+	 		const advance = (amount = 18) => { ensureSpace(amount); cursorY += amount; };
+	 		const wrap = (value, width = 300) => doc.splitTextToSize(String(value ?? ''), width);
+	 		const formatCurrency = (value) => `PHP ${Number(value || 0).toFixed(2)}`;
 
-			advance(24);
-			write(`Order #: ${orderIdValue}`);
-			advance(16);
-			write(`Order Date: ${orderDateLabel || '—'}`);
-			advance(16);
-			write(`Estimated Delivery: ${estimatedDateLabel || '—'}`);
+	 		// Try to embed logo (if present) as PNG
+	 		try {
+	 			const res = await fetch('/logo-icon/logo.png');
+	 			if (res.ok) {
+	 				const blob = await res.blob();
+	 				const reader = await new Promise((resolve, reject) => {
+	 					const r = new FileReader();
+	 					r.onload = () => resolve(r.result);
+	 					r.onerror = reject;
+	 					r.readAsDataURL(blob);
+	 				});
+	 				doc.addImage(String(reader), 'PNG', marginX, cursorY - 10, 110, 30);
+	 			}
+	 		} catch (e) { }
 
-			advance(24);
-			doc.setFont('helvetica', 'bold');
-			write('Customer Details');
-			doc.setFont('helvetica', 'normal');
+	 		// Header
+	 		doc.setFontSize(20);
+	 		doc.setFont('helvetica', 'bold');
+	 		doc.text('INVOICE', marginX + 200, cursorY + 15);
+	 		doc.setFontSize(10);
 
-			advance(16);
-			const customerName = [address?.first_name, address?.last_name].filter(Boolean).join(' ') || '—';
-			write(`Name: ${customerName}`);
-			advance(16);
-			write(`Email: ${customerEmail || '—'}`);
-			advance(16);
-			const phoneDisplay = address?.phone_number ? formatDisplayPHMobile(address.phone_number) : '—';
-			write(`Phone: ${phoneDisplay}`);
+			doc.setFontSize(8);
+			doc.setFont('helvetica', 'bolditalic');
+			doc.text('Company Address:', marginX + 400, cursorY + 1);
+			doc.setFont('helvetica', 'italic');
+			doc.text('2219 C. M. Recto Avenue', marginX + 400, cursorY + 11);
+			doc.text('Sampaloc Manila', marginX + 400, cursorY + 21);
 
-			// Add a larger gap between Customer Details and Shipping Address for readability
-			advance(32);
-		doc.setFont('helvetica', 'bold');
-			write('Shipping Address');
-			doc.setFont('helvetica', 'normal');
-			const addressLines = [
-				address?.street_address,
-				[address?.barangay, address?.city].filter(Boolean).join(', '),
-				[address?.province, address?.postal_code].filter(Boolean).join(' '),
-			].filter((line) => line && line.trim());
-			if (addressLines.length === 0) {
-				advance(14);
-				write('—');
-			} else {
-				addressLines.flatMap((line) => wrap(line, 360)).forEach((line, idx) => {
-					advance(idx === 0 ? 14 : 12);
-					write(line);
-				});
-			}
+	 		doc.setLineWidth(0.5);
+	 		doc.line(marginX, cursorY + 31, pageWidth - marginX, cursorY + 31);
+	 		cursorY += 80;
 
-			advance(24);
-			doc.setFont('helvetica', 'bold');
-			write('Delivery');
-			doc.setFont('helvetica', 'normal');
-			advance(14);
-			write(shippingDisplay || 'Standard Delivery');
+	 		// Customer & details block
+	 		doc.setFont('helvetica', 'bold');
+	 		doc.setFontSize(11);
+	 		doc.text('BILL TO', marginX, cursorY);
+	 		doc.setFont('helvetica', 'normal');
+	 		doc.setFontSize(10);
 
-			advance(18);
-			doc.setFont('helvetica', 'bold');
-			write('Payment');
-			doc.setFont('helvetica', 'normal');
-			advance(14);
-			write(paymentDisplay);
+	 		const addressLines = [
+	 			address?.street_address,
+	 			[address?.barangay, address?.city].filter(Boolean).join(', '),
+	 			[address?.province, address?.postal_code].filter(Boolean).join(' '),
+	 		].filter(Boolean);
+	 		const customerName = [address?.first_name, address?.last_name].filter(Boolean).join(' ') || '—';
 
-			advance(24);
-			doc.setFont('helvetica', 'bold');
-			write('Items');
-			doc.setFont('helvetica', 'normal');
+	 		let infoY = cursorY + 16;
+	 		doc.text(customerName, marginX, infoY);
+	 		infoY += 16;
+	 		if (addressLines.length === 0) {
+	 			doc.text('—', marginX, infoY);
+	 			infoY += 14;
+	 		} else {
+	 			addressLines.forEach((line) => { doc.text(String(line), marginX, infoY); infoY += 14; });
+	 		}
+	 		doc.text(customerEmail || '—', marginX, infoY);
+	 		infoY += 14;
+	 		const phoneDisplay = address?.phone_number ? formatDisplayPHMobile(address.phone_number) : '—';
+	 		doc.text(phoneDisplay, marginX, infoY);
 
-			advance(18);
-			doc.setFont('helvetica', 'bold');
-			write('Product');
-			doc.text('Qty', marginX + 360, cursorY);
-			doc.setFont('helvetica', 'normal');
+	 		// Invoice details right column
+	 		const detailsX = pageWidth / 2 + 10;
+	 		let dY = cursorY + 16;
+	 		doc.setFont('helvetica', 'bold');
+	 		doc.setFontSize(11);
+	 		doc.text('INVOICE DETAILS', detailsX, cursorY);
+	 		doc.setFont('helvetica', 'normal');
+	 		doc.setFontSize(10);
+	 		dY += 1;
+	 		const valueX = detailsX + 100;
+	 		doc.text('Invoice #', detailsX, dY);
+	 		doc.text(String(orderIdValue || '—').padStart(6, '0'), valueX, dY);
+	 		dY += 15;
+	 		doc.text('Date', detailsX, dY);
+	 		doc.text(orderDateLabel || '—', valueX, dY);
+	 		dY += 15;
+	 		doc.text('Due Date', detailsX, dY);
+	 		doc.text(estimatedDateLabel || '—', valueX, dY);
 
-			items.forEach((item) => {
-				const qty = Number(item.quantity || 1);
-					const specificationLines = (() => {
-						if (!Array.isArray(item.variants) || item.variants.length === 0) return [];
-						const ORDER = [
-							'Design','Technique','Printing','Color','Size','Material','Strap','Type','Accessories (Hook Clasp)','Accessories Color','Trim Color','Base','Hole','Pieces','Cut Style','Size (Customize)','Acrylic Pieces Quantity'
-						];
-						const norm = (s) => String(s || '').trim();
-						const labelFor = (group, value) => {
-							const g = norm(group).toLowerCase();
-							const v = norm(value);
-							if (/accessor/i.test(g) && /(hook|clasp)/i.test(v)) return 'Accessories (Hook Clasp)';
-							return group || '—';
-						};
-						const indexFor = (label) => {
-							const i = ORDER.findIndex((x) => x.toLowerCase() === String(label || '').toLowerCase());
-							return i === -1 ? 999 : i;
-						};
-						const specs = item.variants.map((variant) => {
-							const label = labelFor(variant?.group, variant?.value);
-							const value = toColorNameIfHex(variant?.group, variant?.value) || variant?.value || '';
-							return { label, value, order: indexFor(label) };
-						}).sort((a,b) => (a.order - b.order) || a.label.localeCompare(b.label));
-						return specs.flatMap(s => wrap(`${s.label}: ${s.value}`, 260));
-					})();
-				const designLines = (() => {
-					const files = Array.isArray(item.uploaded_files) ? item.uploaded_files : [];
-					if (files.length === 0) return [];
-					const first = files[0];
-					const label = first?.file_name ? `Design: ${first.file_name}` : 'Design: Uploaded file';
-					// Use peso sign instead of plus in the PDF note per request
-					const extra = files.length > 1 ? `(₱${files.length - 1} more)` : null;
-					const base = wrap(label, 260);
-					return extra ? [...base, ...wrap(extra, 260)] : base;
-				})();
-				const nameLines = wrap(item.name || 'Product', 260);
-				const allLines = [...nameLines, ...specificationLines, ...designLines];
-				if (allLines.length === 0) allLines.push('—');
-				allLines.forEach((line, index) => {
-					advance(index === 0 ? 18 : 12);
-					write(line);
-					if (index === 0) {
-						doc.text(String(qty), marginX + 360, cursorY);
-					}
-				});
-			});
+	 		cursorY = Math.max(cursorY + 100, infoY + 24, dY + 10);
 
-			advance(24);
-			doc.setFont('helvetica', 'bold');
-			write('Summary');
-			doc.setFont('helvetica', 'normal');
+	 		// Items table
+	 		const innerW = pageWidth - marginX * 2;
+	 		const colX = {
+	 			no: marginX + 8,
+	 			desc: marginX + 40,
+	 			price: marginX + Math.floor(innerW * 0.5),
+	 			qty: marginX + Math.floor(innerW * 0.75),
+	 			total: pageWidth - marginX - 8,
+	 		};
+	 		const headerBgRgb = [230, 238, 248];
+	 		doc.setFillColor(...headerBgRgb);
+	 		const headerH = 28;
+	 		doc.rect(marginX, cursorY - 10, innerW, headerH, 'F');
+	 		doc.setFont('helvetica', 'bold');
+	 		doc.setFontSize(12);
+	 		doc.setTextColor(23, 23, 56);
+	 		doc.text('No.', colX.no, cursorY + 4);
+	 		doc.text('Description', colX.desc, cursorY + 4);
+	 		doc.text('Price', colX.price - 50, cursorY + 4);
+	 		doc.text('Quantity', colX.qty, cursorY + 4);
+	 		doc.text('Total Price', colX.total, cursorY + 4, { align: 'right' });
+	 		cursorY += headerH - 6;
+	 		doc.setLineWidth(0.7);
+	 		doc.setDrawColor(200,200,200);
+	 		doc.line(marginX, cursorY, pageWidth - marginX, cursorY);
+	 		cursorY += 12;
+	 		doc.setFont('helvetica', 'normal');
+	 		doc.setFontSize(10);
 
-			const summaryRows = [
-				['Subtotal', formatCurrency(subtotal)],
-				['Shipping', formatCurrency(shippingCost)],
-				['Taxes', formatCurrency(taxes)],
-				['Total', formatCurrency(total)],
-			];
+	 		items.forEach((item, idx) => {
+	 			const qty = Number(item.quantity || 1);
+	 			const lineNo = idx + 1;
+	 			const nameLines = wrap(item.name || item.product?.name || 'Product', colX.price - colX.desc - 8);
 
-			summaryRows.forEach(([label, amount], idx) => {
-				advance(idx === 0 ? 18 : 12);
-				if (idx === summaryRows.length - 1) doc.setFont('helvetica', 'bold');
-				write(label);
-				doc.text(amount, marginX + 260, cursorY);
-				if (idx === summaryRows.length - 1) doc.setFont('helvetica', 'normal');
-			});
+	 			const linesCount = Math.max(1, nameLines.length);
+	 			const rowHeight = (linesCount * 12) + 12;
+	 			ensureSpace(rowHeight + 6);
 
-			doc.save(`invoice-${orderIdValue}.pdf`);
-		} catch (error) {
-			console.error('Failed to generate invoice PDF', error);
-		} finally {
-			setIsGeneratingInvoice(false);
-		}
+	 			const rowY = cursorY;
+	 			const numericBaseline = rowY + Math.max(0, Math.floor((rowHeight - 12) / 2));
+
+	 			// number and first description aligned with numericBaseline
+	 			doc.text(String(lineNo), colX.no, numericBaseline);
+	 			nameLines.forEach((line, i) => {
+	 				const y = numericBaseline + (i * 12);
+	 				doc.text(line, colX.desc, y);
+	 			});
+
+	 			const unitText = formatCurrency(Number(item.unit_price || item.price || item.total / (item.quantity || 1) || 0));
+	 			const totalText = formatCurrency(Number(item.total != null ? item.total : (Number(item.unit_price || 0) * qty)));
+	 			doc.text(unitText, colX.price - 50, numericBaseline, { align: 'left' });
+	 			doc.text(String(qty), colX.qty - 30, numericBaseline, { align: 'center' });
+	 			doc.text(totalText, colX.total - 60, numericBaseline, { align: 'left' });
+
+	 			cursorY += rowHeight;
+	 			doc.setDrawColor(220,220,220);
+	 			doc.setLineWidth(0.6);
+	 			doc.line(marginX, cursorY - 6, pageWidth - marginX, cursorY - 6);
+	 		});
+
+	 		// Totals
+	 		ensureSpace(80);
+	 		const totalsX = pageWidth - marginX - 180;
+	 		doc.setFont('helvetica', 'normal');
+	 		doc.setTextColor(0,0,0);
+	 		doc.text('Subtotal', totalsX, cursorY + 30);
+	 		doc.text(formatCurrency(subtotal), totalsX + 110, cursorY + 30);
+	 		doc.text('Shipping', totalsX, cursorY + 48);
+	 		doc.text(formatCurrency(shippingCost), totalsX + 110, cursorY + 48);
+	 		doc.text('Taxes', totalsX, cursorY + 66);
+	 		doc.text(formatCurrency(taxes), totalsX + 110, cursorY + 66);
+	 		doc.setFont('helvetica', 'bold');
+	 		doc.setFontSize(12);
+	 		doc.setTextColor(23, 23, 56);
+	 		const totalY = cursorY + 100;
+	 		doc.setLineWidth(0.6);
+	 		doc.setDrawColor(220,220,220);
+	 		doc.line(totalsX, totalY - 30, pageWidth - marginX, totalY - 30);
+	 		doc.text('Total', totalsX, totalY);
+	 		doc.text(formatCurrency(total), pageWidth - marginX - 8, totalY, { align: 'right' });
+	 		doc.setFontSize(10);
+	 		doc.setTextColor(0,0,0);
+
+	 		// Footer note and payment/notes
+	 		cursorY += 100;
+	 		doc.setFontSize(14);
+	 		doc.setFont('helvetica', 'bolditalic');
+	 		doc.setTextColor(128, 0, 128);
+	 		doc.text('Thank you!', marginX, cursorY);
+	 		doc.setTextColor(0, 0, 0);
+
+	 		cursorY += 40;
+	 		doc.setFontSize(10);
+	 		doc.setFont('helvetica', 'bold');
+	 		doc.text('Payment Method', marginX, cursorY);
+	 		doc.setFont('helvetica', 'normal');
+	 		doc.text(String(paymentDisplay || '—'), marginX + 110, cursorY);
+
+	 		cursorY += 16;
+	 		doc.setFont('helvetica', 'bold');
+	 		doc.text('Notes', marginX, cursorY);
+	 		doc.setFont('helvetica', 'normal');
+	 		doc.text('VAT included where applicable.\nThis is a system-generated invoice. No signature is required.', marginX + 110, cursorY);
+
+	 		// FOOTER on every page
+	 		try {
+	 			const pageCount = doc.getNumberOfPages();
+	 			for (let p = 1; p <= pageCount; p += 1) {
+	 				doc.setPage(p);
+	 				const footerY = doc.internal.pageSize.getHeight() - 36;
+	 				doc.setDrawColor(200, 200, 200);
+	 				doc.setLineWidth(0.6);
+	 				doc.line(marginX, footerY - 12, pageWidth - marginX, footerY - 12);
+	 				doc.setFontSize(9);
+	 				doc.setTextColor(120, 120, 120);
+	 				const leftContact = '+63 9xxx xxx xxxx | goodprintsgreatprints@gmail.com | goodprints-greatprints.com';
+	 				doc.text(leftContact, marginX, footerY);
+	 				const rightName = 'Good Prints Great Prints';
+	 				doc.text(rightName, pageWidth - marginX, footerY, { align: 'right' });
+	 			}
+	 		} catch (e) { console.warn('Failed to draw footer on PDF pages', e); }
+
+	 		// open in new tab or fallback to save
+	 		try {
+	 			const blob = doc.output('blob');
+	 			const url = URL.createObjectURL(blob);
+	 			const win = window.open(url, '_blank');
+	 			if (!win) {
+	 				doc.save(`invoice-${orderIdValue}.pdf`);
+	 			} else {
+	 				try { win.focus(); } catch (e) {}
+	 			}
+	 		} catch (e) { doc.save(`invoice-${orderIdValue}.pdf`); }
+	 	} catch (e) {
+	 		console.error('Failed to generate invoice PDF', e);
+	 	} finally {
+	 		setIsGeneratingInvoice(false);
+	 	}
 	}, [address, customerEmail, estimatedDateLabel, items, orderDateLabel, orderIdValue, paymentDisplay, shippingDisplay, shippingCost, subtotal, taxes, total]);
 
 	return (
@@ -717,7 +782,7 @@ const OrderConfirmationPage = () => {
 									disabled={!order?.order_id || isGeneratingInvoice}
 									className="ml-auto rounded-md border border-[#171738] bg-white px-4 py-2 text-sm font-semibold text-[#171738] transition hover:bg-[#171738] hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
 								>
-									{isGeneratingInvoice ? 'Generating…' : 'Download e-Invoice'}
+									{isGeneratingInvoice ? 'Generating…' : 'View e-Invoice'}
 								</button>
 							</div>
 						</div>

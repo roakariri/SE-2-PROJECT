@@ -1,5 +1,6 @@
+import React from 'react';
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { supabase } from "../../../supabaseClient";
 import { v4 as uuidv4 } from 'uuid';
 import { UserAuth } from "../../../context/AuthContext";
@@ -1261,16 +1262,23 @@ const ShakerKeychain = () => {
     };
     const formatSize = (v) => (v == null ? 0 : v.toString());
     
-    const calculateSizePrice = () => {
-        if (!sizeDimensions) return price || 0;
-        const basePrice = price || 0;
-        const lengthInc = sizeDimensions.length_increment || 0.1;
-        const widthInc = sizeDimensions.width_increment || 0.1;
-        const lengthIncrements = Math.max(0, Math.floor(((length || 0) - (sizeDimensions.min_length || 0)) / lengthInc));
-        const widthIncrements = Math.max(0, Math.floor(((width || 0) - (sizeDimensions.min_width || 0)) / widthInc));
-        const pricePerIncrement = 0.5; // placeholder until DB provides a rate
+    const calculateSizePrice = useCallback(() => {
+        if (!sizeDimensions) return Number(price) || 0;
+        const basePrice = Number(price) || 0;
+        const minLen = Number(sizeDimensions.min_length || 0);
+        const minWid = Number(sizeDimensions.min_width || 0);
+        const lenInc = Number(sizeDimensions.length_increment || 0.1) || 0.1;
+        const widInc = Number(sizeDimensions.width_increment || 0.1) || 0.1;
+
+        // Use rounding to avoid floating precision issues when counting increments
+        const lengthIncrements = Math.max(0, Math.round((Number(length || 0) - minLen) / lenInc));
+        const widthIncrements = Math.max(0, Math.round((Number(width || 0) - minWid) / widInc));
+
+        // Prefer DB-provided per-increment price if present
+        const pricePerIncrement = Number(sizeDimensions.price_per_increment ?? sizeDimensions.increment_price ?? 0.5) || 0.5;
+
         return basePrice + (lengthIncrements + widthIncrements) * pricePerIncrement;
-    };
+    }, [length, width, sizeDimensions, price]);
 
     useEffect(() => {
         const base = calculateSizePrice();

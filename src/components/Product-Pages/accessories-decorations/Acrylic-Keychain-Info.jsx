@@ -1,5 +1,6 @@
+import React from 'react';
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { supabase } from "../../../supabaseClient";
 import { v4 as uuidv4 } from 'uuid';
 import { UserAuth } from "../../../context/AuthContext";
@@ -1460,15 +1461,24 @@ const AcrylicKeychain = () => {
         });
     };
 
-    const calculateSizePrice = () => {
-        if (!sizeDimensions) return 0;
-        const basePrice = price || 0;
-        const lengthIncrements = Math.max(0, Math.floor((length - sizeDimensions.min_length) / sizeDimensions.length_increment));
-        const widthIncrements = Math.max(0, Math.floor((width - sizeDimensions.min_width) / sizeDimensions.width_increment));
-        // Assuming a fixed price per increment (e.g., $0.50 per increment, adjust as per your DB)
-        const pricePerIncrement = 0.50; // This should ideally come from size_dimension_customizable if available
+    const calculateSizePrice = useCallback(() => {
+        // Return a numeric unit price for the currently-selected dimensions
+        if (!sizeDimensions) return Number(price) || 0;
+        const basePrice = Number(price) || 0;
+        const minLen = Number(sizeDimensions.min_length || 0);
+        const minWid = Number(sizeDimensions.min_width || 0);
+        const lenInc = Number(sizeDimensions.length_increment || 0.1) || 0.1;
+        const widInc = Number(sizeDimensions.width_increment || 0.1) || 0.1;
+
+        // Use rounding instead of floor to avoid floating-point precision issues
+        const lengthIncrements = Math.max(0, Math.round((Number(length || 0) - minLen) / lenInc));
+        const widthIncrements = Math.max(0, Math.round((Number(width || 0) - minWid) / widInc));
+
+        // Allow the DB to specify a per-increment price when available
+        const pricePerIncrement = Number(sizeDimensions.price_per_increment ?? sizeDimensions.increment_price ?? 0.5) || 0.5;
+
         return basePrice + (lengthIncrements + widthIncrements) * pricePerIncrement;
-    };
+    }, [length, width, sizeDimensions, price]);
 
     // Recalculate totalPrice when quantity or selectedVariants change
     const [totalPrice, setTotalPrice] = useState(0);

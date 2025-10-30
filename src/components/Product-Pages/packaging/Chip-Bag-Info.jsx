@@ -234,6 +234,60 @@ const ChipBag = () => {
 
     // Fetch stock info based on selected variants (Cap logic)
     useEffect(() => {
+        const normalizeVariantValues = (raw) => {
+            try {
+                // If stored as JSON string
+                if (typeof raw === 'string') {
+                    try {
+                        const parsed = JSON.parse(raw);
+                        raw = parsed;
+                    } catch (_) {
+                        // not JSON, try to split comma-separated ids
+                        const parts = raw.split(',').map(s => s.trim()).filter(Boolean);
+                        if (parts.length > 0) return parts.map(n => Number(n)).filter(n => !Number.isNaN(n));
+                    }
+                }
+
+                // If now an array of primitives
+                if (Array.isArray(raw)) {
+                    return raw.map(v => {
+                        if (v == null) return null;
+                        // objects with id/value
+                        if (typeof v === 'object') {
+                            if ('id' in v) return Number(v.id);
+                            if ('value' in v) return Number(v.value);
+                            if ('variant_value_id' in v) return Number(v.variant_value_id);
+                            // try common numeric property names
+                            for (const k of Object.keys(v)) {
+                                if (typeof v[k] === 'number' || /^[0-9]+$/.test(String(v[k]))) return Number(v[k]);
+                            }
+                            return null;
+                        }
+                        return Number(v);
+                    }).filter(n => !Number.isNaN(n));
+                }
+
+                // If it's an object with numeric keys or arrays inside
+                if (typeof raw === 'object' && raw !== null) {
+                    // attempt to extract numeric values
+                    const vals = Object.values(raw).map(v => {
+                        if (v == null) return null;
+                        if (typeof v === 'object') {
+                            if ('id' in v) return Number(v.id);
+                            if ('value' in v) return Number(v.value);
+                        }
+                        return Number(v);
+                    }).filter(n => !Number.isNaN(n));
+                    if (vals.length > 0) return vals;
+                }
+
+                return [];
+            } catch (err) {
+                console.debug('[Chip-Bag] normalizeVariantValues error', err);
+                return [];
+            }
+        };
+
         const fetchStockInfo = async () => {
             if (!productId || !variantGroups.length) {
                 setStockInfo(null);
@@ -251,6 +305,7 @@ const ChipBag = () => {
             }
 
             const sortedVariantIds = [...variantIds].map(n => Number(n)).sort((a, b) => a - b);
+            const selectedSet = new Set(sortedVariantIds);
 
             const { data: combinations, error: combError } = await supabase
                 .from('product_variant_combinations')
@@ -258,32 +313,61 @@ const ChipBag = () => {
                 .eq('product_id', productId);
 
             if (combError) {
+                console.warn('[Chip-Bag] combinations query error', combError);
                 setStockInfo(null);
                 return;
             }
 
-            // Some products have extra UI groups (e.g., QTY/PACK) not part of combinations.
-            // Find the most specific combination whose variant IDs are a subset of selected IDs.
-            const selectedSet = new Set(sortedVariantIds);
-            const candidates = (combinations || []).filter(row => Array.isArray(row.variants) && row.variants.length > 0 && row.variants.every(v => selectedSet.has(Number(v))));
-            // If multiple candidates match (partial selection), sum their available inventory
-            const match = candidates.sort((a, b) => (b.variants?.length || 0) - (a.variants?.length || 0))[0];
+            const rows = (combinations || []).map(r => {
+                const normalized = normalizeVariantValues(r.variants || r.variant_ids || r.variant_values);
+                return { ...r, normalizedVariants: normalized };
+            }).filter(r => Array.isArray(r.normalizedVariants) && r.normalizedVariants.length > 0);
 
-            if (!match) {
-                setStockInfo({ quantity: 0, low_stock_limit: 0 });
-                return;
+            console.debug('[Chip-Bag] combinations normalized', { rows, selected: sortedVariantIds });
+
+            // Try exact match first (same length and same members)
+            const exact = rows.find(r => {
+                const a = [...r.normalizedVariants].map(n => Number(n)).sort((x, y) => x - y);
+                if (a.length !== sortedVariantIds.length) return false;
+                return a.every((v, i) => v === sortedVariantIds[i]);
+            });
+
+            let combinationIds = [];
+            if (exact) {
+                combinationIds = [exact.combination_id];
+                console.debug('[Chip-Bag] exact combination match', { exact });
+            } else {
+                // Fallback: subset candidates (combinations whose variants are contained in selection)
+                const candidates = rows.filter(r => r.normalizedVariants.every(v => selectedSet.has(Number(v))));
+                if (candidates.length === 0) {
+                    console.debug('[Chip-Bag] no matching combinations found, returning zero stock');
+                    setStockInfo({ quantity: 0, low_stock_limit: 0 });
+                    return;
+                }
+                // Prefer the most specific candidates but aggregate inventory across them
+                candidates.sort((a, b) => (b.normalizedVariants.length || 0) - (a.normalizedVariants.length || 0));
+                combinationIds = candidates.map(c => c.combination_id);
+                console.debug('[Chip-Bag] subset candidates', { candidates });
             }
 
-            const combinationIds = candidates.length > 0 ? candidates.map(c => c.combination_id) : [match.combination_id];
             const { data: inventoryRows, error: invError } = await supabase
                 .from('inventory')
                 .select('quantity, low_stock_limit, status, combination_id')
                 .in('combination_id', combinationIds);
 
-            if (invError || !inventoryRows || inventoryRows.length === 0) {
+            if (invError) {
+                console.warn('[Chip-Bag] inventory query error', invError);
                 setStockInfo({ quantity: 0, low_stock_limit: 0 });
                 return;
             }
+
+            if (!inventoryRows || inventoryRows.length === 0) {
+                console.debug('[Chip-Bag] no inventory rows for combination_ids', { combinationIds });
+                setStockInfo({ quantity: 0, low_stock_limit: 0 });
+                return;
+            }
+
+            console.debug('[Chip-Bag] inventoryRows', { inventoryRows });
 
             const totalQty = (inventoryRows || []).reduce((sum, r) => sum + (Number(r.quantity) || 0), 0);
             const lowLimit = (inventoryRows && inventoryRows[0] && typeof inventoryRows[0].low_stock_limit === 'number') ? inventoryRows[0].low_stock_limit : 0;

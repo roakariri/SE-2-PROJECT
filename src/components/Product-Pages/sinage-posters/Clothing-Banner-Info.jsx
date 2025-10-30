@@ -1369,7 +1369,7 @@ const ClothingBanner = () => {
 
                         <div className="mb-6">
                             <div className="text-[16px] font-semibold text-gray-700 mb-2">UPLOAD DESIGN {showUploadError && <span className="text-red-600 text-sm">*Required</span>}</div>
-                            <UploadDesign key={uploadResetKey} productId={productId} session={session} hidePreviews={!showUploadUI} isEditMode={fromCart && !!editingCartId} cartId={fromCart ? editingCartId : null} />
+                            <UploadDesign key={uploadResetKey} productId={productId} session={session} hidePreviews={!showUploadUI} isEditMode={fromCart && !!editingCartId} cartId={fromCart ? editingCartId : null} setUploadedFileMetas={setUploadedFileMetas} />
                         </div>
 
                         <div className="mb-6">

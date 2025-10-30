@@ -1,5 +1,4 @@
 import React from "react";
-import PdfViewer from "../PdfViewer";
 import { useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "../../supabaseClient";
 import { UserAuth } from "../../context/AuthContext";
@@ -264,7 +263,6 @@ export default function OrderPage() {
 	const [paymentLabel, setPaymentLabel] = React.useState("");
 	const [taxTotal, setTaxTotal] = React.useState(0);
 	const [isGeneratingInvoice, setIsGeneratingInvoice] = React.useState(false);
-	const [pdfPreviewUrl, setPdfPreviewUrl] = React.useState(null);
 	const [isCancelling, setIsCancelling] = React.useState(false);
 	const [showCancelModal, setShowCancelModal] = React.useState(false);
 
@@ -679,7 +677,7 @@ export default function OrderPage() {
 			const colX = {
 				no: marginX + 8,
 				desc: marginX + 40,
-				price: marginX + Math.floor(innerW * 0.55),
+				price: marginX + Math.floor(innerW * 0.5),
 				qty: marginX + Math.floor(innerW * 0.75),
 				total: pageWidth - marginX - 8,
 			};
@@ -693,8 +691,8 @@ export default function OrderPage() {
 			doc.setTextColor(23, 23, 56);
 			doc.text('No.', colX.no, cursorY + 4);
 			doc.text('Description', colX.desc, cursorY + 4);
-			doc.text('Price', colX.price, cursorY + 4);
-			doc.text('Quantity', colX.qty, cursorY + 4);
+			doc.text('Price', colX.price - 50, cursorY + 4);
+			doc.text('Quantity', colX.qty - 35, cursorY + 4);
 			doc.text('Total Price', colX.total, cursorY + 4, { align: 'right' });
 			// thin divider under header
 			cursorY += headerH - 6;
@@ -706,30 +704,41 @@ export default function OrderPage() {
 			doc.setFontSize(10);
 
 			items.forEach((item, idx) => {
-				ensureSpace(28);
 				const qty = Number(item.quantity || 1);
 				const lineNo = idx + 1;
 				const nameLines = wrap(item.product?.name || item.name || 'Product', colX.price - colX.desc - 8);
-				// print numbering and description
-				doc.text(String(lineNo), colX.no, cursorY);
+				// variants removed from PDF: do not render item.variants in the invoice
+
+				// calculate required height for this row and ensure space
+				const linesCount = Math.max(1, nameLines.length);
+				const rowHeight = (linesCount * 12) + 12; // content + padding
+				ensureSpace(rowHeight + 6);
+
+				// baseline for this row
+				const rowY = cursorY;
+
+				// vertical center for numeric columns within the row
+				const numericBaseline = rowY + Math.max(0, Math.floor((rowHeight - 12) / 2));
+
+				// print numbering and description (left column)
+				// align the item number and the first description line to the same baseline as the numeric columns
+				doc.text(String(lineNo), colX.no, numericBaseline);
 				nameLines.forEach((line, i) => {
-					doc.text(line, colX.desc, cursorY + (i * 12));
+					const y = numericBaseline + (i * 12);
+					doc.text(line, colX.desc, y);
 				});
-				// variants/specs under name
-				const specLines = (() => {
-					if (!Array.isArray(item.variants) || item.variants.length === 0) return [];
-					return item.variants.map(v => `${v.group || ''}: ${v.value || ''}`);
-				})();
-				specLines.forEach((s, si) => { doc.text(s, colX.desc, cursorY + (nameLines.length * 12) + (si * 12)); });
-				// monetary and qty columns
+				// variants intentionally not rendered in PDF
+
+				// monetary and qty columns (aligned vertically centered)
 				const unitText = formatCurrency(Number(item.unit_price || item.price || 0));
 				const totalText = formatCurrency(Number(item.total_price != null ? item.total_price : (Number(item.unit_price || 0) * qty)));
-				doc.text(unitText, colX.price, cursorY, { align: 'right' });
-				doc.text(String(qty), colX.qty, cursorY, { align: 'center' });
-				doc.text(totalText, colX.total, cursorY, { align: 'right' });
+				doc.text(unitText, colX.price - 50, numericBaseline, { align: 'left' });
+				doc.text(String(qty), colX.qty - 30, numericBaseline, { align: 'center' });
+				doc.text(totalText, colX.total - 60, numericBaseline, { align: 'left' });
+
 				// advance cursor by the full block height
-				const linesUsed = Math.max(1, nameLines.length + specLines.length);
-				cursorY += (linesUsed * 12) + 12;
+				cursorY += rowHeight;
+
 				// draw a subtle separator under each row
 				doc.setDrawColor(220,220,220);
 				doc.setLineWidth(0.6);
@@ -741,31 +750,91 @@ export default function OrderPage() {
 			const totalsX = pageWidth - marginX - 180;
 			doc.setFont('helvetica', 'normal');
 			doc.setTextColor(0,0,0);
-			doc.text('Subtotal', totalsX, cursorY + 6);
-			doc.text(formatCurrency(subtotal), totalsX + 110, cursorY + 6);
-			doc.text('Shipping', totalsX, cursorY + 24);
-			doc.text(formatCurrency(shippingCost), totalsX + 110, cursorY + 24);
-			doc.text('Taxes', totalsX, cursorY + 42);
-			doc.text(formatCurrency(taxes), totalsX + 110, cursorY + 42);
-			// total row emphasized
+			doc.text('Subtotal', totalsX, cursorY + 30);
+			doc.text(formatCurrency(subtotal), totalsX + 110, cursorY + 30);
+			doc.text('Shipping', totalsX, cursorY + 48);
+			doc.text(formatCurrency(shippingCost), totalsX + 110, cursorY + 48);
+			doc.text('Taxes', totalsX, cursorY + 66);
+			doc.text(formatCurrency(taxes), totalsX + 110, cursorY + 66);
+			// total row emphasized (placed below Taxes)
 			doc.setFont('helvetica', 'bold');
-			doc.setTextColor(255,255,255);
-			doc.text('Total', totalsX, cursorY + 60);
-			doc.text(formatCurrency(total), totalsX + 110, cursorY + 60);
-			// reset text color
+			doc.setFontSize(12);
+			doc.setTextColor(23, 23, 56);
+			const totalY = cursorY + 100;
+			// thin separator above total for emphasis
+			doc.setLineWidth(0.6);
+			doc.setDrawColor(220,220,220);
+			doc.line(totalsX, totalY - 30, pageWidth - marginX, totalY - 30);
+			// label left, amount right-aligned
+			doc.text('Total', totalsX, totalY);
+			doc.text(formatCurrency(total), pageWidth - marginX - 8, totalY, { align: 'right' });
+			// restore smaller font and default color
+			doc.setFontSize(10);
 			doc.setTextColor(0,0,0);
 
 			// Footer note
-			cursorY += 32;
-			doc.setFontSize(9);
-			doc.setFont('helvetica', 'normal');
-			doc.text('This is a computer-generated e-invoice. For queries, contact billing@gpgp.example', marginX, cursorY);
+			cursorY += 100;
+			doc.setFontSize(14);
+		
+			doc.setFont('helvetica', 'bolditalic');
+			// render thank-you in purple
+			doc.setTextColor(128, 0, 128);
+			doc.text('Thank you!', marginX, cursorY);
+			// reset text color to black for any subsequent content
+			doc.setTextColor(0, 0, 0);
 
-			// produce blob and show preview instead of auto-download
+			// Payment method & notes block (placed after thank-you footer)
+			cursorY += 40;
+			doc.setFontSize(10);
+			doc.setFont('helvetica', 'bold');
+			doc.text('Payment Method', marginX, cursorY);
+			doc.setFont('helvetica', 'normal');
+			doc.text(String(paymentLabel || '—'), marginX + 110, cursorY);
+
+			// Notes should appear below the payment method (left column)
+			cursorY += 16;
+			doc.setFont('helvetica', 'bold');
+			doc.text('Notes', marginX, cursorY);
+			doc.setFont('helvetica', 'normal');
+
+			doc.text('VAT included where applicable.\nThis is a system-generated invoice. No signature is required.', marginX + 110, cursorY);
+
+			// FOOTER: contact line and company name on each page
+			try {
+				const pageCount = doc.getNumberOfPages();
+				for (let p = 1; p <= pageCount; p += 1) {
+					doc.setPage(p);
+					const footerY = doc.internal.pageSize.getHeight() - 36; // above bottom margin
+					// separator line
+					doc.setDrawColor(200, 200, 200);
+					doc.setLineWidth(0.6);
+					doc.line(marginX, footerY - 12, pageWidth - marginX, footerY - 12);
+					// footer text
+					doc.setFontSize(9);
+					doc.setFont('helvetica', 'bold');
+
+					doc.setTextColor(120, 120, 120);
+					const leftContact = '+63 9xxx xxx xxxx | goodprintsgreatprints@gmail.com | goodprints-greatprints.com';
+					doc.text(leftContact, marginX, footerY);
+					const rightName = 'Good Prints Great Prints';
+					doc.text(rightName, pageWidth - marginX, footerY, { align: 'right' });
+				}
+			} catch (e) {
+				// non-fatal if footer drawing fails
+				console.warn('Failed to draw footer on PDF pages', e);
+			}
+			
+			// produce blob and open in a new tab (fallback to download if popup blocked)
 			try {
 				const blob = doc.output('blob');
 				const url = URL.createObjectURL(blob);
-				setPdfPreviewUrl(url);
+				const win = window.open(url, '_blank');
+				if (!win) {
+					// popup blocked, fallback to download
+					doc.save(`invoice-${orderIdValue}.pdf`);
+				} else {
+					try { win.focus(); } catch (e) {}
+				}
 			} catch (e) {
 				// fallback to save if blob fails
 				doc.save(`invoice-${orderIdValue}.pdf`);
@@ -777,12 +846,7 @@ export default function OrderPage() {
 		}
 	}, [address, items, order?.created_at, orderDate, order, paymentLabel, shipping, shippingCost, subtotal, taxes, total, customerEmail, estimatedDateLabel, orderDateLabel, orderIdValue, shippingDisplay]);
 
-	const closePdfPreview = React.useCallback(() => {
-		if (pdfPreviewUrl) {
-			try { URL.revokeObjectURL(pdfPreviewUrl); } catch {}
-		}
-		setPdfPreviewUrl(null);
-	}, [pdfPreviewUrl]);
+	// pdfPreviewUrl/closePdfPreview removed: PDFs now open in a separate tab
 
 	const statusPill = () => {
 		const s = normalizeStage(order?.status);
@@ -1098,9 +1162,7 @@ export default function OrderPage() {
 
 				</div>
 
-				{pdfPreviewUrl && (
-					<PdfViewer url={pdfPreviewUrl} onClose={closePdfPreview} title={`E-Invoice ${orderIdValue || ''}`} />
-				)}
+
 			</div>
 		</div>
 	);
