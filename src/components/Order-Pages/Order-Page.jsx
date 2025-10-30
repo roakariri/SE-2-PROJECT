@@ -1,4 +1,5 @@
 import React from "react";
+import PdfViewer from "../PdfViewer";
 import { useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "../../supabaseClient";
 import { UserAuth } from "../../context/AuthContext";
@@ -8,54 +9,54 @@ const useQuery = () => new URLSearchParams(useLocation().search);
 
 // Helpers
 const formatDate = (iso) => {
-	try {
-		const d = iso ? new Date(iso) : new Date();
-		return d.toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
-	} catch {
-		return String(iso || "");
-	}
+    try {
+        const d = iso ? new Date(iso) : new Date();
+        return d.toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
+    } catch {
+        return String(iso || "");
+    }
 };
 
 const formatDisplayPHMobile = (value) => {
-	try {
-		const digits = String(value || "").replace(/\D/g, "");
-		if (!digits) return "";
-		let local10 = digits;
-		if (local10.startsWith("63")) local10 = local10.slice(2);
-		if (local10.startsWith("0")) local10 = local10.slice(1);
-		if (local10.length > 10) local10 = local10.slice(-10);
-		return local10 ? `+63 ${local10}` : "";
-	} catch {
-		return "";
-	}
+    try {
+        const digits = String(value || "").replace(/\D/g, "");
+        if (!digits) return "";
+        let local10 = digits;
+        if (local10.startsWith("63")) local10 = local10.slice(2);
+        if (local10.startsWith("0")) local10 = local10.slice(1);
+        if (local10.length > 10) local10 = local10.slice(-10);
+        return local10 ? `+63 ${local10}` : "";
+    } catch {
+        return "";
+    }
 };
 
 const addBusinessDays = (startISO, days = 3) => {
-	try {
-		let date = startISO ? new Date(startISO) : new Date();
-		let added = 0;
-		while (added < days) {
-			date.setDate(date.getDate() + 1);
-			const day = date.getDay();
-			if (day !== 0 && day !== 6) added++;
-		}
-		return date.toISOString();
-	} catch {
-		return startISO;
-	}
+    try {
+        let date = startISO ? new Date(startISO) : new Date();
+        let added = 0;
+        while (added < days) {
+            date.setDate(date.getDate() + 1);
+            const day = date.getDay();
+            if (day !== 0 && day !== 6) added++;
+        }
+        return date.toISOString();
+    } catch {
+        return startISO;
+    }
 };
 
 // Color helpers
 const hexToRgb = (hex) => {
-	if (typeof hex !== "string") return null;
-	let h = hex.trim();
-	if (h.startsWith("#")) h = h.slice(1);
-	if (h.length === 3) {
-		h = h.split("").map((c) => c + c).join("");
-	}
-	if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
-	const num = parseInt(h, 16);
-	return { r: (num >> 16) & 255, g: (num >> 8) & 255, b: num & 255 };
+    if (typeof hex !== "string") return null;
+    let h = hex.trim();
+    if (h.startsWith("#")) h = h.slice(1);
+    if (h.length === 3) {
+        h = h.split("").map((c) => c + c).join("");
+    }
+    if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
+    const num = parseInt(h, 16);
+    return { r: (num >> 16) & 255, g: (num >> 8) & 255, b: num & 255 };
 };
 
 const rgbToHsl = ({ r, g, b }) => {
@@ -263,6 +264,7 @@ export default function OrderPage() {
 	const [paymentLabel, setPaymentLabel] = React.useState("");
 	const [taxTotal, setTaxTotal] = React.useState(0);
 	const [isGeneratingInvoice, setIsGeneratingInvoice] = React.useState(false);
+	const [pdfPreviewUrl, setPdfPreviewUrl] = React.useState(null);
 	const [isCancelling, setIsCancelling] = React.useState(false);
 	const [showCancelModal, setShowCancelModal] = React.useState(false);
 
@@ -542,177 +544,245 @@ export default function OrderPage() {
 	const shippingDisplay = shipping?.name ? `${shipping.name}${shipping.description ? ` — ${shipping.description}` : ''}` : 'Standard Delivery';
 
 	const handleGenerateInvoice = React.useCallback(async () => {
+		console.debug('handleGenerateInvoice invoked for order', orderIdValue);
 		if (!orderIdValue) return;
 		try {
 			setIsGeneratingInvoice(true);
 			const { jsPDF } = await import('jspdf');
 			const doc = new jsPDF({ unit: 'pt', format: 'a4' });
 			const marginX = 48;
-			const topY = 60;
+			const topY = 48;
 			const bottomMargin = 60;
 			let cursorY = topY;
+			const pageWidth = doc.internal.pageSize.getWidth();
 			const pageHeight = doc.internal.pageSize.getHeight();
 
-			const ensureSpace = (amount = 16) => {
+			const ensureSpace = (amount = 18) => {
 				if (cursorY + amount > pageHeight - bottomMargin) {
 					doc.addPage();
 					cursorY = topY;
 				}
 			};
-			const advance = (amount = 16) => {
-				ensureSpace(amount);
-				cursorY += amount;
-			};
-			const write = (text, x = marginX) => {
-				doc.text(String(text ?? ''), x, cursorY);
-			};
-			const wrap = (value, width = 340) => doc.splitTextToSize(String(value ?? ''), width);
+			const advance = (amount = 18) => { ensureSpace(amount); cursorY += amount; };
+			const wrap = (value, width = 300) => doc.splitTextToSize(String(value ?? ''), width);
 			const formatCurrency = (value) => `PHP ${Number(value || 0).toFixed(2)}`;
 
+			// Colors (site palette)
+			const primaryRgb = [43, 66, 105]; // #2B4269
+			const accentRgb = [239, 125, 102]; // #ef7d66
+
+			// Try to embed logo (if present) as PNG
+			try {
+				const res = await fetch('/logo-icon/logo.png');
+				if (res.ok) {
+					const blob = await res.blob();
+					const reader = await new Promise((resolve, reject) => {
+						const r = new FileReader();
+						r.onload = () => resolve(r.result);
+						r.onerror = reject;
+						r.readAsDataURL(blob);
+					});
+					doc.addImage(String(reader), 'PNG', marginX, cursorY - 10, 110, 30);
+				}
+			} catch (e) {
+				// ignore if logo missing
+			}
+
+			// Company info left
+			doc.setFontSize(14);
 			doc.setFont('helvetica', 'bold');
-			doc.setFontSize(18);
-			write('E-Invoice');
-			doc.setFontSize(12);
-			doc.setFont('helvetica', 'normal');
-
-			advance(24);
-			write(`Order #: ${orderIdValue}`);
-			advance(16);
-			write(`Order Date: ${orderDateLabel || '—'}`);
-			advance(16);
-			write(`Estimated Delivery: ${estimatedDateLabel || '—'}`);
-
-			advance(32);
+			doc.setTextColor(23, 23, 56); // #171738
+		
+			doc.setFontSize(20);
 			doc.setFont('helvetica', 'bold');
-			write('Customer Details');
-			doc.setFont('helvetica', 'normal');
+			doc.text('INVOICE', marginX + 200, cursorY + 15);
 
-			advance(16);
-			const customerName = [address?.first_name, address?.last_name].filter(Boolean).join(' ') || '—';
-			write(`Name: ${customerName}`);
-			advance(16);
-			write(`Email: ${customerEmail || '—'}`);
-			advance(16);
-			const phoneDisplay = address?.phone_number ? formatDisplayPHMobile(address.phone_number) : '—';
-			write(`Phone: ${phoneDisplay}`);
+			doc.setFontSize(8);
+			doc.setFont('helvetica', 'bolditalic');
+			doc.text('Company Address:', marginX + 400, cursorY + 1);
+			doc.setFont('helvetica', 'italic');
+			doc.text('2219 C. M. Recto Avenue', marginX + 400, cursorY + 11);
+			doc.text('Sampaloc Manila', marginX + 400, cursorY + 21);
 
-			advance(32);
+			doc.setLineWidth(0.5); // line thickness
+			// draw a full-width separator under header using page margins
+			doc.line(marginX, cursorY + 31, pageWidth - marginX, cursorY + 31); // (x1, y1, x2, y2)
+
+			cursorY += 80; // move down for next content
+
+
+			
+			
+
+		
+
+
+			// Customer & Shipping block
 			doc.setFont('helvetica', 'bold');
-			write('Shipping Address');
+			doc.setFontSize(11);
+			doc.text('BILL TO', marginX, cursorY);
+		
 			doc.setFont('helvetica', 'normal');
+			doc.setFontSize(10);
+
+
 			const addressLines = [
 				address?.street_address,
 				[address?.barangay, address?.city].filter(Boolean).join(', '),
 				[address?.province, address?.postal_code].filter(Boolean).join(' '),
-			].filter((line) => line && line.trim());
+			].filter(Boolean);
+			const customerName = [address?.first_name, address?.last_name].filter(Boolean).join(' ') || '—';
+
+			// Print customer info in left column: name -> address lines -> email -> phone
+			let infoY = cursorY + 16;
+			doc.text(customerName, marginX, infoY);
+			infoY += 16;
 			if (addressLines.length === 0) {
-				advance(14);
-				write('—');
+				doc.text('—', marginX, infoY);
+				infoY += 14;
 			} else {
-				addressLines.flatMap((line) => wrap(line, 360)).forEach((line, idx) => {
-					advance(idx === 0 ? 14 : 12);
-					write(line);
-				});
+				addressLines.forEach((line) => { doc.text(String(line), marginX, infoY); infoY += 14; });
 			}
+			doc.text(customerEmail || '—', marginX, infoY);
+			infoY += 14;
+			const phoneDisplay = address?.phone_number ? formatDisplayPHMobile(address.phone_number) : '—';
+			doc.text(phoneDisplay, marginX, infoY);
 
-			advance(24);
+			
+			
+
+		// Invoice details block on the right column
+		const detailsX = pageWidth / 2 + 10;
+		let dY = cursorY + 16; // baseline for details
+		doc.setFont('helvetica', 'bold');
+		doc.setFontSize(11);
+		doc.text('INVOICE DETAILS', detailsX, cursorY);
+		doc.setFont('helvetica', 'normal');
+		doc.setFontSize(10);
+		dY += 1;
+		// Labels left, values placed closer on the X axis to reduce gap
+		const valueX = detailsX + 100; // move values closer to labels
+		doc.text('Invoice #', detailsX, dY);
+		doc.text(String(orderIdValue || '—').padStart(6, '0'), valueX, dY);
+		dY += 15;
+		doc.text('Date', detailsX, dY);
+		doc.text(orderDateLabel || '—', valueX, dY);
+		dY += 15;
+		doc.text('Due Date', detailsX, dY);
+		doc.text(estimatedDateLabel || '—', valueX, dY);
+
+		// Move cursor below the customer info and invoice details so the table header doesn't overlap
+		cursorY = Math.max(cursorY + 100, infoY + 24, dY + 10);
+
+			// Items table header (matches sample layout)
+			const innerW = pageWidth - marginX * 2;
+			const colX = {
+				no: marginX + 8,
+				desc: marginX + 40,
+				price: marginX + Math.floor(innerW * 0.55),
+				qty: marginX + Math.floor(innerW * 0.75),
+				total: pageWidth - marginX - 8,
+			};
+			// Table header background (light blue)
+			const headerBgRgb = [230, 238, 248];
+			doc.setFillColor(...headerBgRgb);
+			const headerH = 28;
+			doc.rect(marginX, cursorY - 10, innerW, headerH, 'F');
 			doc.setFont('helvetica', 'bold');
-			write('Delivery');
+			doc.setFontSize(12);
+			doc.setTextColor(23, 23, 56);
+			doc.text('No.', colX.no, cursorY + 4);
+			doc.text('Description', colX.desc, cursorY + 4);
+			doc.text('Price', colX.price, cursorY + 4);
+			doc.text('Quantity', colX.qty, cursorY + 4);
+			doc.text('Total Price', colX.total, cursorY + 4, { align: 'right' });
+			// thin divider under header
+			cursorY += headerH - 6;
+			doc.setLineWidth(0.7);
+			doc.setDrawColor(200,200,200);
+			doc.line(marginX, cursorY, pageWidth - marginX, cursorY);
+			cursorY += 12;
 			doc.setFont('helvetica', 'normal');
-			advance(14);
-			write(shippingDisplay || 'Standard Delivery');
+			doc.setFontSize(10);
 
-			advance(18);
-			doc.setFont('helvetica', 'bold');
-			write('Payment');
-			doc.setFont('helvetica', 'normal');
-			advance(14);
-			write(paymentLabel || 'Paid');
-
-			advance(24);
-			doc.setFont('helvetica', 'bold');
-			write('Items');
-			doc.setFont('helvetica', 'normal');
-
-			advance(18);
-			doc.setFont('helvetica', 'bold');
-			write('Product');
-			doc.text('Qty', marginX + 360, cursorY);
-			doc.setFont('helvetica', 'normal');
-
-			items.forEach((item) => {
+			items.forEach((item, idx) => {
+				ensureSpace(28);
 				const qty = Number(item.quantity || 1);
-				const specificationLines = (() => {
-					if (!Array.isArray(item.variants) || item.variants.length === 0) return [];
-					const ORDER = [
-						'Design','Technique','Printing','Color','Size','Material','Strap','Type','Accessories (Hook Clasp)','Accessories Color','Trim Color','Base','Hole','Pieces','Cut Style','Size (Customize)','Acrylic Pieces Quantity'
-					];
-					const norm = (s) => String(s || '').trim();
-					const labelFor = (group, value) => {
-						const g = norm(group).toLowerCase();
-						const v = norm(value);
-						if (/accessor/i.test(g) && /(hook|clasp)/i.test(v)) return 'Accessories (Hook Clasp)';
-						return group || '—';
-					};
-					const indexFor = (label) => {
-						const i = ORDER.findIndex((x) => x.toLowerCase() === String(label || '').toLowerCase());
-						return i === -1 ? 999 : i;
-					};
-					const specs = item.variants.map((variant) => {
-						const label = labelFor(variant?.group, variant?.value);
-						const value = toColorNameIfHex(variant?.group, variant?.value) || variant?.value || '';
-						return { label, value, order: indexFor(label) };
-					}).sort((a,b) => (a.order - b.order) || a.label.localeCompare(b.label));
-					return specs.flatMap(s => wrap(`${s.label}: ${s.value}`, 260));
-				})();
-				const designLines = (() => {
-					const files = Array.isArray(item.uploaded_files) ? item.uploaded_files : [];
-					if (files.length === 0) return [];
-					const first = files[0];
-					const label = first?.file_name ? `Design: ${first.file_name}` : 'Design: Uploaded file';
-					const extra = files.length > 1 ? `(and ${files.length - 1} more)` : null;
-					const base = wrap(label, 260);
-					return extra ? [...base, ...wrap(extra, 260)] : base;
-				})();
-				const nameLines = wrap(item.product?.name || item.name || 'Product', 260);
-				const allLines = [...nameLines, ...specificationLines, ...designLines];
-				if (allLines.length === 0) allLines.push('—');
-				allLines.forEach((line, index) => {
-					advance(index === 0 ? 18 : 12);
-					write(line);
-					if (index === 0) {
-						doc.text(String(qty), marginX + 360, cursorY);
-					}
+				const lineNo = idx + 1;
+				const nameLines = wrap(item.product?.name || item.name || 'Product', colX.price - colX.desc - 8);
+				// print numbering and description
+				doc.text(String(lineNo), colX.no, cursorY);
+				nameLines.forEach((line, i) => {
+					doc.text(line, colX.desc, cursorY + (i * 12));
 				});
+				// variants/specs under name
+				const specLines = (() => {
+					if (!Array.isArray(item.variants) || item.variants.length === 0) return [];
+					return item.variants.map(v => `${v.group || ''}: ${v.value || ''}`);
+				})();
+				specLines.forEach((s, si) => { doc.text(s, colX.desc, cursorY + (nameLines.length * 12) + (si * 12)); });
+				// monetary and qty columns
+				const unitText = formatCurrency(Number(item.unit_price || item.price || 0));
+				const totalText = formatCurrency(Number(item.total_price != null ? item.total_price : (Number(item.unit_price || 0) * qty)));
+				doc.text(unitText, colX.price, cursorY, { align: 'right' });
+				doc.text(String(qty), colX.qty, cursorY, { align: 'center' });
+				doc.text(totalText, colX.total, cursorY, { align: 'right' });
+				// advance cursor by the full block height
+				const linesUsed = Math.max(1, nameLines.length + specLines.length);
+				cursorY += (linesUsed * 12) + 12;
+				// draw a subtle separator under each row
+				doc.setDrawColor(220,220,220);
+				doc.setLineWidth(0.6);
+				doc.line(marginX, cursorY - 6, pageWidth - marginX, cursorY - 6);
 			});
 
-			advance(24);
-			doc.setFont('helvetica', 'bold');
-			write('Summary');
+			// Totals block on the right (accent background for emphasis)
+			ensureSpace(80);
+			const totalsX = pageWidth - marginX - 180;
 			doc.setFont('helvetica', 'normal');
+			doc.setTextColor(0,0,0);
+			doc.text('Subtotal', totalsX, cursorY + 6);
+			doc.text(formatCurrency(subtotal), totalsX + 110, cursorY + 6);
+			doc.text('Shipping', totalsX, cursorY + 24);
+			doc.text(formatCurrency(shippingCost), totalsX + 110, cursorY + 24);
+			doc.text('Taxes', totalsX, cursorY + 42);
+			doc.text(formatCurrency(taxes), totalsX + 110, cursorY + 42);
+			// total row emphasized
+			doc.setFont('helvetica', 'bold');
+			doc.setTextColor(255,255,255);
+			doc.text('Total', totalsX, cursorY + 60);
+			doc.text(formatCurrency(total), totalsX + 110, cursorY + 60);
+			// reset text color
+			doc.setTextColor(0,0,0);
 
-			const summaryRows = [
-				['Subtotal', formatCurrency(subtotal)],
-				['Shipping', formatCurrency(shippingCost)],
-				['Taxes', formatCurrency(taxes)],
-				['Total', formatCurrency(total)],
-			];
+			// Footer note
+			cursorY += 32;
+			doc.setFontSize(9);
+			doc.setFont('helvetica', 'normal');
+			doc.text('This is a computer-generated e-invoice. For queries, contact billing@gpgp.example', marginX, cursorY);
 
-			summaryRows.forEach(([label, amount], idx) => {
-				advance(idx === 0 ? 18 : 12);
-				if (idx === summaryRows.length - 1) doc.setFont('helvetica', 'bold');
-				write(label);
-				doc.text(amount, marginX + 260, cursorY);
-				if (idx === summaryRows.length - 1) doc.setFont('helvetica', 'normal');
-			});
-
-			doc.save(`invoice-${orderIdValue}.pdf`);
+			// produce blob and show preview instead of auto-download
+			try {
+				const blob = doc.output('blob');
+				const url = URL.createObjectURL(blob);
+				setPdfPreviewUrl(url);
+			} catch (e) {
+				// fallback to save if blob fails
+				doc.save(`invoice-${orderIdValue}.pdf`);
+			}
 		} catch (e) {
 			console.error('Failed to generate invoice PDF', e);
 		} finally {
 			setIsGeneratingInvoice(false);
 		}
 	}, [address, items, order?.created_at, orderDate, order, paymentLabel, shipping, shippingCost, subtotal, taxes, total, customerEmail, estimatedDateLabel, orderDateLabel, orderIdValue, shippingDisplay]);
+
+	const closePdfPreview = React.useCallback(() => {
+		if (pdfPreviewUrl) {
+			try { URL.revokeObjectURL(pdfPreviewUrl); } catch {}
+		}
+		setPdfPreviewUrl(null);
+	}, [pdfPreviewUrl]);
 
 	const statusPill = () => {
 		const s = normalizeStage(order?.status);
@@ -820,7 +890,7 @@ export default function OrderPage() {
 											}
 											className={
 												(!order || isCancelling || ((order?.status || '') && ['cancelled', 'in production', 'printing', 'shipped', 'delivered', 'deliver'].some(kw => (order.status || '').toLowerCase().includes(kw))))
-													? 'rounded-md border border-red-400  px-3 py-1 text-sm font-semibold bg-[#964545] text-red-600 transition disabled:cursor-not-allowed disabled:opacity-60 pointer-events-none'
+													? 'rounded-md border border-red-400  px-3 py-1 text-sm font-semibold bg-[#964545] text-white transition disabled:cursor-not-allowed disabled:opacity-60 pointer-events-none'
 													: 'rounded-md border border-red-400  px-3 py-1 text-sm bg-[#964545] font-semibold text-white transition h hover:text-white'
 											} 
 										>
@@ -961,7 +1031,7 @@ export default function OrderPage() {
 										<button
 											type="button"
 											onClick={handleGenerateInvoice}
-											disabled={!orderId || isGeneratingInvoice}
+											disabled={!order?.order_id || isGeneratingInvoice}
 											className="rounded-md border border-[#171738] bg-white px-3 py-1 text-sm font-semibold text-[#171738] transition hover:bg-[#171738] hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
 										>
 											{isGeneratingInvoice ? 'Generating…' : 'View e-Invoice'}
@@ -1027,6 +1097,10 @@ export default function OrderPage() {
          
 
 				</div>
+
+				{pdfPreviewUrl && (
+					<PdfViewer url={pdfPreviewUrl} onClose={closePdfPreview} title={`E-Invoice ${orderIdValue || ''}`} />
+				)}
 			</div>
 		</div>
 	);

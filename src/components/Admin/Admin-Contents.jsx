@@ -1206,8 +1206,16 @@ const OrdersList = ({ externalSearch = '' }) => {
 
     // Helper to normalize order status into three buckets used by the UI
     const orderStatusLabel = (s) => {
-        if (s === 'Delivered') return 'Delivered';
-        if (s === 'Cancelled') return 'Cancelled';
+        // Normalize various possible status values stored in the orders table
+        if (s == null) return 'In Progress';
+        const v = String(s).trim().toLowerCase();
+        // Delivered-ish values
+        if (/deliver|delivered|fulfilled|completed|complete|shipped|done/.test(v)) return 'Delivered';
+        // Cancelled-ish values
+        if (/cancel|canceled|cancelled|void|rejected|failed/.test(v)) return 'Cancelled';
+        // Treat paid/paid|captured as delivered for purposes of the badge
+        if (/paid|captur|settled/.test(v)) return 'Delivered';
+        // Anything else is considered in-progress (includes 'pending', 'processing', 'in_progress', etc.)
         return 'In Progress';
     };
 
@@ -1850,7 +1858,7 @@ const OrdersList = ({ externalSearch = '' }) => {
                                             <span className="text-gray-800">{r.customer}</span>
                                         </td>
                                         <td className="px-4 py-3 align-top text-gray-700">{r.date}</td>
-                                        <td className="px-4 py-3 align-top">{statusBadge(r.status)}</td>
+                                        <td className="px-4 py-3 align-top">{statusBadge(orderStatusLabel(r.status))}</td>
                                         <td className="px-4 py-3 align-top text-gray-800">{peso(r.amount)}</td>
                                         <td className="px-4 py-3 align-top">
                                             <button onClick={() => openViewModal(r.id)} className="px-3 py-1 rounded-md w-[109px] border border-[#939393] text-sm text-gray-700 hover:bg-gray-50">View</button>
@@ -1871,7 +1879,7 @@ const OrdersList = ({ externalSearch = '' }) => {
                         <div className="mb-4">
                             <div className="text-2xl font-bold text-[#12263F]">{`Order #${viewOrderDetails?.order_id ?? viewOrderDetails?.id ?? ''}`}</div>
                             <div className="mt-3 flex items-center gap-3">
-                                <span className="inline-flex items-center px-2.5 py-1 rounded text-sm bg-yellow-100 text-yellow-800 font-medium">{viewOrderDetails?.status ?? 'In Progress'}</span>
+                                <span className="inline-flex items-center px-2.5 py-1 rounded text-sm bg-yellow-100 text-yellow-800 font-medium">{orderStatusLabel(viewOrderDetails?.status ?? viewOrderDetails?.order_status)}</span>
                                 <button className="inline-flex items-center gap-2 text-sm border rounded px-2 py-1 text-gray-700 bg-white">
                                     <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 9l6 6 6-6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
                                     Print
