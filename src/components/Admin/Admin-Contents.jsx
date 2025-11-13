@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '../../supabaseClient';
+import bcrypt from 'bcryptjs';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
 
@@ -1223,7 +1224,7 @@ const OrdersList = ({ externalSearch = '' }) => {
     let filtered = rows;
     if (Array.isArray(statusFilters) && statusFilters.length > 0) {
         const setSt = new Set(statusFilters);
-        filtered = filtered.filter(r => setSt.has(orderStatusLabel(r.status)));
+        filtered = filtered.filter(r => setSt.has(r.status));
     }
     filtered = filtered.filter(r =>
         String(r.id).toLowerCase().includes(q) ||
@@ -1232,9 +1233,26 @@ const OrdersList = ({ externalSearch = '' }) => {
 
     const statusBadge = (s) => {
         const base = 'inline-flex items-center px-2 py-1 rounded text-sm';
-        if (s === 'Delivered') return <span className={`${base} bg-green-100 text-green-800`}>Delivered</span>;
-        if (s === 'Cancelled') return <span className={`${base} bg-red-100 text-red-700`}>Cancelled</span>;
-        return <span className={`${base} bg-yellow-100 text-yellow-800`}>In Progress</span>;
+        const status = String(s || '').toLowerCase();
+        
+        // Format status for display: order_placed -> Order Placed
+        const formatStatus = (str) => {
+            return String(str || '')
+                .split('_')
+                .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                .join(' ');
+        };
+        
+        // Delivered and shipped
+        if (status === 'delivered' || status === 'shipped') {
+            return <span className={`${base} bg-green-100 text-green-800`}>{formatStatus(s)}</span>;
+        }
+        // Cancelled
+        if (status === 'cancelled') {
+            return <span className={`${base} bg-red-100 text-red-700`}>{formatStatus(s)}</span>;
+        }
+        // In progress states
+        return <span className={`${base} bg-yellow-100 text-yellow-800`}>{formatStatus(s)}</span>;
     };
 
     const peso = (n) => `₱${Number(n).toFixed(2)}`;
@@ -1315,11 +1333,14 @@ const OrdersList = ({ externalSearch = '' }) => {
     const fetchOrderDetails = async (orderId) => {
         if (!orderId) return null;
         try {
-            // Try multiple candidate columns
+            // Try to fetch order - try order_id first as it's most likely
             let res = await supabase.from('orders').select('*').eq('order_id', orderId).maybeSingle();
+            
             if (!res || res.error || !res.data) {
+                // Fallback: try with id column
                 res = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
             }
+            
             if (res && !res.error && res.data) {
                 const data = res.data;
 
@@ -1345,66 +1366,103 @@ const OrdersList = ({ externalSearch = '' }) => {
                         } catch (e) { productsMap = {}; }
                     }
 
-                    // Fetch uploaded files linked to this order. Prefer exact order_id matches (supports multiple id columns) and
-                    // also fetch files attached to specific order_item_id when available. We'll build maps by product_id and order_item_id
-                    // so we can attach files to items reliably.
+                    // Fetch uploaded files linked to this order - try multiple strategies
                     const uploadedFilesByProduct = {};
                     const uploadedFilesByOrderItem = {};
                     const uploadedFilesForOrder = [];
-                    try {
-                        // Try several order_id equality strategies (many projects store uploaded_files.order_id as numeric FK to orders.id)
-                        const tried = new Set();
-                        // 1) numeric orders.id
-                        if (data?.id) {
-                            try {
-                                const { data: filesByOrderNum, error: fErrNum } = await supabase.from('uploaded_files').select('*').eq('order_id', data.id).order('uploaded_at', { ascending: false });
-                                if (!fErrNum && Array.isArray(filesByOrderNum) && filesByOrderNum.length > 0) uploadedFilesForOrder.push(...filesByOrderNum);
-                                tried.add(String(data.id));
-                            } catch (e) { /* ignore */ }
-                        }
-                        // 2) orders.order_id (external string id)
-                        if (data?.order_id && !tried.has(String(data.order_id))) {
-                            try {
-                                const { data: filesByOrderExt, error: fErrExt } = await supabase.from('uploaded_files').select('*').eq('order_id', data.order_id).order('uploaded_at', { ascending: false });
-                                if (!fErrExt && Array.isArray(filesByOrderExt) && filesByOrderExt.length > 0) uploadedFilesForOrder.push(...filesByOrderExt);
-                                tried.add(String(data.order_id));
-                            } catch (e) { /* ignore */ }
-                        }
-                        // 3) function parameter (caller-supplied orderId)
-                        if (orderId && !tried.has(String(orderId))) {
-                            try {
-                                const { data: filesByOrderParam, error: fErrParam } = await supabase.from('uploaded_files').select('*').eq('order_id', orderId).order('uploaded_at', { ascending: false });
-                                if (!fErrParam && Array.isArray(filesByOrderParam) && filesByOrderParam.length > 0) uploadedFilesForOrder.push(...filesByOrderParam);
-                                tried.add(String(orderId));
-                            } catch (e) { /* ignore */ }
-                        }
-                        // 4) if still empty, try parsing orderId as number
-                        if (uploadedFilesForOrder.length === 0 && orderId) {
-                            const maybeNum = parseInt(orderId, 10);
-                            if (!isNaN(maybeNum) && !tried.has(String(maybeNum))) {
-                                try {
-                                    const { data: filesByOrderNum2, error: fErrNum2 } = await supabase.from('uploaded_files').select('*').eq('order_id', maybeNum).order('uploaded_at', { ascending: false });
-                                    if (!fErrNum2 && Array.isArray(filesByOrderNum2) && filesByOrderNum2.length > 0) uploadedFilesForOrder.push(...filesByOrderNum2);
-                                    tried.add(String(maybeNum));
-                                } catch (e) { /* ignore */ }
+                    
+        console.log('[fetchOrderDetails] Starting uploaded_files fetch. orderId:', orderId, 'typeof orderId:', typeof orderId, 'data.order_id:', data.order_id, 'typeof data.order_id:', typeof data.order_id, 'data.id:', data.id);
+
+        try {
+            // Strategy 1A: Try with orderId as integer
+            const { data: filesByOrder, error: filesError } = await supabase
+                .from('uploaded_files')
+                .select('*')
+                .eq('order_id', parseInt(orderId, 10))
+                .order('uploaded_at', { ascending: false })
+                .limit(100);
+            
+            console.log('[fetchOrderDetails] Strategy 1A - uploaded_files by orderId (as int):', { 
+                orderId: parseInt(orderId, 10),
+                filesByOrder, 
+                filesError,
+                count: filesByOrder?.length || 0
+            });
+
+            // Strategy 1B: If no results, try as string
+            let filesByOrderString = null;
+            if (!filesByOrder || filesByOrder.length === 0) {
+                const result = await supabase
+                    .from('uploaded_files')
+                    .select('*')
+                    .eq('order_id', String(orderId))
+                    .order('uploaded_at', { ascending: false })
+                    .limit(100);
+                filesByOrderString = result.data;
+                
+                console.log('[fetchOrderDetails] Strategy 1B - uploaded_files by orderId (as string):', { 
+                    orderId: String(orderId),
+                    filesByOrderString, 
+                    error: result.error,
+                    count: filesByOrderString?.length || 0
+                });
+            }
+
+            if (Array.isArray(filesByOrder) && filesByOrder.length > 0) {
+                uploadedFilesForOrder.push(...filesByOrder);
+            } else if (Array.isArray(filesByOrderString) && filesByOrderString.length > 0) {
+                uploadedFilesForOrder.push(...filesByOrderString);
+            }
+                        
+                        // Strategy 2: If no files found and data.order_id differs from orderId, try data.order_id
+                        if ((!filesByOrder || filesByOrder.length === 0) && data.order_id && String(data.order_id) !== String(orderId)) {
+                            const { data: filesByDataOrderId } = await supabase
+                                .from('uploaded_files')
+                                .select('*')
+                                .eq('order_id', data.order_id)
+                                .order('uploaded_at', { ascending: false })
+                                .limit(100);
+                            
+                            console.log('[fetchOrderDetails] Strategy 2 - uploaded_files by data.order_id:', { 
+                                data_order_id: data.order_id, 
+                                filesByDataOrderId,
+                                count: filesByDataOrderId?.length || 0
+                            });
+                            
+                            if (Array.isArray(filesByDataOrderId) && filesByDataOrderId.length > 0) {
+                                uploadedFilesForOrder.push(...filesByDataOrderId);
                             }
                         }
-                    } catch (e) { /* ignore */ }
-                    try {
-                        // Also attempt to fetch files tied to specific order_item_id (if the uploaded_files table uses that linkage)
-                        const orderItemIds = Array.isArray(oi) ? oi.map(r => r.order_item_id || r.id).filter(Boolean) : [];
-                        if (orderItemIds.length > 0) {
-                            const { data: filesByItem } = await supabase.from('uploaded_files').select('*').in('order_item_id', orderItemIds).order('uploaded_at', { ascending: false });
-                            if (Array.isArray(filesByItem) && filesByItem.length > 0) uploadedFilesForOrder.push(...filesByItem);
+                        
+                        // Strategy 3: Try with user_id and product_ids as fallback
+                        if (uploadedFilesForOrder.length === 0 && productIds.length > 0) {
+                            const userId = data.user_id || data.user || data.customer_id;
+                            if (userId) {
+                                const { data: fallbackFiles } = await supabase
+                                    .from('uploaded_files')
+                                    .select('*')
+                                    .eq('user_id', userId)
+                                    .in('product_id', productIds)
+                                    .order('uploaded_at', { ascending: false })
+                                    .limit(100);
+                                
+                                console.log('[fetchOrderDetails] Strategy 3 - fallback by user_id + product_ids:', { 
+                                    userId, 
+                                    productIds, 
+                                    fallbackFiles,
+                                    count: fallbackFiles?.length || 0
+                                });
+                                
+                                if (Array.isArray(fallbackFiles) && fallbackFiles.length > 0) {
+                                    uploadedFilesForOrder.push(...fallbackFiles);
+                                }
+                            }
                         }
-                    } catch (e) { /* ignore */ }
-                    try {
-                        // Fallback: try to fetch by user_id and product_id for any missing product attachments when session user exists
-                        if (session?.user?.id && productIds.length > 0) {
-                            const { data: fallbackFiles } = await supabase.from('uploaded_files').select('*').eq('user_id', session.user.id).in('product_id', productIds).order('uploaded_at', { ascending: false }).limit(200);
-                            if (Array.isArray(fallbackFiles) && fallbackFiles.length > 0) uploadedFilesForOrder.push(...fallbackFiles);
-                        }
-                    } catch (e) { /* ignore */ }
+                        
+                        console.log('[fetchOrderDetails] Total uploaded files found:', uploadedFilesForOrder.length);
+                    } catch (e) { 
+                        console.error('[fetchOrderDetails] uploaded_files query error:', e);
+                    }
 
                     // Normalize and index
                     const normalizeFiles = (arr) => (arr || []).map((f) => ({
@@ -1479,41 +1537,16 @@ const OrdersList = ({ externalSearch = '' }) => {
                         const taxPerUnit = Number(prod?.tax || it.tax_per_unit || 0);
                         const taxAmount = Number((taxPerUnit * qty).toFixed(2));
                         taxSumAcc += taxAmount;
-                        // Per your schema: uploaded_files are linked by `order_id` (numeric). Attach files for this order and product.
-                        let uploadedFiles = [];
-                        try {
-                            const orderIds = new Set();
-                            if (data?.id !== undefined && data?.id !== null) orderIds.add(String(data.id));
-                            if (data?.order_id !== undefined && data?.order_id !== null) orderIds.add(String(data.order_id));
-                            if (orderId !== undefined && orderId !== null) orderIds.add(String(orderId));
-                            // Also try numeric parse of orderId
-                            const parsed = parseInt(orderId, 10);
-                            if (!isNaN(parsed)) orderIds.add(String(parsed));
-
-                            if (Array.isArray(norm) && norm.length > 0) {
-                                // Attach files whose order_id matches and (optionally) match product_id
-                                uploadedFiles = norm.filter(f => {
-                                    try {
-                                        if (!f) return false;
-                                        const fOrder = (f.order_id ?? f.orderId ?? f.order) || null;
-                                        if (!fOrder) return false;
-                                        if (!orderIds.has(String(fOrder))) return false;
-                                        // If uploaded_files has a product_id, prefer matching product; otherwise include it
-                                        if (f.product_id) {
-                                            return String(f.product_id) === String(it.product_id);
-                                        }
-                                        return true;
-                                    } catch (e) { return false; }
-                                });
-                            }
-                            // If still empty, attach any order-level files (regardless of product)
-                            if ((!uploadedFiles || uploadedFiles.length === 0) && Array.isArray(norm) && norm.length > 0) {
-                                uploadedFiles = norm.filter(f => {
-                                    try { return f && (orderIds.has(String(f.order_id ?? f.orderId ?? f.order ?? ''))); } catch(e) { return false; }
-                                });
-                            }
-                        } catch (e) { /* non-fatal */ }
-                        try { console.debug('[OrdersList] attached_files_for_item', { order_item_id: it.order_item_id ?? it.id, product_id: it.product_id, attached: Array.isArray(uploadedFiles) ? uploadedFiles.length : 0 }); } catch(e) {}
+                        
+                        // Attach uploaded files for this item using the indexed maps
+                        const uploadedFiles = uploadedFilesByProduct[it.product_id] || uploadedFilesByOrderItem[it.order_item_id] || [];
+                        console.log('[fetchOrderDetails] attaching files for item:', {
+                            product_id: it.product_id,
+                            order_item_id: it.order_item_id,
+                            uploadedFiles: uploadedFiles.length,
+                            uploadedFilesByProduct_keys: Object.keys(uploadedFilesByProduct),
+                            uploadedFilesByOrderItem_keys: Object.keys(uploadedFilesByOrderItem)
+                        });
                         its.push({
                             order_item_id: it.order_item_id ?? it.id ?? null,
                             product_id: it.product_id,
@@ -1532,22 +1565,167 @@ const OrdersList = ({ externalSearch = '' }) => {
                     data.items = its;
                     data._itemsSubtotal = its.reduce((s, it) => s + (Number(it.total_price || 0) || 0), 0);
                     data._itemsTax = taxSumAcc;
+
+                    // --- Saved address enrichment: try to resolve an address row linked to each product
+                    try {
+                        // Collect product-level address identifiers from productsMap
+                        const prodAddressIds = Array.from(new Set(Object.keys(productsMap || {}).map(pid => {
+                            const p = productsMap[pid] || {};
+                            return (p.address_id ?? p.addressId ?? p.shipping_address_id ?? p.address?.id ?? null);
+                        }).filter(Boolean)));
+                        if (prodAddressIds.length > 0) {
+                            const resolved = await fetchAddressesByIds(prodAddressIds);
+                            // Build lookup by id and address_id
+                            const byId = {};
+                            const byAddressId = {};
+                            (resolved || []).forEach(a => {
+                                if (!a) return;
+                                if (a.id != null) byId[String(a.id)] = a;
+                                if (a.address_id) byAddressId[String(a.address_id)] = a;
+                            });
+
+                            const savedMap = {};
+                            // match each product to an address row when possible
+                            for (const pid of Object.keys(productsMap || {})) {
+                                const p = productsMap[pid] || {};
+                                const cand = p.address_id ?? p.addressId ?? p.shipping_address_id ?? (p.address && (p.address.id || p.address.address_id)) ?? null;
+                                let row = null;
+                                if (cand != null) {
+                                    const s = String(cand);
+                                    if (byId[s]) row = byId[s];
+                                    else if (byAddressId[s]) row = byAddressId[s];
+                                    else {
+                                        // try lowercase UUID match
+                                        const lower = s.toLowerCase();
+                                        if (byId[lower]) row = byId[lower];
+                                        else if (byAddressId[lower]) row = byAddressId[lower];
+                                    }
+                                }
+                                if (row) savedMap[String(pid)] = row;
+                            }
+
+                            // attach to items and order-level list
+                            const savedList = [];
+                            data.items = (data.items || []).map(itm => {
+                                const addr = savedMap[String(itm.product_id)] || null;
+                                if (addr) {
+                                    savedList.push(addr);
+                                    return { ...itm, saved_address_row: addr };
+                                }
+                                return itm;
+                            });
+                            // dedupe savedList by id/address_id
+                            const seenS = new Set();
+                            data._saved_addresses = savedList.filter(a => {
+                                const k = String(a?.id ?? a?.address_id ?? Math.random());
+                                if (seenS.has(k)) return false; seenS.add(k); return true;
+                            });
+                        }
+                    } catch (e) { /* non-fatal */ }
                 } catch (e) { /* ignore items fetch errors */ }
 
-                // Attempt to load payments related to this order (to display payment method / amount)
-                try {
-                    const payIds = Array.from(new Set([String(orderId), String(data?.id), String(data?.order_id)].filter(Boolean)));
-                    const { data: pays, error: payErr } = await supabase.from('payments').select('*').in('order_id', payIds);
-                    if (!payErr && Array.isArray(pays)) {
-                        data._payments = pays;
-                        // attempt to derive a payment summary
-                        const first = pays[0];
-                        if (first) {
-                            data._payment_method = first.method || first.payment_method || first.type || first.gateway || null;
-                            data._paid_amount = Number(first.amount || first.paid || 0) || null;
-                        }
+                // Fetch payments, payment methods, and shipping methods in parallel
+                const [paymentsResult, paymentMethodResult, shippingMethodResult] = await Promise.allSettled([
+                    // Fetch payments
+                    (async () => {
+                        try {
+                            const payIds = Array.from(new Set([String(orderId), String(data?.id), String(data?.order_id)].filter(Boolean)));
+                            const { data: pays, error: payErr } = await supabase.from('payments').select('*').in('order_id', payIds);
+                            if (!payErr && Array.isArray(pays)) {
+                                return pays;
+                            }
+                        } catch (e) { /* ignore */ }
+                        return null;
+                    })(),
+                    
+                    // Fetch payment method
+                    (async () => {
+                        try {
+                            const pid = data?.payment_id;
+                            if (pid) {
+                                const { data: pmRow } = await supabase.from('payment_methods').select('method').eq('payment_id', String(pid)).maybeSingle();
+                                return pmRow;
+                            }
+                        } catch (e) { /* ignore */ }
+                        return null;
+                    })(),
+                    
+                    // Fetch shipping method
+                    (async () => {
+                        try {
+                            const sid = data?.shipping_id;
+                            if (sid) {
+                                const { data: smRow } = await supabase.from('shipping_methods').select('name, base_rate, rate_per_grams').eq('shipping_id', String(sid)).maybeSingle();
+                                return smRow;
+                            }
+                        } catch (e) { /* ignore */ }
+                        return null;
+                    })()
+                ]);
+                
+                // Process payments result
+                if (paymentsResult.status === 'fulfilled' && paymentsResult.value) {
+                    data._payments = paymentsResult.value;
+                    const first = paymentsResult.value[0];
+                    if (first) {
+                        data._payment_method = first.method || first.payment_method || first.type || first.gateway || null;
+                        data._paid_amount = Number(first.amount || first.paid || 0) || null;
                     }
-                } catch (e) { /* ignore payments */ }
+                }
+                
+                // Process payment method result
+                if (paymentMethodResult.status === 'fulfilled' && paymentMethodResult.value?.method && !data._payment_method) {
+                    data._payment_method = paymentMethodResult.value.method;
+                }
+                
+                // Process shipping method result
+                if (shippingMethodResult.status === 'fulfilled' && shippingMethodResult.value?.name) {
+                    data._delivery_method = shippingMethodResult.value.name;
+                    data.delivery_method = shippingMethodResult.value.name;
+                    // Store for shipping calculation later
+                    data._shipping_method_rates = {
+                        base_rate: shippingMethodResult.value.base_rate,
+                        rate_per_grams: shippingMethodResult.value.rate_per_grams
+                    };
+                }
+
+                // Compute taxes (prefer already computed item-level tax accumulator)
+                try {
+                    const computedTaxes = Number(data._itemsTax || data.tax_amount || data.tax || data.taxes || 0);
+                    data.taxes = Number(isFinite(computedTaxes) ? computedTaxes : 0);
+                } catch (e) { data.taxes = 0; }
+
+                // Resolve shipping amount: prefer explicit order fields, then use already-fetched shipping_method rates,
+                // finally fallback to delta between order.total_price and items subtotal + taxes.
+                try {
+                    const totalWeightGrams = Number((Array.isArray(data.items) ? data.items.reduce((s, it) => s + (Number(it.weight || 0) * Number(it.quantity || 1)), 0) : 0) || 0);
+                    let shippingAmount = null;
+
+                    // 1) explicit fields on the order
+                    if (data.shipping_amount != null && !Number.isNaN(Number(data.shipping_amount))) shippingAmount = Number(data.shipping_amount);
+                    else if (data.shipping_cost != null && !Number.isNaN(Number(data.shipping_cost))) shippingAmount = Number(data.shipping_cost);
+                    else if (data.shipping != null && !Number.isNaN(Number(data.shipping))) shippingAmount = Number(data.shipping);
+
+                    // 2) use already-fetched shipping method rates (from parallel query above)
+                    if (shippingAmount == null && data._shipping_method_rates) {
+                        const base = Number(data._shipping_method_rates.base_rate || 0);
+                        const per = Number(data._shipping_method_rates.rate_per_grams || 0);
+                        const cost = base + per * totalWeightGrams;
+                        shippingAmount = Number(isFinite(cost) ? Number(cost.toFixed(2)) : 0);
+                    }
+
+                    // 3) fallback to delta (order total - items subtotal - taxes)
+                    if (shippingAmount == null) {
+                        const subtotal = Number(data._itemsSubtotal || data.subtotal || data.sub_total || 0);
+                        const taxes = Number(data.taxes || 0);
+                        const delta = Number(data.total_price || data.total || data.amount || 0) - subtotal - taxes;
+                        shippingAmount = Math.max(0, Number(isFinite(delta) ? Number(delta.toFixed(2)) : 0));
+                    }
+
+                    data.shipping_amount = Number(shippingAmount || 0);
+                    data.shipping_cost = data.shipping_cost || data.shipping_amount;
+                    data.shipping = data.shipping || data.shipping_amount;
+                } catch (e) { /* ignore shipping resolution errors */ }
 
                 // Enrich order with user/profile contact info when order has a user_id
                 try {
@@ -1576,6 +1754,19 @@ const OrdersList = ({ externalSearch = '' }) => {
                                 }
                             } catch (e) { /* ignore */ }
                         }
+
+                        // Try user_info table as another possible source for email when customer/profile lookups didn't yield one.
+                        // Note: user_info uses `id` as the user identifier column.
+                        try {
+                            if (!data.customer_email && uid) {
+                                const { data: uiRow, error: uiErr } = await supabase.from('user_info').select('email').eq('id', String(uid)).maybeSingle();
+                                if (!uiErr && uiRow && uiRow.email) {
+                                    data.customer_email = uiRow.email;
+                                    data._user_profile = data._user_profile || {};
+                                    data._user_profile.email = data._user_profile.email || uiRow.email;
+                                }
+                            }
+                        } catch (e) { /* ignore user_info lookup errors */ }
 
                         // fallback: try custom users table
                         if (!data._user_profile) {
@@ -1713,13 +1904,14 @@ const OrdersList = ({ externalSearch = '' }) => {
             const data = await fetchOrderDetails(orderId);
             if (data) {
                 setViewOrderDetails(data);
-                setUpdateStatusValue(data.status ?? 'In Progress');
+                // Store the original status to compare for changes
+                setUpdateStatusValue(data.status ?? 'order_placed');
             } else {
                 // fallback: find in rows
                 const fallback = rows.find(r => String(r.id) === String(orderId));
                 if (fallback) {
                     setViewOrderDetails({ id: fallback.id, status: fallback.status, customer_name: fallback.customer });
-                    setUpdateStatusValue(fallback.status ?? 'In Progress');
+                    setUpdateStatusValue(fallback.status ?? 'order_placed');
                 }
             }
         } catch (e) {
@@ -1733,10 +1925,74 @@ const OrdersList = ({ externalSearch = '' }) => {
 
     const cancelOrder = async (orderId) => {
         try {
-            await supabase.from('orders').update({ status: 'Cancelled' }).or(`order_id.eq.${orderId},id.eq.${orderId}`);
+            console.log('Cancelling order:', orderId); // Debug log
+            const { data, error } = await supabase.from('orders').update({ status: 'cancelled' }).eq('order_id', orderId);
+            console.log('Cancel order result:', { data, error, orderId }); // Debug log
+            if (error) {
+                console.error('Orders table update error:', error);
+                alert(`Failed to cancel order: ${error.message}`);
+                return;
+            }
+
+            // Also mark related order_items as cancelled.
+            // Some schemas store order_id as numeric or string on order_items; try several strategies and fall back to updating by order_item_id.
+            try {
+                // 1) Try direct IN update with string and numeric forms
+                const forms = Array.from(new Set([String(orderId), String(Number(orderId))].filter(v => v && v !== 'NaN')));
+                if (forms.length > 0) {
+                    const { error: inErr, data: inData } = await supabase.from('order_items').update({ status: 'Cancelled' }).in('order_id', forms);
+                    if (inErr) console.warn('order_items .in update error', inErr, { orderId, forms, inData });
+                    // If rows were updated (or no error), we're done
+                    // Note: some Supabase setups don't return row counts for updates; we'll still attempt fallback if no rows were matched.
+                }
+
+                // 2) If the above might not have matched (different column types), fetch matching order_items using multiple eq forms
+                let matchedItems = [];
+                try {
+                    const { data: byStr, error: byStrErr } = await supabase.from('order_items').select('order_item_id').eq('order_id', orderId);
+                    if (!byStrErr && Array.isArray(byStr) && byStr.length > 0) matchedItems = byStr.map(x => x.order_item_id ?? x.id).filter(Boolean);
+                } catch (e) {}
+                if (matchedItems.length === 0) {
+                    try {
+                        const { data: byStr2, error: byStr2Err } = await supabase.from('order_items').select('order_item_id').eq('order_id', String(orderId));
+                        if (!byStr2Err && Array.isArray(byStr2) && byStr2.length > 0) matchedItems = byStr2.map(x => x.order_item_id ?? x.id).filter(Boolean);
+                    } catch (e) {}
+                }
+                if (matchedItems.length === 0) {
+                    const asNum = parseInt(orderId, 10);
+                    if (!isNaN(asNum)) {
+                        try {
+                            const { data: byNum, error: byNumErr } = await supabase.from('order_items').select('order_item_id').eq('order_id', asNum);
+                            if (!byNumErr && Array.isArray(byNum) && byNum.length > 0) matchedItems = byNum.map(x => x.order_item_id ?? x.id).filter(Boolean);
+                        } catch (e) {}
+                    }
+                }
+
+                // 3) If we found specific order_item ids, update by primary keys for reliability
+                if (matchedItems.length > 0) {
+                    try {
+                        const uniqIds = Array.from(new Set(matchedItems.map(String)));
+                        const { error: pkErr } = await supabase.from('order_items').update({ status: 'Cancelled' }).in('order_item_id', uniqIds);
+                        if (pkErr) console.warn('Failed updating order_items by order_item_id', pkErr, { orderId, uniqIds });
+                    } catch (e) {
+                        console.warn('Exception when updating order_items by order_item_id', e, { orderId, matchedItems });
+                    }
+                }
+            } catch (e) {
+                // non-fatal: log and continue
+                console.warn('Failed to update order_items status for cancelled order', orderId, e);
+            }
+
             // update local rows
             setRows(prev => prev.map(r => (String(r.id) === String(orderId) ? { ...r, status: 'Cancelled' } : r)));
-            setViewOrderDetails(prev => prev ? { ...prev, status: 'Cancelled' } : prev);
+            // Update viewOrderDetails and mark each item as cancelled locally so UI shows change
+            setViewOrderDetails(prev => {
+                if (!prev) return prev;
+                const updatedItems = Array.isArray(prev.items) ? prev.items.map(it => ({ ...it, status: 'Cancelled' })) : prev.items;
+                return { ...prev, status: 'Cancelled', items: updatedItems };
+            });
+            // Close the modal after successful cancellation
+            closeViewModal();
         } catch (e) {
             console.error('Cancel order failed', e);
         }
@@ -1746,15 +2002,46 @@ const OrdersList = ({ externalSearch = '' }) => {
         if (!viewOrderDetails) return;
         const orderId = viewOrderDetails.order_id ?? viewOrderDetails.id ?? viewOrderDetails.reference ?? viewOrderDetails.number;
         try {
-            const { error } = await supabase.from('orders').update({ status: updateStatusValue }).or(`order_id.eq.${orderId},id.eq.${orderId}`);
-            if (!error) {
-                setRows(prev => prev.map(r => (String(r.id) === String(orderId) ? { ...r, status: updateStatusValue } : r)));
-                setViewOrderDetails(prev => prev ? { ...prev, status: updateStatusValue } : prev);
-                setShowUpdateModal(false);
+            console.log('Updating order status:', orderId, 'to', updateStatusValue); // Debug log
+            const { data, error } = await supabase.from('orders').update({ status: updateStatusValue }).eq('order_id', orderId);
+            console.log('Update status result:', { data, error, orderId, newStatus: updateStatusValue }); // Debug log
+            if (error) {
+                console.error('Orders table update error:', error);
+                alert(`Failed to update order status: ${error.message}`);
+                return;
             }
+            
+            // Update local state
+            setRows(prev => prev.map(r => (String(r.id) === String(orderId) ? { ...r, status: updateStatusValue } : r)));
+            setViewOrderDetails(prev => prev ? { ...prev, status: updateStatusValue } : prev);
+            
+            // Close update modal and return to view modal
+            setShowUpdateModal(false);
         } catch (e) {
             console.error('Save status failed', e);
         }
+    };
+
+    // Render a compact shipping address card inside the Order modal
+    const renderShippingAddress = (order) => {
+        const a = order?.shipping_address_row || order?.shipping || order?.billing_address_row || order?.billing || order?.address || null;
+        if (!a) return null;
+
+        const lines = [
+            a.street_address || a.street || a.address_line1 || a.address || a.line1 || a.shipping_address || '',
+            a.barangay || a.brgy || a.subdivision || a.suburb || '',
+            [a.city || a.city_name || a.municipality || a.town, a.region || a.province].filter(Boolean).join(', '),
+            a.postal_code || a.zip || a.zipcode || ''
+        ].filter(Boolean);
+
+        return (
+            <div className="mt-4 border-t border-dashed border-gray-200 pt-4">
+                <h3 className="text-[20px] font-semibold text-[#12263F] mb-3">Shipping Address</h3>
+                <div className="text-[14px] font-medium text-black">
+                    {lines.map((ln, i) => (<div key={i}>{ln}</div>))}
+                </div>
+            </div>
+        );
     };
 
     return (
@@ -1801,13 +2088,14 @@ const OrdersList = ({ externalSearch = '' }) => {
                                                     </div>
                                                     <div className="max-h-60 overflow-y-auto py-1 pr-1">
                                                         <div className="flex flex-wrap gap-2">
-                                                            {['Delivered','Cancelled','In Progress'].map(name => {
-                                                                const available = rows.some(r => orderStatusLabel(r.status) === name);
+                                                            {['order_placed', 'printing', 'quality_check', 'packed', 'ready_for_shipment', 'shipped', 'delivered', 'cancelled'].map(name => {
+                                                                const available = rows.some(r => r.status === name);
                                                                 const active = statusDraft.includes(name);
                                                                 const base = "px-3 py-1 rounded-full border border-black text-sm";
+                                                                const formatStatus = (str) => str.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
                                                                 if (!available) {
                                                                     return (
-                                                                        <button key={name} type="button" disabled className={`${base} bg-gray-200 text-gray-400 cursor-not-allowed`}>{name}</button>
+                                                                        <button key={name} type="button" disabled className={`${base} bg-gray-200 text-gray-400 cursor-not-allowed`}>{formatStatus(name)}</button>
                                                                     );
                                                                 }
                                                                 return (
@@ -1817,7 +2105,7 @@ const OrdersList = ({ externalSearch = '' }) => {
                                                                         onClick={() => setStatusDraft(d => (d.includes(name) ? d.filter(x => x !== name) : [...d, name]))}
                                                                         className={`${base} ${active ? 'bg-[#2B4269] text-white border-[#2B4269]' : 'text-gray-700 hover:bg-gray-50'}`}
                                                                     >
-                                                                        {name}
+                                                                        {formatStatus(name)}
                                                                     </button>
                                                                 );
                                                             })}
@@ -1858,7 +2146,7 @@ const OrdersList = ({ externalSearch = '' }) => {
                                             <span className="text-gray-800">{r.customer}</span>
                                         </td>
                                         <td className="px-4 py-3 align-top text-gray-700">{r.date}</td>
-                                        <td className="px-4 py-3 align-top">{statusBadge(orderStatusLabel(r.status))}</td>
+                                        <td className="px-4 py-3 align-top">{statusBadge(r.status)}</td>
                                         <td className="px-4 py-3 align-top text-gray-800">{peso(r.amount)}</td>
                                         <td className="px-4 py-3 align-top">
                                             <button onClick={() => openViewModal(r.id)} className="px-3 py-1 rounded-md w-[109px] border border-[#939393] text-sm text-gray-700 hover:bg-gray-50">View</button>
@@ -1869,9 +2157,18 @@ const OrdersList = ({ externalSearch = '' }) => {
                             </table>
                 </div>
 
+            {/* Loading Modal */}
+            <Modal open={viewLoading && !viewOrderDetails} onClose={() => {}} width={"w-[300px]"}>
+                <div className="p-8 flex flex-col items-center justify-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#2B4269] mb-4"></div>
+                    <div className="text-lg font-semibold text-[#12263F]">Loading Order...</div>
+                    <div className="text-sm text-gray-500 mt-2">Please wait</div>
+                </div>
+            </Modal>
+
             {/* View Order Modal */}
-            <Modal open={!!viewOrderDetails} onClose={closeViewModal} width={"w-[400px]"}>
-                <div className="p-6 max-w-[520px]">
+            <Modal open={!!viewOrderDetails} onClose={closeViewModal} width={"w-[520px]"}>
+                <div className="p-6 max-w-[520px] max-h-[90vh] overflow-y-auto">
                     {viewLoading ? (
                         <div className="p-6 text-center">Loading…</div>
                     ) : (
@@ -1879,7 +2176,7 @@ const OrdersList = ({ externalSearch = '' }) => {
                         <div className="mb-4">
                             <div className="text-2xl font-bold text-[#12263F]">{`Order #${viewOrderDetails?.order_id ?? viewOrderDetails?.id ?? ''}`}</div>
                             <div className="mt-3 flex items-center gap-3">
-                                <span className="inline-flex items-center px-2.5 py-1 rounded text-sm bg-yellow-100 text-yellow-800 font-medium">{orderStatusLabel(viewOrderDetails?.status ?? viewOrderDetails?.order_status)}</span>
+                                {statusBadge(viewOrderDetails?.status ?? viewOrderDetails?.order_status)}
                                 <button className="inline-flex items-center gap-2 text-sm border rounded px-2 py-1 text-gray-700 bg-white">
                                     <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 9l6 6 6-6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
                                     Print
@@ -1889,10 +2186,10 @@ const OrdersList = ({ externalSearch = '' }) => {
 
                         {/* Contact */}
                         <div className="mt-4 border-t border-dashed border-gray-200 pt-4">
-                            <h3 className="text-sm font-semibold text-[#12263F] mb-3">Contact</h3>
-                            <div className="grid grid-cols-2 gap-6">
+                            <h3 className="text-[20px] font-semibold text-[#12263F] mb-3">Contact</h3>
+                            <div className="grid grid-cols-1 gap-6">
                                 <div>
-                                    <div className="text-xs text-gray-500">Email Address</div>
+                                    <div className="text-[14px] font-medium text-black">Email Address</div>
                                     <div className="text-sm text-blue-600 underline">
                                         {(viewOrderDetails?.shipping_address_row?.email)
                                             || (viewOrderDetails?.billing_address_row?.email)
@@ -1903,8 +2200,8 @@ const OrdersList = ({ externalSearch = '' }) => {
                                     </div>
                                 </div>
                                 <div>
-                                    <div className="text-xs text-gray-500">Phone</div>
-                                    <div className="text-sm">
+                                    <div className="text-[14px] font-medium text-black">Phone</div>
+                                    <div className="text-[14px]">
                                         {(viewOrderDetails?.shipping_address_row?.phone_number)
                                             || (viewOrderDetails?.billing_address_row?.phone_number)
                                             || viewOrderDetails?.phone
@@ -1916,27 +2213,49 @@ const OrdersList = ({ externalSearch = '' }) => {
                             </div>
                         </div>
 
-                        {/* Order Info */}
-                        <div className="mt-6 border-t border-dashed border-gray-200 pt-4">
-                            <h4 className="text-sm font-semibold mb-3">Order Info</h4>
+                {/* Order Info */}
+            {renderShippingAddress(viewOrderDetails)}
+            {/* Saved Address (from linked product address_id) */}
+            {Array.isArray(viewOrderDetails?._saved_addresses) && viewOrderDetails._saved_addresses.length > 0 && (
+                <div className="mt-4 border-t border-dashed border-gray-200 pt-4">
+                    <h3 className="text-[20px] font-semibold text-black mb-3">Saved Address</h3>
+                    <div className="text-[14px] text-black">
+                        {(() => {
+                            try {
+                                const addr = viewOrderDetails._saved_addresses[0];
+                                if (!addr) return null;
+                                const lines = [
+                                    addr.street_address || addr.street || addr.address_line1 || addr.address || addr.line1 || addr.shipping_address || '',
+                                    addr.barangay || addr.brgy || addr.subdivision || addr.suburb || '',
+                                    [addr.city || addr.city_name || addr.municipality || addr.town, addr.region || addr.province].filter(Boolean).join(', '),
+                                    addr.postal_code || addr.zip || addr.zipcode || ''
+                                ].filter(Boolean);
+                                return lines.map((ln, i) => (<div key={i}>{ln}</div>));
+                            } catch (e) { return null; }
+                        })()}
+                    </div>
+                </div>
+            )}
+            <div className="mt-6 border-t border-dashed border-gray-200 pt-4">
+                            <h4 className="text-[20px] font-semibold mb-3">Order Info</h4>
                             <div className="grid grid-cols-2 gap-4 text-sm text-gray-700">
-                                <div className="text-xs text-gray-500">Date Ordered</div>
-                                <div>{(function(){ try { const d = new Date(viewOrderDetails?.date_ordered || viewOrderDetails?.created_at || viewOrderDetails?.placed_at || viewOrderDetails?.date); if (!isNaN(d)) return d.toISOString().slice(0,10); } catch(e){} return '—'; })()}</div>
+                                <div className="text-[14px] font-semibold text-black">Date Ordered</div>
+                                <div className="text-[14px] font-semibold text-black">{(function(){ try { const d = new Date(viewOrderDetails?.date_ordered || viewOrderDetails?.created_at || viewOrderDetails?.placed_at || viewOrderDetails?.date); if (!isNaN(d)) return d.toISOString().slice(0,10); } catch(e){} return '—'; })()}</div>
 
-                                <div className="text-xs text-gray-500">Payment</div>
-                                <div>{viewOrderDetails?._payment_method || viewOrderDetails?.payment_method || (viewOrderDetails?._payments && viewOrderDetails._payments.length ? viewOrderDetails._payments[0].method || viewOrderDetails._payments[0].payment_method : null) || (viewOrderDetails?.payment_status ? `${viewOrderDetails.payment_status}` : '—')}</div>
+                                <div className="text-[14px] font-semibold text-black">Payment</div>
+                                <div className='text-[14px] font-semibold text-black'>{viewOrderDetails?._payment_method || viewOrderDetails?.payment_method || (viewOrderDetails?._payments && viewOrderDetails._payments.length ? viewOrderDetails._payments[0].method || viewOrderDetails._payments[0].payment_method : null) || (viewOrderDetails?.payment_status ? `${viewOrderDetails.payment_status}` : '—')}</div>
 
-                                <div className="text-xs text-gray-500">Delivery</div>
-                                <div>{viewOrderDetails?.delivery_method || viewOrderDetails?.delivery || viewOrderDetails?.shipping_provider || '—'}</div>
+                                <div className="text-[14px] font-semibold text-black">Delivery</div>
+                                <div className='text-[14px] font-semibold text-black'>{viewOrderDetails?.delivery_method || viewOrderDetails?.delivery || viewOrderDetails?.shipping_provider || '—'}</div>
 
-                                <div className="text-xs text-gray-500">Tracking No.</div>
+                                <div className="text-[14px] font-semibold text-black">Tracking No.</div>
                                 <div>{viewOrderDetails?.tracking_number || viewOrderDetails?.tracking_no || viewOrderDetails?.tracking || '—'}</div>
                             </div>
                         </div>
 
                         {/* Items */}
                         <div className="mt-6 border-t border-dashed border-gray-200 pt-4">
-                            <h4 className="text-sm font-semibold mb-3">Item(s) Ordered</h4>
+                            <h4 className="text-[20px] font-semibold mb-3">Item(s) Ordered</h4>
                             <div className="space-y-4">
                                 {Array.isArray(viewOrderDetails?.items) && viewOrderDetails.items.length > 0 ? (
                                     viewOrderDetails.items.map((it, idx) => {
@@ -1983,56 +2302,41 @@ const OrdersList = ({ externalSearch = '' }) => {
                                             return lines;
                                         };
                                         const designFiles = Array.isArray(it.uploaded_files) ? it.uploaded_files : [];
-                                        const designBlock = (() => {
-                                            if (designFiles.length === 0) return null;
-                                            const first = designFiles[0];
-                                            const extra = Math.max(0, designFiles.length - 1);
-                                            return (
-                                                <div className="mt-2 flex items-center gap-2">
-                                                    <div className="flex items-center gap-2 border rounded px-2 py-1 bg-white">
-                                                        <div className="w-10 h-10 overflow-hidden rounded bg-gray-100 flex items-center justify-center">
-                                                            {first?.image_url ? (
-                                                                <img src={first.image_url} alt={first.file_name || 'design'} className="w-full h-full object-cover" />
-                                                            ) : (
-                                                                <img src="/logo-icon/image.svg" alt="file" className="w-4 h-4" />
-                                                            )}
-                                                        </div>
-                                                        <div className="text-xs text-gray-600 truncate max-w-[140px]">{first?.file_name || 'uploaded design'}</div>
-                                                    </div>
-                                                    {extra > 0 && (
-                                                        <div className="inline-flex items-center justify-center bg-transparent text-black text-[15px] font-semibold rounded-full w-6 h-6">+{extra}</div>
-                                                    )}
-                                                </div>
-                                            );
-                                        })();
+                                        console.log('[OrderModal] item uploaded_files:', { 
+                                            idx, 
+                                            product_name: it.product?.name || it.name,
+                                            uploaded_files_count: designFiles.length,
+                                            uploaded_files: designFiles 
+                                        });
 
                                         return (
                                             <div key={idx} className="flex items-start gap-4">
                                                 <img src={it.product?.image_url || it.image_url || it.image || (it.raw && (it.raw.product_image || it.raw.thumbnail)) || '/logo-icon/profile-icon.svg'} alt="" className="w-12 h-12 rounded border bg-white p-1 object-cover" />
                                                 <div className="flex-1">
                                                     <div className="font-semibold text-sm text-gray-800">{(it.product && it.product.name) || it.name || it.product_name}</div>
-                                                    <div className="mt-2">
-                                                        {designBlock ? (
-                                                            <div className="flex items-center gap-3">
-                                                                <div className="flex-1">
-                                                                    <div className="flex items-center gap-3 border rounded-md bg-white px-3 py-2">
-                                                                        <div className="w-10 h-10 overflow-hidden rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
-                                                                            {designFiles[0]?.image_url ? (
-                                                                                <img src={designFiles[0].image_url} alt={designFiles[0].file_name || 'design'} className="w-full h-full object-cover" />
-                                                                            ) : (
-                                                                                <img src="/logo-icon/image.svg" alt="file" className="w-4 h-4" />
-                                                                            )}
-                                                                        </div>
-                                                                        <div className="text-sm text-gray-700 truncate">{designFiles[0]?.file_name || 'uploaded design'}</div>
-                                                                    </div>
+                                                    
+                                                    {/* Uploaded Files Section */}
+                                                    {designFiles.length > 0 && (
+                                                        <div className="mt-2 flex items-center gap-2">
+                                                            <div className="flex items-center gap-2 border rounded px-2 py-1 bg-white">
+                                                                <div className="w-10 h-10 overflow-hidden rounded bg-gray-100 flex items-center justify-center">
+                                                                    {designFiles[0]?.image_url ? (
+                                                                        <img src={designFiles[0].image_url} alt={designFiles[0].file_name || 'design'} className="w-full h-full object-cover" />
+                                                                    ) : (
+                                                                        <img src="/logo-icon/image.svg" alt="file" className="w-4 h-4" />
+                                                                    )}
                                                                 </div>
-                                                                {designFiles.length > 1 && (
-                                                                    <div className="inline-flex items-center justify-center bg-gray-100 text-black text-[13px] font-semibold rounded-full w-7 h-7">+{designFiles.length - 1}</div>
-                                                                )}
+                                                                <div className="text-xs text-gray-600 truncate max-w-[140px]">{designFiles[0]?.file_name || 'uploaded design'}</div>
                                                             </div>
-                                                        ) : null}
+                                                            {designFiles.length > 1 && (
+                                                                <div className="inline-flex items-center justify-center bg-transparent text-black text-[15px] font-semibold rounded-full w-6 h-6">+{designFiles.length - 1}</div>
+                                                            )}
+                                                        </div>
+                                                    )}
 
-                                                        <div className="text-xs text-gray-600 mt-2">
+                                                    {/* Specifications */}
+                                                    <div className="mt-2">
+                                                        <div className="text-xs text-gray-600">
                                                             {buildSpecs().map((line, i) => (<div key={i}>{line}</div>))}
                                                         </div>
                                                     </div>
@@ -2050,15 +2354,38 @@ const OrdersList = ({ externalSearch = '' }) => {
                         </div>
 
                         {/* Totals */}
-                        <div className="mt-6 border-t border-dashed border-gray-200 pt-4 text-sm text-gray-800">
+                        <div className="mt-6 border-t border-dashed border-gray-200 pt-4 text-sm text-black">
                             <div className="flex items-center justify-between"><div>Subtotal</div><div>{peso(viewOrderDetails?._itemsSubtotal ?? viewOrderDetails?.subtotal ?? viewOrderDetails?.sub_total ?? 0)}</div></div>
                             <div className="flex items-center justify-between mt-2"><div>Shipping</div><div>{peso(viewOrderDetails?.shipping_amount ?? viewOrderDetails?.shipping_cost ?? viewOrderDetails?.shipping ?? 0)}</div></div>
                             <div className="flex items-center justify-between mt-2"><div>Taxes</div><div>{peso(viewOrderDetails?.taxes ?? viewOrderDetails?.tax ?? 0)}</div></div>
-                            <div className="flex items-center justify-between mt-3 font-semibold text-gray-900"><div>Total</div><div>{peso(viewOrderDetails?.total ?? viewOrderDetails?.amount ?? ((viewOrderDetails?._itemsSubtotal ?? viewOrderDetails?.subtotal ?? viewOrderDetails?.sub_total ?? 0) + (viewOrderDetails?.shipping_amount ?? viewOrderDetails?.shipping_cost ?? viewOrderDetails?.shipping ?? 0)))}</div></div>
+                            <div className="flex items-center justify-between mt-3 font-semibold text-gray-900">
+                                <div>Total</div>
+                                <div>
+                                    {(() => {
+                                        try {
+                                            const raw = viewOrderDetails?.total ?? viewOrderDetails?.amount ??
+                                                ((viewOrderDetails?._itemsSubtotal ?? viewOrderDetails?.subtotal ?? viewOrderDetails?.sub_total ?? 0)
+                                                    + (viewOrderDetails?.shipping_amount ?? viewOrderDetails?.shipping_cost ?? viewOrderDetails?.shipping ?? 0)
+                                                    + (viewOrderDetails?.taxes ?? viewOrderDetails?.tax ?? 0));
+                                            const num = Number(raw) || 0;
+                                            const rounded = Math.ceil(num);
+                                            return peso(rounded);
+                                        } catch (e) {
+                                            return peso(0);
+                                        }
+                                    })()}
+                                </div>
+                            </div>
                         </div>
 
                         <div className="mt-6 pt-4 border-t flex items-center justify-between gap-4">
-                            <button className="bg-[#9E3E3E] hover:bg-[#873434] text-white px-4 py-2 rounded-md font-semibold" onClick={() => cancelOrder(viewOrderDetails?.order_id ?? viewOrderDetails?.id)}>CANCEL ORDER</button>
+                            <button 
+                                className="bg-[#9E3E3E] hover:bg-[#873434] text-white px-4 py-2 rounded-md font-semibold disabled:bg-gray-400 disabled:cursor-not-allowed" 
+                                onClick={() => cancelOrder(viewOrderDetails?.order_id ?? viewOrderDetails?.id)}
+                                disabled={orderStatusLabel(viewOrderDetails?.status ?? viewOrderDetails?.order_status) === 'Cancelled'}
+                            >
+                                CANCEL ORDER
+                            </button>
                             <div className="flex items-center gap-3">
                                 <button className="px-4 py-2 border border-gray-300 rounded-md text-sm" onClick={closeViewModal}>CLOSE</button>
                                 <button className="px-4 py-2 bg-[#1F3A57] hover:bg-[#172a41] text-white rounded-md font-semibold" onClick={() => setShowUpdateModal(true)}>UPDATE</button>
@@ -2070,23 +2397,232 @@ const OrdersList = ({ externalSearch = '' }) => {
             </Modal>
 
             {/* Update Status Modal */}
-            <Modal open={showUpdateModal} onClose={() => setShowUpdateModal(false)}>
-                <div className="p-6 max-w-[420px]">
-                    <div className="text-xl font-bold text-[#12263F] mb-4">{`Order #${viewOrderDetails?.order_id ?? viewOrderDetails?.id ?? ''}`}</div>
+            <Modal open={showUpdateModal} onClose={() => setShowUpdateModal(false)} width={"w-[520px]"}>
+                <div className="p-6 max-w-[520px] max-h-[90vh] overflow-y-auto">
                     <div className="mb-4">
-                        <label className="block text-sm text-gray-700 mb-2">Status</label>
-                        <div className="flex items-center gap-3">
-                            <select value={updateStatusValue} onChange={(e) => setUpdateStatusValue(e.target.value)} className="border rounded px-3 py-2 text-sm">
-                                <option>In Progress</option>
-                                <option>Delivered</option>
-                                <option>Cancelled</option>
+                        <div className="text-2xl font-bold text-[#12263F]">{`Order #${viewOrderDetails?.order_id ?? viewOrderDetails?.id ?? ''}`}</div>
+                        <div className="mt-3 flex items-center gap-3">
+                            <select 
+                                value={updateStatusValue} 
+                                onChange={(e) => setUpdateStatusValue(e.target.value)} 
+                                className="inline-flex items-center px-3 py-1 rounded text-sm border border-gray-300 bg-white font-medium"
+                            >
+                                <option value="order_placed">Order Placed</option>
+                                <option value="printing">Printing</option>
+                                <option value="quality_check">Quality Check</option>
+                                <option value="packed">Packed</option>
+                                <option value="ready_for_shipment">Ready For Shipment</option>
+                                <option value="shipped">Shipped</option>
+                                <option value="delivered">Delivered</option>
+                                <option value="cancelled">Cancelled</option>
                             </select>
-                            <button className="px-3 py-2 border rounded text-sm">Print</button>
+                            <button className="inline-flex items-center gap-2 text-sm border rounded px-2 py-1 text-gray-700 bg-white">
+                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 9l6 6 6-6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                                Print
+                            </button>
                         </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                        <button className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md font-semibold" onClick={saveUpdatedStatus}>SAVE</button>
-                        <button className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md" onClick={() => setShowUpdateModal(false)}>CANCEL</button>
+
+                    {/* Contact */}
+                    <div className="mt-4 border-t border-dashed border-gray-200 pt-4">
+                        <h3 className="text-[20px] font-semibold text-[#12263F] mb-3">Contact</h3>
+                        <div className="grid grid-cols-1 gap-6">
+                            <div>
+                                <div className="text-[14px] font-medium text-black">Email Address</div>
+                                <div className="text-sm text-blue-600 underline">
+                                    {(viewOrderDetails?.shipping_address_row?.email)
+                                        || (viewOrderDetails?.billing_address_row?.email)
+                                        || viewOrderDetails?.customer_email
+                                        || viewOrderDetails?.email
+                                        || viewOrderDetails?.contact_email
+                                        || '—'}
+                                </div>
+                            </div>
+                            <div>
+                                <div className="text-[14px] font-medium text-black">Phone</div>
+                                <div className="text-[14px]">
+                                    {(viewOrderDetails?.shipping_address_row?.phone_number)
+                                        || (viewOrderDetails?.billing_address_row?.phone_number)
+                                        || viewOrderDetails?.phone
+                                        || viewOrderDetails?.contact_phone
+                                        || viewOrderDetails?.mobile
+                                        || '—'}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Shipping Address */}
+                    {renderShippingAddress(viewOrderDetails)}
+                    
+                    {/* Saved Address */}
+                    {Array.isArray(viewOrderDetails?._saved_addresses) && viewOrderDetails._saved_addresses.length > 0 && (
+                        <div className="mt-4 border-t border-dashed border-gray-200 pt-4">
+                            <h3 className="text-[20px] font-semibold text-black mb-3">Saved Address</h3>
+                            <div className="text-[14px] text-black">
+                                {(() => {
+                                    try {
+                                        const addr = viewOrderDetails._saved_addresses[0];
+                                        if (!addr) return null;
+                                        const lines = [
+                                            addr.street_address || addr.street || addr.address_line1 || addr.address || addr.line1 || addr.shipping_address || '',
+                                            addr.barangay || addr.brgy || addr.subdivision || addr.suburb || '',
+                                            [addr.city || addr.city_name || addr.municipality || addr.town, addr.region || addr.province].filter(Boolean).join(', '),
+                                            addr.postal_code || addr.zip || addr.zipcode || ''
+                                        ].filter(Boolean);
+                                        return lines.map((ln, i) => (<div key={i}>{ln}</div>));
+                                    } catch (e) { return null; }
+                                })()}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Order Info */}
+                    <div className="mt-6 border-t border-dashed border-gray-200 pt-4">
+                        <h4 className="text-[20px] font-semibold mb-3">Order Info</h4>
+                        <div className="grid grid-cols-2 gap-4 text-sm text-gray-700">
+                            <div className="text-[14px] font-semibold text-black">Date Ordered</div>
+                            <div className="text-[14px] font-semibold text-black">{(function(){ try { const d = new Date(viewOrderDetails?.date_ordered || viewOrderDetails?.created_at || viewOrderDetails?.placed_at || viewOrderDetails?.date); if (!isNaN(d)) return d.toISOString().slice(0,10); } catch(e){} return '—'; })()}</div>
+
+                            <div className="text-[14px] font-semibold text-black">Payment</div>
+                            <div className='text-[14px] font-semibold text-black'>{viewOrderDetails?._payment_method || viewOrderDetails?.payment_method || (viewOrderDetails?._payments && viewOrderDetails._payments.length ? viewOrderDetails._payments[0].method || viewOrderDetails._payments[0].payment_method : null) || (viewOrderDetails?.payment_status ? `${viewOrderDetails.payment_status}` : '—')}</div>
+
+                            <div className="text-[14px] font-semibold text-black">Delivery</div>
+                            <div className='text-[14px] font-semibold text-black'>{viewOrderDetails?.delivery_method || viewOrderDetails?.delivery || viewOrderDetails?.shipping_provider || '—'}</div>
+
+                            <div className="text-[14px] font-semibold text-black">Tracking No.</div>
+                            <div>{viewOrderDetails?.tracking_number || viewOrderDetails?.tracking_no || viewOrderDetails?.tracking || '—'}</div>
+                        </div>
+                    </div>
+
+                    {/* Items */}
+                    <div className="mt-6 border-t border-dashed border-gray-200 pt-4">
+                        <h4 className="text-[20px] font-semibold mb-3">Item(s) Ordered</h4>
+                        <div className="space-y-4">
+                            {Array.isArray(viewOrderDetails?.items) && viewOrderDetails.items.length > 0 ? (
+                                viewOrderDetails.items.map((it, idx) => {
+                                    const buildSpecs = () => {
+                                        const ORDER = [
+                                            'Technique',
+                                            'Printing',
+                                            'Color',
+                                            'Size',
+                                            'Material',
+                                            'Strap',
+                                            'Type',
+                                            'Accessories (Hook Clasp)',
+                                            'Accessories Color',
+                                            'Trim Color',
+                                            'Base',
+                                            'Hole',
+                                            'Pieces',
+                                            'Cut Style',
+                                            'Size (Customize)',
+                                            'Acrylic Pieces Quantity',
+                                        ];
+                                        const norm = (s) => String(s || '').trim();
+                                        const labelFor = (group, value) => {
+                                            const g = norm(group);
+                                            const v = norm(value);
+                                            if (/accessor/i.test(g) && /(hook|clasp)/i.test(v)) return 'Accessories (Hook Clasp)';
+                                            return g || '—';
+                                        };
+                                        const rawSpecs = [];
+                                        if (Array.isArray(it.variants)) {
+                                            for (const v of it.variants) {
+                                                const label = labelFor(v?.group, v?.value);
+                                                const val = toColorNameIfHex(v?.group, v?.value);
+                                                rawSpecs.push({ label, value: val });
+                                            }
+                                        }
+                                        const map = rawSpecs.reduce((acc, s) => { acc[s.label] = s.value; return acc; }, {});
+                                        const lines = [];
+                                        for (const label of ORDER) {
+                                            if (map[label]) lines.push(`${label}: ${map[label]}`);
+                                        }
+                                        return lines;
+                                    };
+                                    const designFiles = Array.isArray(it.uploaded_files) ? it.uploaded_files : [];
+
+                                    return (
+                                        <div key={idx} className="flex items-start gap-4">
+                                            <img src={it.product?.image_url || it.image_url || it.image || (it.raw && (it.raw.product_image || it.raw.thumbnail)) || '/logo-icon/profile-icon.svg'} alt="" className="w-12 h-12 rounded border bg-white p-1 object-cover" />
+                                            <div className="flex-1">
+                                                <div className="font-semibold text-sm text-gray-800">{(it.product && it.product.name) || it.name || it.product_name}</div>
+                                                
+                                                {/* Uploaded Files Section */}
+                                                {designFiles.length > 0 && (
+                                                    <div className="mt-2 flex items-center gap-2">
+                                                        <div className="flex items-center gap-2 border rounded px-2 py-1 bg-white">
+                                                            <div className="w-10 h-10 overflow-hidden rounded bg-gray-100 flex items-center justify-center">
+                                                                {designFiles[0]?.image_url ? (
+                                                                    <img src={designFiles[0].image_url} alt={designFiles[0].file_name || 'design'} className="w-full h-full object-cover" />
+                                                                ) : (
+                                                                    <img src="/logo-icon/image.svg" alt="file" className="w-4 h-4" />
+                                                                )}
+                                                            </div>
+                                                            <div className="text-xs text-gray-600 truncate max-w-[140px]">{designFiles[0]?.file_name || 'uploaded design'}</div>
+                                                        </div>
+                                                        {designFiles.length > 1 && (
+                                                            <div className="inline-flex items-center justify-center bg-transparent text-black text-[15px] font-semibold rounded-full w-6 h-6">+{designFiles.length - 1}</div>
+                                                        )}
+                                                    </div>
+                                                )}
+
+                                                {/* Specifications */}
+                                                <div className="mt-2">
+                                                    <div className="text-xs text-gray-600">
+                                                        {buildSpecs().map((line, i) => (<div key={i}>{line}</div>))}
+                                                    </div>
+                                                </div>
+
+                                                <div className="text-xs text-gray-600 mt-2">Qty: {it.quantity ?? 1}</div>
+                                                <div className="text-sm text-gray-900 mt-1">{peso(it.total_price ?? it.line_total ?? (Number(it.price || 0) * (it.quantity || 1)))}</div>
+                                            </div>
+                                        </div>
+                                    );
+                                })
+                            ) : (
+                                <div className="text-sm text-gray-500">No item details available.</div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Totals */}
+                    <div className="mt-6 border-t border-dashed border-gray-200 pt-4 text-sm text-black">
+                        <div className="flex items-center justify-between"><div>Subtotal</div><div>{peso(viewOrderDetails?._itemsSubtotal ?? viewOrderDetails?.subtotal ?? viewOrderDetails?.sub_total ?? 0)}</div></div>
+                        <div className="flex items-center justify-between mt-2"><div>Shipping</div><div>{peso(viewOrderDetails?.shipping_amount ?? viewOrderDetails?.shipping_cost ?? viewOrderDetails?.shipping ?? 0)}</div></div>
+                        <div className="flex items-center justify-between mt-2"><div>Taxes</div><div>{peso(viewOrderDetails?.taxes ?? viewOrderDetails?.tax ?? 0)}</div></div>
+                        <div className="flex items-center justify-between mt-3 font-semibold text-gray-900">
+                            <div>Total</div>
+                            <div>
+                                {(() => {
+                                    try {
+                                        const raw = viewOrderDetails?.total ?? viewOrderDetails?.amount ??
+                                            ((viewOrderDetails?._itemsSubtotal ?? viewOrderDetails?.subtotal ?? viewOrderDetails?.sub_total ?? 0)
+                                                + (viewOrderDetails?.shipping_amount ?? viewOrderDetails?.shipping_cost ?? viewOrderDetails?.shipping ?? 0)
+                                                + (viewOrderDetails?.taxes ?? viewOrderDetails?.tax ?? 0));
+                                        const num = Number(raw) || 0;
+                                        const rounded = Math.ceil(num);
+                                        return peso(rounded);
+                                    } catch (e) {
+                                        return peso(0);
+                                    }
+                                })()}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="mt-6 pt-4 border-t flex items-center justify-end gap-3">
+                        <button className="px-4 py-2 border border-gray-300 rounded-md text-sm" onClick={() => setShowUpdateModal(false)}>CANCEL</button>
+                        <button 
+                            className="px-4 py-2 bg-[#1F3A57] hover:bg-[#172a41] text-white rounded-md font-semibold disabled:bg-gray-400 disabled:cursor-not-allowed" 
+                            onClick={saveUpdatedStatus}
+                            disabled={updateStatusValue === (viewOrderDetails?.status ?? viewOrderDetails?.order_status)}
+                        >
+                            SAVE
+                        </button>
                     </div>
                 </div>
             </Modal>
@@ -2565,15 +3101,25 @@ const UsersList = ({ externalSearch = '' }) => {
             setLoading(true);
             setError(null);
             try {
-                // Fetch up to 2000 users (adjust as needed)
+                // Fetch regular users from user_info
                 const pageSize = 2000;
-                const { data, error } = await supabase
+                const { data: userData, error: userError } = await supabase
                     .from('user_info')
                     .select('*')
                     .order('created_at', { ascending: false })
                     .limit(pageSize);
-                if (error) throw error;
-                const mapped = (data || []).map(u => {
+                if (userError) throw userError;
+                
+                // Fetch admin accounts from admin_accounts (email, created_at, last_activity)
+                const { data: adminData, error: adminError } = await supabase
+                    .from('admin_accounts')
+                    .select('email, created_at, last_activity')
+                    .order('created_at', { ascending: false })
+                    .limit(pageSize);
+                if (adminError) console.warn('Failed to fetch admin accounts:', adminError);
+                
+                // Map regular users
+                const mappedUsers = (userData || []).map(u => {
                     const full = u.full_name || u.display_name || `${u.first_name || ''} ${u.last_name || ''}`.trim() || (u.email ? u.email.split('@')[0] : 'User');
                     const email = u.email || u.email_address || u.contact_email || '';
                     const joined = (u.created_at || u.date_joined || u.joined_at) ? (new Date(u.created_at || u.date_joined || u.joined_at)).toISOString().slice(0,10) : '';
@@ -2583,7 +3129,19 @@ const UsersList = ({ externalSearch = '' }) => {
                     const lastAct = lastActivityRaw ? (new Date(lastActivityRaw)).toISOString().slice(0,10) : '';
                     return { id: u.id || u.user_id || u.uid || u.email, full, email, joined, role, lastAct };
                 });
-                if (mounted) setRows(mapped);
+                
+                // Map admin accounts
+                const mappedAdmins = (adminData || []).map(a => {
+                    const email = a.email || '';
+                    const full = email ? email.split('@')[0] : 'Admin';
+                    const joined = a.created_at ? (new Date(a.created_at)).toISOString().slice(0,10) : '';
+                    const lastAct = a.last_activity ? (new Date(a.last_activity)).toISOString().slice(0,10) : '';
+                    return { id: email, full, email, joined, role: 'Admin', lastAct };
+                });
+                
+                // Combine users and admins - admins first
+                const combined = [...mappedAdmins, ...mappedUsers];
+                if (mounted) setRows(combined);
             } catch (e) {
                 if (mounted) setError(e?.message || String(e));
             } finally {
@@ -2600,14 +3158,56 @@ const UsersList = ({ externalSearch = '' }) => {
     // View modal state
     const [viewUser, setViewUser] = useState(null);
     const [viewLoading, setViewLoading] = useState(false);
+    const [viewAdmin, setViewAdmin] = useState(null); // For admin accounts
 
     // inline validation errors for admin edit (match Account page rules)
     const [firstNameError, setFirstNameError] = useState('');
     const [lastNameError, setLastNameError] = useState('');
+    
+    // Admin edit state
+    const [isEditingAdmin, setIsEditingAdmin] = useState(false);
+    const [editAdminForm, setEditAdminForm] = useState({ email: '', password_hash: '' });
+    const [editAdminSaving, setEditAdminSaving] = useState(false);
+    const [showAdminPassword, setShowAdminPassword] = useState(false);
 
     const openViewModal = async (userIdOrEmail) => {
         setViewLoading(true);
         setViewUser(null);
+        setViewAdmin(null);
+        
+        // Check if this is an admin account (email format and exists in rows with role='Admin')
+        const rowMatch = rows.find(r => r.id === userIdOrEmail || r.email === userIdOrEmail);
+        console.log('openViewModal - rowMatch:', rowMatch); // Debug
+        if (rowMatch && rowMatch.role === 'Admin') {
+            // Fetch admin account details including password_hash
+            try {
+                console.log('Fetching admin account for email:', rowMatch.email); // Debug
+                const { data: adminData, error: adminError } = await supabase
+                    .from('admin_accounts')
+                    .select('email, password_hash, created_at, last_activity')
+                    .eq('email', rowMatch.email)
+                    .maybeSingle();
+                
+                console.log('Admin data fetched:', { adminData, adminError }); // Debug
+                
+                if (!adminError && adminData) {
+                    const adminView = {
+                        email: adminData.email || '',
+                        password_hash: adminData.password_hash || '',
+                        created_at: adminData.created_at ? new Date(adminData.created_at).toISOString().slice(0, 10) : '',
+                        last_activity: adminData.last_activity ? new Date(adminData.last_activity).toISOString().slice(0, 10) : '',
+                        role: 'Admin'
+                    };
+                    console.log('Setting viewAdmin to:', adminView); // Debug
+                    setViewAdmin(adminView);
+                }
+            } catch (e) {
+                console.error('Error fetching admin account:', e);
+            }
+            setViewLoading(false);
+            return;
+        }
+        
         try {
             // Try to fetch user by id first, otherwise try by email
             let userRow = null;
@@ -2720,7 +3320,205 @@ const UsersList = ({ externalSearch = '' }) => {
         }
     };
 
-    const closeViewModal = () => { setViewUser(null); };
+    const closeViewModal = () => { 
+        setViewUser(null); 
+        setViewAdmin(null);
+        setIsEditingAdmin(false);
+        setShowAdminPassword(false);
+    };
+
+    const startEditAdmin = () => {
+        if (!viewAdmin) return;
+        setEditAdminForm({
+            email: viewAdmin.email || '',
+            password_hash: viewAdmin.password_hash || ''
+        });
+        setIsEditingAdmin(true);
+    };
+
+    const cancelEditAdmin = () => {
+        setIsEditingAdmin(false);
+        if (viewAdmin) {
+            setEditAdminForm({
+                email: viewAdmin.email || '',
+                password_hash: viewAdmin.password_hash || ''
+            });
+        }
+    };
+
+    const saveEditAdmin = async () => {
+        if (!viewAdmin) return;
+        setEditAdminSaving(true);
+        try {
+            // Hash the password before saving
+            const saltRounds = 10;
+            const hashedPassword = await bcrypt.hash(editAdminForm.password_hash, saltRounds);
+            
+            const { data, error } = await supabase
+                .from('admin_accounts')
+                .update({ password_hash: hashedPassword })
+                .eq('email', viewAdmin.email);
+            
+            if (error) {
+                console.error('Failed to update admin account:', error);
+                alert(`Failed to update admin account: ${error.message}`);
+                return;
+            }
+            
+            // Update local state with the hashed password
+            setViewAdmin(prev => prev ? { ...prev, password_hash: hashedPassword } : prev);
+            
+            // Update rows state to reflect the change
+            setRows(prev => prev.map(r => 
+                r.email === viewAdmin.email ? { ...r } : r
+            ));
+            
+            setIsEditingAdmin(false);
+            alert('Admin password updated successfully!');
+        } catch (e) {
+            console.error('Save admin failed', e);
+            alert('Failed to update admin account');
+        } finally {
+            setEditAdminSaving(false);
+        }
+    };
+
+    const deleteAdmin = async () => {
+        if (!viewAdmin) return;
+        
+        // Confirm deletion
+        if (!window.confirm(`Are you sure you want to delete admin account "${viewAdmin.email}"? This action cannot be undone.`)) {
+            return;
+        }
+        
+        try {
+            const { data, error } = await supabase
+                .from('admin_accounts')
+                .delete()
+                .eq('email', viewAdmin.email);
+            
+            if (error) {
+                console.error('Failed to delete admin account:', error);
+                alert(`Failed to delete admin account: ${error.message}`);
+                return;
+            }
+            
+            // Update rows state to remove the deleted admin
+            setRows(prev => prev.filter(r => r.email !== viewAdmin.email));
+            
+            alert('Admin account deleted successfully!');
+            closeViewModal();
+        } catch (e) {
+            console.error('Delete admin failed', e);
+            alert('Failed to delete admin account');
+        }
+    };
+
+    // Check if delete button should be disabled
+    const isDeleteDisabled = async () => {
+        if (!viewAdmin) return true;
+        
+        // Check if this is the currently logged-in admin (check both session and user)
+        try {
+            // Check current session
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user?.email === viewAdmin.email) {
+                return true; // Can't delete yourself (current session)
+            }
+            
+            // Double check with getUser
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user?.email === viewAdmin.email) {
+                return true; // Can't delete yourself (current user)
+            }
+            
+            // Also check against the email displayed in navigation bar (localStorage)
+            const navEmail = localStorage.getItem('adminEmail') || 
+                           localStorage.getItem('admin_logged_in_email') || 
+                           localStorage.getItem('adminEmailAddress') || 
+                           localStorage.getItem('adminUser');
+            
+            if (navEmail) {
+                try {
+                    // Try to parse as JSON first
+                    const parsed = JSON.parse(navEmail);
+                    const emailToCheck = parsed?.email ? String(parsed.email) : String(navEmail);
+                    if (emailToCheck === viewAdmin.email) {
+                        return true; // Can't delete the account shown in navigation
+                    }
+                } catch {
+                    // If not JSON, compare directly
+                    if (String(navEmail) === viewAdmin.email) {
+                        return true; // Can't delete the account shown in navigation
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('Error checking current user:', e);
+            // If we can't verify, disable delete for safety
+            return true;
+        }
+        
+        // Check if there's only one admin account left
+        try {
+            const { count, error } = await supabase
+                .from('admin_accounts')
+                .select('*', { count: 'exact', head: true });
+            
+            if (!error && count !== null && count <= 1) {
+                return true; // Can't delete the last admin
+            }
+        } catch (e) {
+            console.error('Error counting admin accounts:', e);
+        }
+        
+        return false;
+    };
+
+    // State for delete button disabled status
+    const [deleteDisabled, setDeleteDisabled] = useState(true);
+    
+    // State for update button disabled status
+    const [updateDisabled, setUpdateDisabled] = useState(true);
+    
+    // Check if UPDATE button should be disabled (only allow editing current logged-in admin)
+    const isUpdateDisabled = () => {
+        if (!viewAdmin) return true;
+        
+        try {
+            // Get the email from navigation bar (localStorage)
+            const navEmail = localStorage.getItem('adminEmail') || 
+                           localStorage.getItem('admin_logged_in_email') || 
+                           localStorage.getItem('adminEmailAddress') || 
+                           localStorage.getItem('adminUser');
+            
+            if (navEmail) {
+                try {
+                    // Try to parse as JSON first
+                    const parsed = JSON.parse(navEmail);
+                    const emailToCheck = parsed?.email ? String(parsed.email) : String(navEmail);
+                    // Only allow update if this is the logged-in admin's account
+                    return emailToCheck !== viewAdmin.email;
+                } catch {
+                    // If not JSON, compare directly
+                    return String(navEmail) !== viewAdmin.email;
+                }
+            }
+        } catch (e) {
+            console.error('Error checking current admin for update:', e);
+        }
+        
+        // If we can't verify, disable update for safety
+        return true;
+    };
+    
+    // Update delete and update button status when viewAdmin changes
+    React.useEffect(() => {
+        if (viewAdmin) {
+            isDeleteDisabled().then(disabled => setDeleteDisabled(disabled));
+            setUpdateDisabled(isUpdateDisabled());
+        }
+    }, [viewAdmin]);
 
     // Edit state
     const [isEditing, setIsEditing] = useState(false);
@@ -2990,8 +3788,155 @@ const UsersList = ({ externalSearch = '' }) => {
                     </table>
                 </div>
             </div>
+            {/* View Admin Modal */}
+            <Modal open={!!viewAdmin} onClose={closeViewModal} width="w-[450px]">
+                <div className="p-6 w-full">
+                    {(() => {
+                        console.log('Admin Modal - viewAdmin:', viewAdmin); // Debug
+                        return null;
+                    })()}
+                    <div>
+                        <div className="flex flex-col items-center">
+                            <div className="w-16 h-16 rounded-full mb-3 bg-blue-100 flex items-center justify-center">
+                                <svg className="w-8 h-8 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+                                </svg>
+                            </div>
+                            <div className="text-[20px] font-semibold text-[#12263F]">Admin Account</div>
+                        </div>
+
+                        <div className="mt-4 border-t pt-4">
+                            <h4 className="text-[16px] font-semibold mb-3">Account Info</h4>
+                            {isEditingAdmin ? (
+                                <div className="grid grid-cols-2 gap-3 text-sm text-gray-700">
+                                    <div className="text-[14px] font-semibold text-gray-500">Email Address</div>
+                                    <div className="text-sm text-blue-600 underline font-medium">{viewAdmin?.email || '—'}</div>
+                                    
+                                    <div className="text-[14px] font-semibold text-gray-500">Password</div>
+                                    <div>
+                                        <input 
+                                            type="password" 
+                                            value={editAdminForm.password_hash} 
+                                            onChange={(e) => setEditAdminForm(f => ({ ...f, password_hash: e.target.value }))}
+                                            className="w-full border rounded px-2 py-1 text-sm"
+                                            placeholder="Enter new password"
+                                        />
+                                    </div>
+                                    
+                                    <div className="text-[14px] font-semibold text-gray-500">Role</div>
+                                    <div className="text-sm font-medium">
+                                        <span className="inline-flex items-center px-2 py-1 rounded text-sm bg-blue-100 text-blue-800">Admin</span>
+                                    </div>
+                                    
+                                    <div className="text-[14px] font-semibold text-gray-500">Date Created</div>
+                                    <div className="text-sm font-medium">{viewAdmin?.created_at || '—'}</div>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-2 gap-1 text-sm text-gray-700">
+                                    <div className="text-[14px] font-semibold text-gray-500">Email Address</div>
+                                    <div className="text-sm text-blue-600 underline font-medium">{viewAdmin?.email || '—'}</div>
+                                    
+                                    <div className="text-[14px] font-semibold text-gray-500">Password</div>
+                                    <div className="flex items-center gap-2">
+                                        <div className="text-sm font-medium font-mono break-all flex-1">
+                                            {showAdminPassword ? (viewAdmin?.password_hash || '—') : '••••••••••••'}
+                                        </div>
+                                        <button
+                                            onClick={() => setShowAdminPassword(!showAdminPassword)}
+                                            disabled={updateDisabled}
+                                            className="text-gray-600 hover:text-gray-900 focus:outline-none disabled:text-gray-300 disabled:cursor-not-allowed"
+                                            title={updateDisabled ? "You can only view your own password hash" : (showAdminPassword ? "Hide password hash" : "Show password hash")}
+                                        >
+                                            {showAdminPassword ? (
+                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                                                </svg>
+                                            ) : (
+                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                                </svg>
+                                            )}
+                                        </button>
+                                    </div>
+                                    
+                                    <div className="text-[14px] font-semibold text-gray-500">Role</div>
+                                    <div className="text-sm font-medium">
+                                        <span className="inline-flex items-center px-2 py-1 rounded text-sm bg-blue-100 text-blue-800">Admin</span>
+                                    </div>
+                                    
+                                    <div className="text-[14px] font-semibold text-gray-500">Date Created</div>
+                                    <div className="text-sm font-medium">{viewAdmin?.created_at || '—'}</div>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="mt-4 border-t pt-4">
+                            <h4 className="text-[16px] font-semibold mb-3">Activity Logs</h4>
+                            <div className="grid grid-cols-2 gap-2 text-sm text-gray-700">
+                                <div className="text-[14px] font-semibold text-gray-500">Last Activity</div>
+                                <div className="text-sm font-medium">{viewAdmin?.last_activity || '—'}</div>
+                            </div>
+                        </div>
+
+                        <div className="mt-6 flex items-center justify-between gap-3">
+                            {isEditingAdmin ? (
+                                <>
+                                    <button 
+                                        onClick={deleteAdmin}
+                                        disabled={deleteDisabled}
+                                        className="bg-[#9E3E3E] hover:bg-[#873434] text-white px-4 py-2 rounded-md font-semibold disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                        title={deleteDisabled ? "Cannot delete: This account is currently in use or it's the last admin account" : "Delete this admin account"}
+                                    >
+                                        DELETE
+                                    </button>
+                                    <div className="flex items-center gap-3">
+                                        <button 
+                                            onClick={cancelEditAdmin}
+                                            disabled={editAdminSaving}
+                                            className="px-4 py-2 border border-gray-300 rounded-md text-sm"
+                                        >
+                                            CANCEL
+                                        </button>
+                                        <button 
+                                            onClick={saveEditAdmin}
+                                            disabled={editAdminSaving || !editAdminForm.password_hash.trim()}
+                                            className="px-4 py-2 bg-[#1F3A57] hover:bg-[#172a41] text-white rounded-md font-semibold disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                        >
+                                            {editAdminSaving ? 'SAVING...' : 'SAVE'}
+                                        </button>
+                                    </div>
+                                </>
+                            ) : (
+                                <>
+                                    <button 
+                                        onClick={deleteAdmin}
+                                        disabled={deleteDisabled}
+                                        className="bg-[#9E3E3E] hover:bg-[#873434] text-white px-4 py-2 rounded-md font-semibold disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                        title={deleteDisabled ? "Cannot delete: This account is currently in use or it's the last admin account" : "Delete this admin account"}
+                                    >
+                                        DELETE
+                                    </button>
+                                    <div className="flex items-center gap-3">
+                                        <button onClick={closeViewModal} className="px-4 py-2 border border-gray-300 rounded-md text-sm">CLOSE</button>
+                                        <button 
+                                            onClick={startEditAdmin}
+                                            disabled={updateDisabled}
+                                            className="px-4 py-2 bg-[#1F3A57] hover:bg-[#172a41] text-white rounded-md font-semibold disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                            title={updateDisabled ? "You can only update your own admin account password" : "Update this admin account"}
+                                        >
+                                            UPDATE
+                                        </button>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </Modal>
+
             {/* View User Modal */}
-            <Modal open={!!viewUser || viewLoading} onClose={closeViewModal} width="w-[450px]">
+            <Modal open={!!viewUser || (viewLoading && !viewAdmin)} onClose={closeViewModal} width="w-[450px]">
                 <div className="p-6 w-full">
                     {viewLoading ? (
                         <div className="p-6 text-center">Loading…</div>
